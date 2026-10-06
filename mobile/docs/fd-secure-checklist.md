@@ -12,7 +12,7 @@
 | Машина | Mac с Xcode 26+ | любая ОС с Android Studio (SDK 36) |
 | Телефон | iPhone с Face ID / Touch ID, iOS 18+ | телефон с отпечатком; лучше со StrongBox (Pixel 6+, Samsung S21+) |
 | Аккаунт | Apple Developer (для App Attest на устройстве) | — |
-| Сервер | одиночный Fugu Deck с `MTLS_MODE=required` (README, «Сервер: что настроить») | то же |
+| Сервер | одиночный Fugu Deck с `MTLS_MODE=required` (README, «Одиночный сервер: что настроить») | то же |
 
 ```bash
 cd mobile && npm install
