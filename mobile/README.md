@@ -124,7 +124,8 @@ deck.example.com {
 KGCHECK=…/fugu-deck-keyguard/kgcheck   # go build -o kgcheck ./cmd/kgcheck — перекрёстные проверки с keyguard
 KC_URL=http://127.0.0.1:8081           # Keycloak 26.7 с realm deck (скрипт настройки — docs/keycloak-test-realm.sh)
 ```
-Без переменных тесты с Keycloak и keyguard пропускаются, остальные идут всегда.
+Без переменных тесты с Keycloak и keyguard пропускаются, остальные идут всегда. `scripts/keycloak_test.sh` поднимает
+одноразовый Keycloak в docker, настраивает realm, собирает `kgcheck` и запускает тесты кластера целиком (идёт в CI).
 
 Нативный модуль на реальных телефонах — [docs/fd-secure-checklist.md](docs/fd-secure-checklist.md).
 
