@@ -8,7 +8,8 @@ import { test } from "node:test";
 
 import { b64u, fromUtf8, randomId, unb64 } from "../src/core/bytes";
 import { canonical, canonicalString } from "../src/core/canonical";
-import { clusterDeviceId, signClusterAction } from "../src/core/cluster";
+import { promptOf } from "../src/core/actions";
+import { clusterDeviceId, prepareClusterAction, signClusterAction } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
 import { makeKey, type DeviceKeys } from "../src/core/keys";
 
@@ -47,7 +48,11 @@ test("подпись действия приложения (JWS) принима�
   const device_id = clusterDeviceId(keys), jwk = keys.confirm.jwk;
   const now = Date.now();
   const fields = { type: "key_put", provider: "sakana", key_hint: "abcd", ct_sha256: "ab".repeat(32) };
-  const ok = await signClusterAction(keys, { ...fields, note: "<&>\u2028😀" }, "", randomId(16), now);
+  const ok = await signClusterAction(keys, fields, { nowMs: now });
+  // подписать можно только то, что описывает схема: лишнее поле и невидимый символ до подписи не доходят
+  await assert.rejects(signClusterAction(keys, { ...fields, note: "не показано человеку" }, { nowMs: now }), /лишнее поле/);
+  await assert.rejects(signClusterAction(keys, { type: "ssh_write", agent: "a", server: "s", command: "ls\u200b" }, { space: "u-anna" }), /невидимые/);
+  await assert.rejects(signClusterAction(keys, { type: "transfer_all" }), /неизвестный тип/);
   const [h, p, sg] = ok.jws.split(".");
   const payload = JSON.parse(fromUtf8(unb64(p)));
   const tampered = { jws: `${h}.${b64u(canonical({ ...payload, provider: "anthropic" }))}.${sg}` };
@@ -55,7 +60,7 @@ test("подпись действия приложения (JWS) принима�
   const foreign = { jws: `${h}.${p}.${b64u(await other.confirm.sign(utf8(`${h}.${p}`)))}` };
   // подпись ключом СЕССИИ вместо ключа подтверждения (без биометрии)
   const bySession = { jws: `${h}.${p}.${b64u(await keys.session.sign(utf8(`${h}.${p}`)))}` };
-  const old = await signClusterAction(keys, fields, "", randomId(16), now);
+  const old = await signClusterAction(keys, fields, { nowMs: now });
   const res = kg([
     { op: "verify", jwk, device_id, signed: ok, now_ms: now, type: "key_put" },
     { op: "verify", jwk, device_id, signed: tampered, now_ms: now, type: "key_put" },
@@ -72,6 +77,16 @@ test("подпись действия приложения (JWS) принима�
   assert.match(res[4], /устарело/, "старше 5 минут");
   assert.match(res[5], /неверное действие/, "другой тип действия");
   assert.match(res[6], /неверное действие/, "прежний формат {action, sig} больше не принимается");
+});
+
+test("текст для биометрии строится из подписываемых полей", () => {
+  const keys = softKeys();
+  const p = prepareClusterAction(keys, { type: "device_approve", user: "anna", target: "d-Zm9vYmFyMTIzNDU2", name: "iPhone Анны" });
+  assert.match(promptOf(p), /Подтвердить новое устройство · Пользователь: anna · Устройство: iPhone Анны/);
+  assert.equal(p.envelope.device_id, clusterDeviceId(keys), "device_id конверта — подписывающее устройство, цель — в target");
+  assert.ok(Object.isFrozen(p.envelope) && Object.isFrozen(p.description), "после подготовки действие не изменить");
+  assert.throws(() => prepareClusterAction(keys, { type: "grant_revoke", chat: "c-1", proposal: "p-1" }), /space/, "действие в пространстве без space");
+  assert.throws(() => prepareClusterAction(keys, { type: "key_delete", provider: "sakana" }, { space: "t-shop" }), /space/, "space у действия вне пространства");
 });
 
 // ---------------- HPKE и ввод ключа ----------------
@@ -113,7 +128,7 @@ test("телефон шифрует — keyguard расшифровывает; k
   const keys = softKeys(), device_id = clusterDeviceId(keys), jwk = keys.confirm.jwk;
   const now = Date.now();
   // подпись — ровно как на экране кластера: signClusterAction (JWS, секунды, r‖s)
-  const sign = (fields: Record<string, unknown>, r: string, nonce: string) => signClusterAction(keys, fields, r, nonce, now);
+  const sign = (body: Record<string, unknown>, nonce: string) => signClusterAction(keys, body, { nonce, nowMs: now });
   const put = (req: unknown) => kg([{ op: "keyput", sk_hex: toHex(sk), jwk, device_id, req, now_ms: now }]);
   const req = await buildKeyPut(sign, { hpkePub: pub, deviceId: device_id, provider: "anthropic", apiKey: "  sk-ant-api03-REAL-KEY  " });
   const [first, replay] = put(req);

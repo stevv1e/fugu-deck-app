@@ -14,7 +14,8 @@ export const KEY_PROVIDERS = ["anthropic", "sakana", "github", "gitlab"] as cons
 export type KeyProvider = (typeof KEY_PROVIDERS)[number];
 
 export type KeyPutRequest = { jws: string; enc: string; ct: string };
-type Signer = (fields: Record<string, unknown>, reason: string, nonce: string) => Promise<{ jws: string }>;
+/** Подписывает действие с заданным nonce (он же входит в AAD шифротекста) — signClusterAction. */
+type Signer = (body: Record<string, unknown>, nonce: string) => Promise<{ jws: string }>;
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -39,7 +40,6 @@ export async function buildKeyPut(
   const { enc, ct } = hpkeSeal(o.hpkePub, utf8(HPKE_INFO), aad, utf8(apiKey));
   const signed = await sign(
     { type: "key_put", provider: o.provider, key_hint: apiKey.slice(-4), ct_sha256: hex(sha256(concat(enc, ct))) },
-    `Сохранить ключ ${o.provider} — его увидит только keyguard`,
     nonce,
   );
   return { ...signed, enc: b64(enc), ct: b64(ct) };

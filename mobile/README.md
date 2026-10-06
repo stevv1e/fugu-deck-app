@@ -113,6 +113,7 @@ deck.example.com {
 | регистрация: токен + DPoP + действие `device_enroll` — JWS (биометрия) + CSR ключом сессии | `buildEnroll` |
 | ожидание подтверждения, сертификат mTLS | `fetchStatus`; экран `src/app/cluster/[cid].tsx` |
 | ввод ключа API: HPKE для keyguard + подпись + хэш шифротекста | `src/core/hpke.ts`, `src/core/apikeys.ts` |
+| схема подписанных действий: точный набор полей, запрет невидимых символов, текст для биометрии из тех же полей | `src/core/actions.ts` (`prepareAction`); `signClusterAction` подписывает только подготовленное |
 
 Экраны: `src/app/join.tsx` (вход), `src/app/cluster/[cid].tsx` (статус, ключи), `src/app/oauth.tsx` (возврат из браузера).
 Сервер кластера, к которому обращаются `join/v1/enroll`, `join/v1/enroll/status` и `api/v1/keys`, — control-plane v2:

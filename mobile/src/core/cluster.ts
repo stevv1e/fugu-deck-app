@@ -11,6 +11,7 @@
 import { p256 } from "@noble/curves/nist.js";
 
 import { b64u, randomBytes, randomId, unb64, utf8, fromUtf8 } from "./bytes";
+import { assertPrepared, prepareAction, promptOf, type PreparedAction } from "./actions";
 import { canonical } from "./canonical";
 import { sha256b64u } from "./crypto";
 import { buildCsr } from "./csr";
@@ -136,26 +137,43 @@ export type ClusterEnrollRequest = {
 };
 
 /**
- * JWS действия — тот же формат, что у модуля deck-security (fugu-deck-stage0, deck.ts signAction):
+ * JWS действия для keyguard:
  *   заголовок {"alg":"ES256","typ":"deck-action+jws","kid":<device_id>}
- *   payload   канонический JSON: поля действия + device_id, nonce, ts (секунды)
+ *   payload   канонический JSON конверта (actions.ts): поля действия + device_id, nonce, ts (секунды), space
+ * Подписывается только действие, прошедшее prepareAction: набор полей проверен, а текст запроса биометрии построен
+ * из тех же полей — вызывающий код не может показать человеку одно, а подписать другое.
  */
-async function actionJws(keys: DeviceKeys, fields: Record<string, unknown>, reason: string, nonce: string, nowSec: number): Promise<ClusterSigned> {
-  const deviceId = clusterDeviceId(keys);
-  const header = b64u(canonical({ alg: "ES256", typ: "deck-action+jws", kid: deviceId }));
-  const payload = b64u(canonical({ ...fields, device_id: deviceId, nonce, ts: Math.floor(nowSec) }));
-  const sig = await keys.confirm.sign(utf8(`${header}.${payload}`), reason);
+async function actionJws(keys: DeviceKeys, p: PreparedAction): Promise<ClusterSigned> {
+  assertPrepared(p);
+  const header = b64u(canonical({ alg: "ES256", typ: "deck-action+jws", kid: p.envelope.device_id }));
+  const payload = b64u(canonical(p.envelope));
+  const sig = await keys.confirm.sign(utf8(`${header}.${payload}`), promptOf(p));
   return { jws: `${header}.${payload}.${b64u(sig)}` };
 }
+
+export type SignOptions = { space?: string; nonce?: string; nowMs?: number };
+
+/** Подготовить действие этого устройства: проверка схемы + текст для человека. Экран может показать description заранее. */
+export function prepareClusterAction(keys: DeviceKeys, body: unknown, o: SignOptions = {}): PreparedAction {
+  return prepareAction(body, { deviceId: clusterDeviceId(keys), nonce: o.nonce ?? randomId(16), nowSec: (o.nowMs ?? Date.now()) / 1000, space: o.space });
+}
+
+/** Подписанное действие от устройства кластера (key_put, grant, device_approve, …) — JWS для keyguard. */
+export async function signClusterAction(keys: DeviceKeys, body: unknown, o: SignOptions = {}): Promise<ClusterSigned> {
+  return actionJws(keys, prepareClusterAction(keys, body, o));
+}
+
+/** Имя устройства для действия: без пробелов по краям и не длиннее 80 символов (схема отклонит невидимые символы). */
+export const deviceNameOf = (name: string) => name.trim().slice(0, 80).trim() || "Телефон";
 
 /** Тело join/v1/enroll: control-plane проверит приглашение и передаст в keyguard как есть. */
 export async function buildEnroll(c: ClusterInvite, keys: DeviceKeys, tokens: Tokens, deviceName: string, now: number): Promise<ClusterEnrollRequest> {
   const enrollUrl = `${c.join}/v1/enroll`;
   const dpop = await dpopProof({ key: keys.session, method: "POST", url: enrollUrl, accessToken: tokens.accessToken, now });
-  const enroll = await actionJws(
+  const enroll = await signClusterAction(
     keys,
-    { type: "device_enroll", session_jkt: keys.session.jkt, confirm_jkt: keys.confirm.jkt, name: deviceName },
-    `Зарегистрировать «${deviceName}» в кластере`, randomId(16), now,
+    { type: "device_enroll", session_jkt: keys.session.jkt, confirm_jkt: keys.confirm.jkt, name: deviceNameOf(deviceName) },
+    { nowMs: now * 1000 },
   );
   // CSR подписан ключом сессии: keyguard сверит ключ с токеном и выпустит сертификат mTLS после подтверждения.
   const csr = await buildCsr(keys.session, clusterDeviceId(keys));
@@ -179,11 +197,6 @@ export async function fetchStatus(http: Http, c: ClusterInvite, keys: DeviceKeys
     body: JSON.stringify(await statusRequest(c, keys, now)) });
   if (r.status !== 200) throw errorFrom(r.status, r.text);
   return JSON.parse(r.text) as DeviceStatus;
-}
-
-/** Подписанное действие от устройства кластера (key_put, grant, device_approve, …) — JWS для keyguard. */
-export function signClusterAction(keys: DeviceKeys, fields: Record<string, unknown>, reason: string, nonce = randomId(16), nowMs = Date.now()) {
-  return actionJws(keys, fields, reason, nonce, nowMs / 1000);
 }
 
 export const _test = { utf8 };

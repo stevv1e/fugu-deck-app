@@ -154,7 +154,7 @@ test("Keycloak → keyguard: регистрация, ожидание, подт�
   const admin = softKeys(), anna = softKeys(), annaThief = softKeys();
   const tAdmin = await login("admin", admin), tAnna = await login("anna", anna);
   const sk = p256.utils.randomSecretKey(), hpkePub = p256.getPublicKey(sk, false);
-  const signAs = (keys: DeviceKeys) => (fields: Record<string, unknown>, r: string, nonce = randomId(16)) => signClusterAction(keys, fields, r, nonce);
+  const signAs = (keys: DeviceKeys) => (body: Record<string, unknown>, nonce?: string) => signClusterAction(keys, body, { nonce });
   const annaId = clusterDeviceId(anna);
   const stolen = await buildEnroll(c, annaThief, tAnna, "чужой телефон", now()); // токен Анны, ключи вора
   const out = kgScript({
@@ -165,7 +165,7 @@ test("Keycloak → keyguard: регистрация, ожидание, подт�
       { path: "/v1/devices", body: await buildEnroll(c, anna, tAnna, "iPhone Анны", now()) },
       { path: "/v1/devices/status", body: await statusRequest(c, anna, now()) },
       { path: "/v1/keys", body: await buildKeyPut(signAs(anna), { hpkePub, deviceId: annaId, provider: "anthropic", apiKey: "sk-ant-api03-ANNA-REAL" }) },
-      { path: "/v1/devices/confirm", body: await signAs(admin)({ type: "device_approve", target: annaId }, "") },
+      { path: "/v1/devices/confirm", body: await signAs(admin)({ type: "device_approve", user: "anna", target: annaId, name: "iPhone Анны" }) },
       { path: "/v1/keys", body: await buildKeyPut(signAs(anna), { hpkePub, deviceId: annaId, provider: "anthropic", apiKey: "sk-ant-api03-ANNA-REAL" }) },
       { path: "/v1/devices/status", body: await statusRequest(c, anna, now()) },
       { path: "/v1/devices/status", body: await statusRequest(c, annaThief, now()).then((r) => ({ ...r, device_id: annaId })) },

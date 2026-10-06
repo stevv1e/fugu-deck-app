@@ -73,7 +73,7 @@ export default function ClusterDevice() {
       const now = () => Date.now() / 1000;
       const t = await refresh(plainHttp(), inv, k, rt, now());
       await saveRefresh(rec.id, t.refreshToken);
-      const body = await buildKeyPut((f, r, n) => signClusterAction(k, f, r, n), { hpkePub: unb64(rec.hpke), deviceId: clusterDeviceId(k), provider, apiKey });
+      const body = await buildKeyPut((b, n) => signClusterAction(k, b, { nonce: n }), { hpkePub: unb64(rec.hpke), deviceId: clusterDeviceId(k), provider, apiKey });
       const url = `${rec.api}/v1/keys`;
       const proof = await dpopProof({ key: k.session, method: "POST", url, accessToken: t.accessToken, now: now() });
       const r = await http.request({ method: "POST", url, body: JSON.stringify(body),

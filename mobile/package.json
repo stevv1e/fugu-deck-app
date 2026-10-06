@@ -45,6 +45,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/core.test.ts tests/keyguard.cross.test.ts tests/cluster.test.ts",
     "itest": "tsx tests/integration.ts",
+    "vectors": "tsx tests/vectors.ts",
     "web:export": "expo export --platform web",
     "lint": "expo lint"
   },
