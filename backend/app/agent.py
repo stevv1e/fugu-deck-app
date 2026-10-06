@@ -1,0 +1,479 @@
+"""Агентный цикл: модель → вызовы инструментов → подтверждения → результат.
+
+Каждый запуск (Run) выполняется в фоне и пишет события в журнал. Телефон читает
+журнал через SSE и может переподключиться с любого места (after=N) — это важно
+для мобильных: экран погас, связь моргнула, а Fugu Ultra продолжает работать.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import time
+import traceback
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .db import Database, new_id
+from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
+from .tools import REGISTRY, ApprovalPolicy, ToolContext
+from . import keyguard_client as kgc
+from .tools.providers import GitHubProvider, GitLabProvider
+
+SYSTEM_PROMPT = """Ты — Fugu Deck, ИИ-ассистент разработчика, работающий с его репозиториями на GitHub и GitLab.
+Пользователь пишет с телефона, поэтому отвечай кратко и по делу, на языке пользователя.
+
+Подключено: {providers}
+
+Правила работы:
+- Прежде чем менять существующий код, посмотри структуру репозитория (list_files) и прочитай нужные файлы.
+- В существующих репозиториях по умолчанию работай в новой ветке (commit_files с base_branch) и открывай Pull/Merge Request.
+  Коммить прямо в основную ветку, только если пользователь просит об этом или репозиторий только что создан.
+- Группируй связанные изменения в один коммит. В content передавай полный текст файла, а не фрагмент.
+- Пиши понятные сообщения коммитов (conventional commits).
+- Файлы с телефона доступны через list_attachments / read_attachment; бинарные файлы (картинки, архивы)
+  коммить через attachment_id, не пересказывая их содержимое.
+- Изменяющие действия пользователь подтверждает в приложении. Если действие отклонено — не повторяй его,
+  а спроси, что изменить.
+- Никогда не записывай в репозитории секреты, токены и пароли.
+- В конце кратко сообщи, что сделано, со ссылками на коммит / PR.
+
+Память проекта:
+- Ниже — снимок памяти проекта. Если нужно больше — ищи через memory_search (он ищет и в связанных проектах).
+- Когда узнаёшь что-то долговременно полезное (решение, соглашение, адрес, структуру, предпочтение) —
+  сохрани через memory_save. Одна мысль — одна запись. Не дублируй существующие записи, обновляй их.
+- Память связанных проектов доступна только на чтение.
+- Сообщения пользователей начинаются с [Имя] — в проекте могут работать несколько людей и агентов параллельно;
+  перед важными изменениями перепроверяй актуальное состояние репозитория и памяти.
+
+Скилы: если задача относится к одному из скилов ниже — сначала загрузи его через load_skill и следуй ему.
+"""
+
+MEMORY_PROMPT_CHARS = 6000
+
+VISION_MAX_BYTES = 5 * 1024 * 1024
+INLINE_TEXT_MAX = 30_000
+OLD_TOOL_RESULT_MAX = 1500
+
+
+@dataclass
+class Run:
+    id: str
+    conversation_id: str
+    model: str
+    project_id: str = ""
+    user: dict = field(default_factory=dict)
+    # копия ключей автора запуска (только в памяти; стирается по окончании)
+    keys: dict = field(default_factory=dict, repr=False)
+    git: dict = field(default_factory=dict, repr=False)
+    # ключ модели от спонсора чата (общий проект) и проверка его лимита расходов
+    llm_key: str | None = field(default=None, repr=False)
+    payer_id: str | None = None  # чей ключ оплачивает модель (спонсор или сам автор)
+    budget: Any = field(default=None, repr=False)
+    events: list[dict] = field(default_factory=list)
+    status: str = "running"
+    started_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+    task: asyncio.Task | None = None
+    approvals: dict[str, asyncio.Future] = field(default_factory=dict)
+    approval_meta: dict[str, dict] = field(default_factory=dict)  # что именно подтверждают: для проверки подписи с телефона
+    cond: asyncio.Condition = field(default_factory=asyncio.Condition)
+
+    async def emit(self, type_: str, **data: Any) -> None:
+        async with self.cond:
+            self.events.append({"seq": len(self.events), "type": type_, "ts": time.time(), **data})
+            self.cond.notify_all()
+
+    async def wait_events(self, after: int, timeout: float = 15.0) -> list[dict]:
+        async with self.cond:
+            if len(self.events) <= after and self.status == "running":
+                try:
+                    await asyncio.wait_for(self.cond.wait(), timeout)
+                except asyncio.TimeoutError:
+                    pass
+            return self.events[after:]
+
+
+class Agent:
+    def __init__(self, db: Database, settings, providers: dict, skills=None, broker=None):
+        self.db = db
+        self.skills = skills
+        self.broker = broker
+        self.settings = settings
+        self.providers = providers  # git-провайдеры из .env (только одиночный режим)
+        self.policy = ApprovalPolicy(settings.approval_mode)
+        self.runs: dict[str, Run] = {}
+        self.active: dict[str, str] = {}  # conversation_id -> run_id
+
+    # ------------------------------------------------------------ управление запусками
+    def active_run(self, cid: str) -> Run | None:
+        rid = self.active.get(cid)
+        return self.runs.get(rid) if rid else None
+
+    def llm_key(self, provider: str, keys: dict) -> str | None:
+        if kgc.enabled():  # кластер v2: вместо ключа — токен пространства, ключ подставит keyguard
+            return kgc.token()
+        if keys.get(provider):
+            return keys[provider]
+        if not self.settings.is_space:  # одиночный режим: ключи из .env
+            return {"sakana": self.settings.sakana_api_key, "anthropic": self.settings.anthropic_api_key}.get(provider) or None
+        return None
+
+    def _git_for(self, keys: dict, chat_id: str = "", member: str = "") -> dict:
+        git: dict = {}
+        if kgc.enabled():  # кластер v2: GitHub и GitLab через keyguard, токен пространства на каждый запрос
+            for name, cls in (("github", GitHubProvider), ("gitlab", GitLabProvider)):
+                p = cls("-", kgc.git_base(name))
+                p.http.auth = kgc.Auth()
+                p.http.headers.update(kgc.headers(chat_id, member))
+                git[name] = p
+            return git
+        if keys.get("github"):
+            git["github"] = GitHubProvider(keys["github"], self.settings.github_api_url)
+        if keys.get("gitlab"):
+            git["gitlab"] = GitLabProvider(keys["gitlab"], keys.get("gitlab_url") or self.settings.gitlab_url)
+        if not self.settings.is_space:
+            for k, v in self.providers.items():
+                git.setdefault(k, v)
+        return git
+
+    async def start(self, cid: str, model: str, user: dict | None = None, project_id: str = "",
+                    keys: dict | None = None, llm_key: str | None = None, budget=None,
+                    payer_id: str | None = None) -> Run:
+        if (r := self.active_run(cid)) and r.status == "running":
+            raise RuntimeError("В этом чате уже идёт выполнение")
+        self._gc()
+        keys = dict(keys or {})
+        run = Run(id=new_id(), conversation_id=cid, model=model, project_id=project_id, user=user or {},
+                  keys=keys, git=self._git_for(keys, cid, (user or {}).get("username", "")), llm_key=llm_key, budget=budget,
+                  payer_id=payer_id or (user or {}).get("id"))
+        self.runs[run.id] = run
+        self.active[cid] = run.id
+        run.task = asyncio.create_task(self._run(run))
+        await self._publish("run.started", run)
+        return run
+
+    def running_in_project(self, project_id: str) -> list[dict]:
+        return [{"run_id": r.id, "conversation_id": r.conversation_id, "user": r.user.get("display_name")}
+                for r in self.runs.values() if r.status == "running" and r.project_id == project_id]
+
+    async def _publish(self, type_: str, run: Run, **extra) -> None:
+        if self.broker and run.project_id:
+            await self.broker.publish(type_, run.project_id, conversation_id=run.conversation_id,
+                                      run_id=run.id, status=run.status, by=run.user.get("display_name"), **extra)
+
+    async def context(self, cid: str, user: dict | None = None, run: Run | None = None) -> ToolContext:
+        conv = await self.db.get_conversation(cid) or {}
+        project = await self.db.get_project(conv.get("project_id") or "") or {}
+        readable = {project["id"]: project["name"]} if project else {}
+        if project:
+            for src in await self.db.memory_sources(project["id"]):
+                readable[src["id"]] = src["name"]
+        git = run.git if run else self._git_for({})
+        return ToolContext(cid, self.db, self.settings, git, project=project,
+                           readable_projects=readable, user=user or {}, skills=self.skills, broker=self.broker)
+
+    async def cancel(self, run: Run) -> None:
+        if run.task and not run.task.done():
+            run.task.cancel()
+
+    def resolve_approval(self, approval_id: str, approve: bool, comment: str = "") -> bool:
+        for run in self.runs.values():
+            fut = run.approvals.get(approval_id)
+            if fut and not fut.done():
+                fut.set_result((approve, comment))
+                return True
+        return False
+
+    def _gc(self) -> None:
+        now = time.time()
+        for rid, r in list(self.runs.items()):
+            if r.finished_at and now - r.finished_at > 3600:
+                self.runs.pop(rid, None)
+                if self.active.get(r.conversation_id) == rid:
+                    self.active.pop(r.conversation_id, None)
+
+    # ------------------------------------------------------------ история → формат OpenAI
+    async def _user_content(self, m: dict) -> Any:
+        text = m["content"] or ""
+        author = (m.get("meta") or {}).get("author")
+        if author:
+            text = f"[{author}] {text}"
+        atts = (m.get("meta") or {}).get("attachments") or []
+        if not atts:
+            return text
+        notes, images = [], []
+        for a in atts:
+            att = await self.db.get_attachment(a["id"])
+            if not att:
+                continue
+            p = Path(att["path"])
+            line = f"- {att['filename']} ({att['mime']}, {att['size']} байт), attachment_id={att['id']}"
+            if att["mime"].startswith("image/") and att["size"] <= VISION_MAX_BYTES and p.exists():
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                images.append({"type": "image_url", "image_url": {"url": f"data:{att['mime']};base64,{b64}"}})
+            elif att["size"] <= INLINE_TEXT_MAX and p.exists():
+                try:
+                    body = p.read_text("utf-8")
+                    line += f"\n```\n{body}\n```"
+                except UnicodeDecodeError:
+                    pass
+            notes.append(line)
+        full = f"{text}\n\n[Пользователь приложил файлы]\n" + "\n".join(notes)
+        if images:
+            return [{"type": "text", "text": full}, *images]
+        return full
+
+    async def _system_prompt(self, ctx: ToolContext) -> str:
+        who = []
+        for name, p in ctx.providers.items():
+            try:
+                me = await p.whoami()
+                who.append(f"{name} (пользователь {me['login']})")
+            except Exception:
+                who.append(f"{name} (токен не работает)")
+        parts = [SYSTEM_PROMPT.format(providers=", ".join(who) or "ничего")]
+        p = ctx.project
+        if p:
+            parts.append(f"\n## Проект: {p['name']}\n{p.get('description') or ''}")
+            if p.get("instructions"):
+                parts.append(f"\n### Инструкции проекта (обязательны к выполнению)\n{p['instructions']}")
+            # скилы
+            if self.skills:
+                from .tools.skill_tools import enabled
+                sk = [s for s in self.skills.list() if enabled(ctx, s["name"])]
+                if sk:
+                    parts.append("\n### Доступные скилы\n" + "\n".join(f"- {s['name']}: {s['description']}" for s in sk))
+            # память
+            mem = await self.db.list_memories(p["id"], 200)
+            lines, used = [], 0
+            for m in mem:
+                line = f"- [#{m['id']}{' 📌' if m['pinned'] else ''}] {m['content']}"
+                if used + len(line) > MEMORY_PROMPT_CHARS:
+                    lines.append(f"- …ещё {len(mem) - len(lines)} записей, ищи через memory_search")
+                    break
+                lines.append(line)
+                used += len(line)
+            parts.append("\n### Память проекта\n" + ("\n".join(lines) if lines else "(пусто)"))
+            others = [n for i, n in ctx.readable_projects.items() if i != p["id"]]
+            if others:
+                parts.append("\n### Память связанных проектов (только чтение, через memory_search)\n"
+                             + ", ".join(others))
+        return "\n".join(parts)
+
+    async def _build_messages(self, cid: str, ctx: ToolContext | None = None, provider: str = "") -> list[dict]:
+        ctx = ctx or await self.context(cid)
+        msgs: list[dict] = [{"role": "system", "content": await self._system_prompt(ctx)}]
+        rows = await self.db.get_messages(cid)
+        user_idx = [i for i, r in enumerate(rows) if r["role"] == "user"]
+        cutoff = user_idx[-3] if len(user_idx) >= 3 else -1
+        for i, r in enumerate(rows):
+            if r["role"] == "user":
+                msgs.append({"role": "user", "content": await self._user_content(r)})
+            elif r["role"] == "assistant":
+                m: dict = {"role": "assistant", "content": r["content"] or ""}
+                if r["tool_calls"]:
+                    m["tool_calls"] = r["tool_calls"]
+                meta = r.get("meta") or {}
+                if meta.get("provider_blocks") and split_model(meta.get("model", ""))[0] == provider:
+                    m["_provider_blocks"] = meta["provider_blocks"]
+                msgs.append(m)
+            elif r["role"] == "tool":
+                content = r["content"] or ""
+                if i < cutoff and len(content) > OLD_TOOL_RESULT_MAX:
+                    content = content[:OLD_TOOL_RESULT_MAX] + "\n…[старый результат сокращён для экономии токенов]"
+                msgs.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": content})
+        return _repair_tool_pairs(msgs)
+
+    # ------------------------------------------------------------ вызов модели
+    async def _stream(self, run: Run, messages: list[dict]):
+        pname, model = split_model(run.model)
+        key = run.llm_key or self.llm_key(pname, run.keys)
+        if not key:
+            raise LLMError(f"Нет ключа {PROVIDER_TITLES.get(pname, pname)} — разблокируйте ключи в приложении")
+        provider = get_provider(pname, self.settings)
+
+        async def on_text(t: str):
+            await run.emit("text", delta=t)
+
+        async def on_tool(i: int, name: str):
+            await run.emit("tool_call_building", index=i, name=name)
+
+        hdrs = kgc.headers(run.conversation_id, run.user.get("username", "")) if kgc.enabled() else None
+        res = await provider.stream(key, model, messages, [t.schema() for t in REGISTRY.values()], on_text, on_tool,
+                                    headers=hdrs)
+        for c in res.tool_calls:
+            c["id"] = c["id"] or f"call_{new_id()}"
+        return res
+
+    def price(self, model: str) -> list[float] | None:
+        pr = self.settings.pricing
+        return pr.get(model) or pr.get(split_model(model)[1])
+
+    async def _record_usage(self, run: Run, usage) -> None:
+        if not usage:
+            return
+        p, c, cached, cw = usage.prompt_tokens, usage.completion_tokens, usage.cached_tokens, usage.cache_write_tokens
+        price = self.price(run.model)
+        cost = 0.0
+        if price:
+            pin, pout = price[0], price[1]
+            pcache = price[2] if len(price) > 2 else pin
+            pwrite = price[3] if len(price) > 3 else pin
+            cost = ((p - cached - cw) * pin + cached * pcache + cw * pwrite + c * pout) / 1_000_000
+        await self.db.add_usage(run.conversation_id, run.model, p, c, cached, cost,
+                                run.user.get("id"), run.payer_id)
+        await run.emit("usage", prompt_tokens=p, completion_tokens=c, cached_tokens=cached, cost_usd=cost,
+                       by=run.user.get("display_name"))
+
+    # ------------------------------------------------------------ инструменты
+    async def _exec_tool(self, run: Run, call: dict) -> str:
+        name = call["function"]["name"]
+        ctx = await self.context(run.conversation_id, run.user, run)
+        tool = REGISTRY.get(name)
+        try:
+            args = json.loads(call["function"]["arguments"] or "{}")
+        except json.JSONDecodeError as e:
+            await run.emit("tool_end", call_id=call["id"], name=name, ok=False, error=f"bad json: {e}")
+            return json.dumps({"error": f"Аргументы не являются корректным JSON: {e}"}, ensure_ascii=False)
+        if not tool:
+            return json.dumps({"error": f"Неизвестный инструмент {name}"}, ensure_ascii=False)
+
+        risk = await tool.risk(ctx, args)
+        approved: bool | None = None
+        if self.policy.needs_approval(risk):
+            aid = new_id()
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            run.approvals[aid] = fut
+            run.approval_meta[aid] = {"name": name, "args": args, "risk": risk}
+            from .devices import args_hash
+            await run.emit("approval_request", approval_id=aid, call_id=call["id"], name=name,
+                           title=tool.title, args=args, risk=risk, args_sha256=args_hash(args))
+            await self._publish("run.approval", run, title=tool.title, risk=risk)
+            try:
+                approved, comment = await asyncio.wait_for(fut, self.settings.approval_timeout_seconds)
+            except asyncio.TimeoutError:
+                approved, comment = False, "время ожидания подтверждения истекло"
+            finally:
+                run.approvals.pop(aid, None)
+                run.approval_meta.pop(aid, None)
+            await run.emit("approval_resolved", approval_id=aid, call_id=call["id"], approved=approved)
+            if not approved:
+                await self.db.audit(run.conversation_id, name, args, False, False, "отклонено")
+                msg = "Пользователь отклонил это действие."
+                if comment:
+                    msg += f" Комментарий: {comment}"
+                return json.dumps({"error": msg}, ensure_ascii=False)
+
+        await run.emit("tool_start", call_id=call["id"], name=name, title=tool.title, args=args, risk=risk)
+        try:
+            data = await tool.handler(ctx, args)
+            out = json.dumps(data, ensure_ascii=False, default=str)
+            await run.emit("tool_end", call_id=call["id"], name=name, ok=True, result=_preview(data))
+            await self.db.audit(run.conversation_id, name, args, approved, True, out[:500])
+            return out
+        except Exception as e:  # ошибку отдаём модели, чтобы она могла поправиться
+            err = str(e) or e.__class__.__name__
+            await run.emit("tool_end", call_id=call["id"], name=name, ok=False, error=err)
+            await self.db.audit(run.conversation_id, name, args, approved, False, err)
+            return json.dumps({"error": err}, ensure_ascii=False)
+
+    # ------------------------------------------------------------ основной цикл
+    async def _run(self, run: Run) -> None:
+        cid = run.conversation_id
+        partial = ""
+        try:
+            await run.emit("start", model=run.model)
+            for step in range(self.settings.max_agent_steps):
+                if run.budget and (why := await run.budget()):
+                    await run.emit("notice", text=why)
+                    break
+                messages = await self._build_messages(cid, await self.context(cid, run.user, run),
+                                                      split_model(run.model)[0])
+                await run.emit("thinking", step=step)
+                partial = ""
+                res = await self._stream(run, messages)
+                text, tool_calls = res.text, res.tool_calls
+                partial = text
+                await self._record_usage(run, res.usage)
+                meta: dict = {"model": run.model}
+                if run.user.get("display_name"):
+                    meta["launched_by"] = run.user["display_name"]
+                if res.provider_blocks:
+                    meta["provider_blocks"] = res.provider_blocks
+                await self.db.add_message(cid, "assistant", text, tool_calls=tool_calls or None, meta=meta)
+                partial = ""
+                await run.emit("message_saved", has_tools=bool(tool_calls))
+                if not tool_calls:
+                    break
+                for call in tool_calls:
+                    result = await self._exec_tool(run, call)
+                    await self.db.add_message(cid, "tool", result, tool_call_id=call["id"],
+                                              name=call["function"]["name"])
+            else:
+                await run.emit("notice", text="Достигнут лимит шагов агента — напишите «продолжай».")
+            run.status = "done"
+            await run.emit("done")
+        except asyncio.CancelledError:
+            run.status = "cancelled"
+            if partial:
+                await self.db.add_message(cid, "assistant", partial + "\n\n_(остановлено)_", meta={"model": run.model})
+            await run.emit("cancelled")
+        except LLMError as e:
+            run.status = "error"
+            await run.emit("error", message=str(e))
+        except Exception as e:
+            run.status = "error"
+            traceback.print_exc()
+            await run.emit("error", message=f"{e.__class__.__name__}: {e}")
+        finally:
+            run.finished_at = time.time()
+            # стираем копию ключей и закрываем git-клиенты этого запуска
+            run.keys.clear()
+            run.llm_key = None
+            for g in run.git.values():
+                if g not in self.providers.values():
+                    try:
+                        await g.http.aclose()
+                    except Exception:
+                        pass
+            run.git.clear()
+            for fut in run.approvals.values():
+                if not fut.done():
+                    fut.cancel()
+            async with run.cond:
+                run.cond.notify_all()
+            try:
+                await self._publish("run.finished", run)
+            except Exception:
+                traceback.print_exc()
+
+
+def _repair_tool_pairs(msgs: list[dict]) -> list[dict]:
+    """API требует ответ на каждый tool_call. Если запуск прервали посреди
+    вызовов инструментов — дописываем заглушки, чтобы история оставалась валидной."""
+    out: list[dict] = []
+    i = 0
+    while i < len(msgs):
+        m = msgs[i]
+        out.append(m)
+        i += 1
+        if m["role"] == "assistant" and m.get("tool_calls"):
+            seen = set()
+            while i < len(msgs) and msgs[i]["role"] == "tool":
+                seen.add(msgs[i]["tool_call_id"])
+                out.append(msgs[i])
+                i += 1
+            for c in m["tool_calls"]:
+                if c["id"] not in seen:
+                    out.append({"role": "tool", "tool_call_id": c["id"],
+                                "content": json.dumps({"error": "выполнение было прервано"}, ensure_ascii=False)})
+    return out
+
+
+def _preview(data: Any, limit: int = 1500) -> Any:
+    s = json.dumps(data, ensure_ascii=False, default=str)
+    if len(s) <= limit:
+        return data
+    return {"preview": s[:limit] + "…", "size": len(s)}

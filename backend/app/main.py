@@ -1,0 +1,1461 @@
+"""HTTP API Fugu Deck."""
+from __future__ import annotations
+
+import asyncio
+import json
+import mimetypes
+import re
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from . import auth, devices, spaceauth
+from .agent import Agent
+from .config import get_settings
+from .db import DEFAULT_PROJECT, Database, new_id
+from .events import Broker
+from .keyvault import KeyVault
+from .llm import split_model
+from .skills import SkillError, SkillStore
+from .tools.providers import GitHubProvider, GitLabProvider
+
+settings = get_settings()
+state: dict = {}
+ROLES = {"viewer": 1, "editor": 2, "owner": 3}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = Database(str(settings.db_path))
+    await db.connect()
+    if not settings.is_space:
+        await db.upsert_owner(settings.owner_username)
+    providers = {}
+    if settings.github_token:
+        providers["github"] = GitHubProvider(settings.github_token, settings.github_api_url)
+    if settings.gitlab_token:
+        providers["gitlab"] = GitLabProvider(settings.gitlab_token, settings.gitlab_url)
+    skills = SkillStore(settings.skills_path)
+    skills.seed()
+    broker = Broker(db, all_users=settings.is_space)
+    state.update(db=db, providers=providers, skills=skills, broker=broker, vault=KeyVault(settings.key_ttl_seconds),
+                 agent=Agent(db, settings, providers, skills, broker))
+    if not settings.is_space:
+        state.update(server_keys=devices.ServerKeys(settings.data_dir, settings.server_name),
+                     device_auth=devices.DeviceAuth(auth.jwt_secret(settings) + ":device"))
+    yield
+    for p in providers.values():
+        await p.http.aclose()
+    await db.close()
+
+
+app = FastAPI(title="Fugu Deck", lifespan=lifespan, docs_url=None, redoc_url=None)
+if settings.cors_origins:
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","),
+                       allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+def db() -> Database:
+    return state["db"]
+
+
+def agent() -> Agent:
+    return state["agent"]
+
+
+def broker() -> Broker:
+    return state["broker"]
+
+
+def skills() -> SkillStore:
+    return state["skills"]
+
+
+# ================================================================== доступ
+def vault() -> KeyVault:
+    return state["vault"]
+
+
+async def current_user(request: Request) -> dict:
+    if settings.is_space:
+        token = spaceauth.bearer(request)
+        if not token:
+            raise HTTPException(401, "Нужен токен пространства")
+        cl = spaceauth.verify(token, settings)
+        u = await db().get_user(cl["sub"])
+        name = cl.get("name") or cl.get("nick") or "?"
+        if not u:
+            await db().create_space_user(cl["sub"], cl.get("nick") or cl["sub"], name)
+            u = await db().get_user(cl["sub"])
+        elif u["display_name"] != name:
+            await db().update_user(u["id"], display_name=name)
+            u = await db().get_user(cl["sub"])
+        u = dict(u)
+        u["space_role"] = cl["role"]
+        vault().touch(u["id"])
+        return u
+    authz = request.headers.get("authorization", "")
+    if authz[:5].lower() == "dpop ":
+        return await device_user(request, authz[5:].strip())
+    uid = auth.token_user_id(request, settings)
+    u = await db().get_user(uid)
+    if not u or u["disabled"]:
+        raise HTTPException(401, "Пользователь отключён")
+    return u
+
+
+async def device_user(request: Request, at: str) -> dict:
+    """Запрос с телефона: токен привязан к ключу сессии устройства, к запросу приложено DPoP-доказательство."""
+    da: devices.DeviceAuth = state["device_auth"]
+    cl = da.read_token(at)
+    _, jkt = da.check_proof(request.headers.get("dpop"), request.method, request.url.path, at=at)
+    if jkt != cl.get("cnf", {}).get("jkt"):
+        raise HTTPException(401, "DPoP: ключ не совпадает с токеном")
+    d = await db().get_device(cl["did"])
+    if not d or d["revoked_at"] or d["session_jkt"] != jkt:
+        raise HTTPException(401, "Устройство отозвано")
+    check_mtls(request, d)
+    u = await db().get_user(cl["sub"])
+    if not u or u["disabled"]:
+        raise HTTPException(401, "Пользователь отключён")
+    if not d["last_seen"] or time.time() - d["last_seen"] > 60:
+        await db().touch_device(d["id"])
+    u = dict(u)
+    u["_device"] = d
+    return u
+
+
+def check_mtls(request: Request, d: dict) -> None:
+    if settings.mtls_mode == "off":
+        return
+    serial = request.headers.get(settings.mtls_serial_header, "").strip().lower()
+    if not serial:
+        if settings.mtls_mode == "required":
+            raise HTTPException(401, "Нужен сертификат устройства (mTLS)")
+        return
+    if not devices.serial_matches(d.get("cert_serial"), serial):
+        raise HTTPException(401, "Сертификат не принадлежит этому устройству")
+
+
+Me = Depends(current_user)
+
+
+def owner_only(u: dict) -> None:
+    if settings.is_space:
+        if u.get("space_role") != "owner":
+            raise HTTPException(403, "Только для владельца пространства")
+        return
+    if u["role"] != "owner":
+        raise HTTPException(403, "Только для владельца")
+
+
+async def need(u: dict, pid: str, min_role: str = "viewer") -> str:
+    if settings.is_space:  # роль в пространстве действует на все его проекты
+        role = u["space_role"] if await db().get_project(pid) else None
+    else:
+        role = await db().project_role(u, pid)
+    if not role:
+        raise HTTPException(404, "Проект не найден")
+    if ROLES[role] < ROLES[min_role]:
+        raise HTTPException(403, "Недостаточно прав в проекте")
+    return role
+
+
+async def conv_access(u: dict, cid: str, min_role: str = "viewer") -> dict:
+    c = await db().get_conversation(cid)
+    if not c:
+        raise HTTPException(404, "Чат не найден")
+    await need(u, c["project_id"], min_role)
+    return c
+
+
+def public_user(u: dict) -> dict:
+    d = {k: u[k] for k in ("id", "username", "display_name", "role")}
+    if u.get("space_role"):
+        d["space_role"] = u["space_role"]
+        d["role"] = "owner" if u["space_role"] == "owner" else "member"
+    return d
+
+
+def standalone_only():
+    if settings.is_space:
+        raise HTTPException(403, "В кластере пользователями управляет control-plane")
+
+
+# ================================================================== служебное
+@app.get("/api/health")
+async def health():
+    return {"ok": True}
+
+
+class LoginIn(BaseModel):
+    username: str = ""
+    password: str
+    totp: str | None = None
+
+
+async def check_credentials(request: Request, username: str, password: str, totp: str | None) -> dict:
+    ip = auth.client_ip(request)
+    auth.check_rate_limit(ip)
+    u = await db().get_user_by_name(username.strip() or settings.owner_username)
+    ok = False
+    if u and not u["disabled"]:
+        if u["role"] == "owner":
+            ok = auth.check_owner(password, totp, settings)
+        else:
+            ok = auth.verify_password(password, u["password_hash"])
+    if not ok:
+        auth.fail(ip)
+        raise HTTPException(401, "Неверный логин, пароль или код")
+    auth.clear(ip)
+    return u
+
+
+@app.post("/api/auth/login")
+async def login(body: LoginIn, request: Request, response: Response):
+    standalone_only()
+    u = await check_credentials(request, body.username, body.password, body.totp)
+    auth.issue(response, u["id"], settings)
+    return {"ok": True}
+
+
+@app.post("/api/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie(auth.COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/info")
+async def auth_info():
+    return {"owner_totp": bool(settings.totp_secret)}
+
+
+# ================================================================== сервер и устройства (нативное приложение)
+def server_keys() -> devices.ServerKeys:
+    standalone_only()
+    return state["server_keys"]
+
+
+def device_auth() -> devices.DeviceAuth:
+    return state["device_auth"]
+
+
+@app.get("/.well-known/fugu-deck")
+async def server_info():
+    """Что приложение узнаёт о сервере до входа. Отпечаток пользователь сверяет с тем, что ему передал владелец."""
+    if settings.is_space:
+        raise HTTPException(404)
+    k = server_keys()
+    return {"app": "fugu-deck", "protocol": 1, "name": settings.server_name, "mode": "standalone",
+            "identity": {"alg": "Ed25519", "key": devices.b64u(k.identity_pub), "fingerprint": k.fingerprint},
+            "auth": {"password": True, "totp": bool(settings.totp_secret)},
+            "devices": {"dpop": True, "signed_actions": True, "mtls": settings.mtls_mode},
+            "public_url": settings.public_url or None}
+
+
+@app.get("/api/devices/challenge")
+async def device_challenge():
+    server_keys()
+    return {"challenge": device_auth().new_challenge(), "server_time": int(time.time() * 1000)}
+
+
+class EnrollIn(BaseModel):
+    username: str = ""
+    password: str
+    totp: str | None = None
+    name: str = Field(..., min_length=1, max_length=80)
+    platform: str = Field("", max_length=40)
+    session_jwk: dict
+    confirm_jwk: dict
+    key_storage: str = Field("software", pattern="^(secure_enclave|strongbox|tee|software)$")
+    attestation: dict | None = None
+    challenge: str
+    session_sig: str
+    confirm_sig: str
+    csr: str | None = None
+
+
+@app.post("/api/devices/enroll")
+async def device_enroll(body: EnrollIn, request: Request):
+    """Регистрация телефона: пароль (+ код) один раз, дальше вход ключом устройства.
+    Обе подписи доказывают, что у телефона есть оба закрытых ключа; ответ подписан ключом идентичности сервера."""
+    k = server_keys()
+    u = await check_credentials(request, body.username, body.password, body.totp)
+    device_auth().take_challenge(body.challenge)
+    sj, cj = devices.jwk_thumbprint(body.session_jwk), devices.jwk_thumbprint(body.confirm_jwk)
+    if sj == cj:
+        raise HTTPException(400, "Ключ сессии и ключ подтверждения должны быть разными")
+    stmt = devices.canonical({"type": "enroll", "challenge": body.challenge, "server": k.fingerprint,
+                              "session_jkt": sj, "confirm_jkt": cj})
+    if not devices.verify_es256(body.session_jwk, stmt, body.session_sig) or not devices.verify_es256(body.confirm_jwk, stmt, body.confirm_sig):
+        raise HTTPException(400, "Подписи регистрации неверны")
+    if body.csr:
+        k.check_csr(body.csr, body.session_jwk)
+    if await db()._one("SELECT id FROM devices WHERE session_jkt=?", (sj,)):
+        raise HTTPException(409, "Этот ключ уже зарегистрирован — удалите устройство и создайте ключи заново")
+    pub = lambda j: {k2: j[k2] for k2 in ("kty", "crv", "x", "y")}
+    d = await db().add_device(u["id"], body.name, body.platform, pub(body.session_jwk), sj, pub(body.confirm_jwk), cj,
+                              body.key_storage, body.attestation)
+    cert = None
+    if body.csr:
+        cert, serial, exp = k.issue_device_cert(body.csr, d["id"], u["username"], d["session_jwk"])
+        await db().set_device_cert(d["id"], serial, exp)
+    await db().audit(None, "device_enroll", {"device": d["id"], "name": body.name, "storage": body.key_storage}, True, True, u["username"])
+    receipt = {"type": "enrolled", "device_id": d["id"], "challenge": body.challenge, "session_jkt": sj, "confirm_jkt": cj,
+               "user": u["username"]}
+    return {"device_id": d["id"], "user": public_user(u), "receipt": receipt, "server_sig": k.sign(receipt),
+            **device_auth().issue(u["id"], d["id"], sj), "cert_pem": cert, "ca_pem": k.ca_pem if cert else None}
+
+
+class DeviceTokenIn(BaseModel):
+    device_id: str
+
+
+@app.post("/api/devices/token")
+async def device_token(body: DeviceTokenIn, request: Request):
+    """Новый токен доступа: телефон подписывает DPoP-доказательство ключом сессии. Пароль не нужен."""
+    server_keys()
+    ip = auth.client_ip(request)
+    auth.check_rate_limit("dev:" + ip)
+    _, jkt = device_auth().check_proof(request.headers.get("dpop"), "POST", request.url.path)
+    d = await db().get_device(body.device_id)
+    if not d or d["revoked_at"] or d["session_jkt"] != jkt:
+        auth.fail("dev:" + ip)
+        raise HTTPException(401, "Устройство не зарегистрировано или отозвано")
+    check_mtls(request, d)
+    u = await db().get_user(d["user_id"])
+    if not u or u["disabled"]:
+        raise HTTPException(401, "Пользователь отключён")
+    await db().touch_device(d["id"])
+    return device_auth().issue(u["id"], d["id"], jkt)
+
+
+@app.get("/api/devices")
+async def list_my_devices(u: dict = Me):
+    server_keys()
+    cur = (u.get("_device") or {}).get("id")
+    return [{**d, "current": d["id"] == cur} for d in await db().list_devices(u["id"])]
+
+
+class SignedIn(BaseModel):
+    action: dict | None = None
+    sig: str | None = None
+
+
+@app.post("/api/devices/{did}/revoke")
+async def revoke_device(did: str, body: SignedIn, u: dict = Me):
+    server_keys()
+    d = await db().get_device(did)
+    if not d or (d["user_id"] != u["id"] and u["role"] != "owner"):
+        raise HTTPException(404, "Устройство не найдено")
+    if u.get("_device"):
+        me = u["_device"]
+        device_auth().check_action(body.action or {}, body.sig or "", me["confirm_jwk"], me["id"],
+                                   {"type": "revoke_device", "target": did})
+    await db().revoke_device(did)
+    await db().audit(None, "device_revoke", {"device": did}, True, True, u["username"])
+    return {"ok": True}
+
+
+class CsrIn(BaseModel):
+    csr: str
+
+
+@app.post("/api/devices/cert")
+async def renew_device_cert(body: CsrIn, u: dict = Me):
+    """Продление сертификата устройства (mTLS) — только с самого устройства."""
+    k = server_keys()
+    d = u.get("_device")
+    if not d:
+        raise HTTPException(403, "Сертификат выпускается только для устройства")
+    cert, serial, exp = k.issue_device_cert(body.csr, d["id"], u["username"], d["session_jwk"])
+    await db().set_device_cert(d["id"], serial, exp)
+    return {"cert_pem": cert, "ca_pem": k.ca_pem, "expires": exp}
+
+
+@app.get("/api/server/invite")
+async def server_invite(request: Request, u: dict = Me):
+    """Ссылка для QR: адрес сервера и отпечаток. Приложение сверит отпечаток при подключении."""
+    k = server_keys()
+    owner_only(u)
+    from urllib.parse import urlencode
+    base = settings.public_url or str(request.base_url).rstrip("/")
+    link = "fugudeck://add?" + urlencode({"url": base, "fp": k.fingerprint.replace(" ", ""), "name": settings.server_name})
+    return {"link": link, "url": base, "fingerprint": k.fingerprint}
+
+
+@app.get("/api/config")
+async def config(u: dict = Me):
+    providers = {}
+    keys = vault().providers(u["id"])
+    if settings.is_space:
+        for name in ("github", "gitlab"):
+            if name in keys:
+                providers[name] = {"ok": True, "login": "ключ с устройства"}
+    else:
+        for name, p in state["providers"].items():
+            try:
+                providers[name] = {"ok": True, **(await p.whoami())}
+            except Exception as e:
+                providers[name] = {"ok": False, "error": str(e)}
+    llm_ready = sorted({split_model(m)[0] for m in settings.model_list
+                        if agent().llm_key(split_model(m)[0], vault().get(u["id"]))})
+    return {
+        "mode": settings.deck_mode,
+        "space": {"id": settings.space_id, "kind": settings.space_kind, "name": settings.space_name}
+        if settings.is_space else None,
+        "keys": keys,
+        "llm_ready": llm_ready,
+        "me": public_user(u),
+        "models": settings.model_list,
+        "default_model": settings.model_list[0] if settings.model_list else "",
+        "pricing": settings.pricing,
+        "providers": providers,
+        "approval_mode": settings.approval_mode,
+        "llm_configured": bool(llm_ready),
+        "skills_writable": skills().writable,
+    }
+
+
+@app.get("/api/usage")
+async def usage(u: dict = Me):
+    now = datetime.now(timezone.utc)
+    month = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+    day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
+    return {"month": await db().usage_since(month), "today": await db().usage_since(day)}
+
+
+PERIODS = {"today": 1, "week": 7, "month": 30, "all": None}
+
+
+@app.get("/api/usage/members")
+async def usage_members(period: str = "month", u: dict = Me):
+    """Сводка расходов по участникам: сколько стоили их запуски и сколько оплачено их ключом."""
+    if period not in PERIODS:
+        raise HTTPException(400, "period: today | week | month | all")
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        since = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
+    elif PERIODS[period]:
+        since = time.time() - PERIODS[period] * 86400
+    else:
+        since = 0.0
+    members = await db().usage_by_member(since)
+    for m in members:
+        m["name"] = m["name"] or ("до сводки (без автора)" if m["user_id"] is None else "бывший участник")
+        m["me"] = m["user_id"] == u["id"]
+        for k in ("launched_usd", "paid_usd", "paid_for_others_usd"):
+            m[k] = round(m[k], 4)
+    total = await db().usage_since(since)
+    return {"period": period, "since": since, "members": members, "models": await db().usage_by_model(since),
+            "total_usd": round(total.get("cost_usd", 0), 4),
+            "total_tokens": (total.get("prompt_tokens", 0) or 0) + (total.get("completion_tokens", 0) or 0)}
+
+
+@app.get("/api/audit")
+async def audit(limit: int = 100, u: dict = Me):
+    owner_only(u)
+    return await db().list_audit(min(limit, 500))
+
+
+# ================================================================== профиль и пользователи
+class MeIn(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=40)
+    old_password: str | None = None
+    new_password: str | None = None
+
+
+@app.patch("/api/me")
+async def update_me(body: MeIn, u: dict = Me):
+    fields: dict = {"display_name": body.display_name}
+    if body.new_password:
+        if u["role"] == "owner":
+            raise HTTPException(400, "Пароль владельца задаётся в APP_PASSWORD на сервере")
+        if not auth.verify_password(body.old_password or "", u["password_hash"]):
+            raise HTTPException(400, "Старый пароль неверен")
+        auth.validate_new_password(body.new_password)
+        fields["password_hash"] = auth.hash_password(body.new_password)
+    await db().update_user(u["id"], **fields)
+    return public_user(await db().get_user(u["id"]))
+
+
+class UserIn(BaseModel):
+    username: str = Field(..., pattern=r"^[A-Za-z0-9_.-]{2,32}$")
+    display_name: str = Field(..., min_length=1, max_length=40)
+    password: str
+
+
+class UserPatch(BaseModel):
+    display_name: str | None = None
+    password: str | None = None
+    disabled: bool | None = None
+
+
+@app.get("/api/users")
+async def list_users(u: dict = Me):
+    rows = await db().list_users()
+    if u["role"] != "owner":  # участникам — только имена (для выбора в проектах не нужно)
+        rows = [{"id": r["id"], "display_name": r["display_name"], "username": r["username"]} for r in rows]
+    return rows
+
+
+@app.post("/api/users")
+async def create_user(body: UserIn, u: dict = Me):
+    standalone_only()
+    owner_only(u)
+    auth.validate_new_password(body.password)
+    if await db().get_user_by_name(body.username):
+        raise HTTPException(409, "Такой логин уже есть")
+    nu = await db().create_user(body.username, body.display_name, auth.hash_password(body.password))
+    return public_user(nu)
+
+
+@app.patch("/api/users/{uid}")
+async def patch_user(uid: str, body: UserPatch, u: dict = Me):
+    standalone_only()
+    owner_only(u)
+    target = await db().get_user(uid)
+    if not target or target["role"] == "owner":
+        raise HTTPException(404, "Пользователь не найден")
+    fields: dict = {"display_name": body.display_name,
+                    "disabled": None if body.disabled is None else int(body.disabled)}
+    if body.password:
+        auth.validate_new_password(body.password)
+        fields["password_hash"] = auth.hash_password(body.password)
+    await db().update_user(uid, **fields)
+    return {"ok": True}
+
+
+@app.delete("/api/users/{uid}")
+async def delete_user(uid: str, u: dict = Me):
+    standalone_only()
+    owner_only(u)
+    await db().delete_user(uid)
+    return {"ok": True}
+
+
+# ================================================================== проекты
+class ProjectIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = ""
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    description: str | None = None
+    instructions: str | None = Field(None, max_length=20000)
+    skills: list[str] | None = None
+    color: str | None = None
+
+
+@app.get("/api/projects")
+async def list_projects(u: dict = Me):
+    rows = await (db().list_all_projects(u["space_role"]) if settings.is_space else db().list_projects_for(u))
+    for p in rows:
+        p["running"] = len(agent().running_in_project(p["id"]))
+    return rows
+
+
+@app.post("/api/projects")
+async def create_project(body: ProjectIn, u: dict = Me):
+    p = await db().create_project(body.name, body.description, u)
+    await broker().publish("project", p["id"], action="created")
+    return p
+
+
+@app.get("/api/projects/{pid}")
+async def get_project(pid: str, u: dict = Me):
+    role = await need(u, pid)
+    p = await db().get_project(pid)
+    p["my_role"] = role
+    p["members"] = await db().members(pid)
+    p["memory_sources"] = await db().memory_sources(pid)
+    p["running"] = agent().running_in_project(pid)
+    p["online"] = broker().project_presence(pid)
+    return p
+
+
+@app.patch("/api/projects/{pid}")
+async def patch_project(pid: str, body: ProjectPatch, u: dict = Me):
+    role = await need(u, pid, "editor")
+    if role != "owner" and (body.name is not None or body.description is not None):
+        raise HTTPException(403, "Название и описание меняет владелец проекта")
+    await db().update_project(pid, **body.model_dump(exclude_none=True))
+    await broker().publish("project", pid, action="updated")
+    return await get_project(pid, u)
+
+
+@app.delete("/api/projects/{pid}")
+async def delete_project(pid: str, u: dict = Me):
+    await need(u, pid, "owner")
+    if pid == DEFAULT_PROJECT:
+        raise HTTPException(400, "Проект по умолчанию удалить нельзя")
+    users = await db().project_user_ids(pid)
+    await db().delete_project(pid)
+    await broker().publish("project", pid, users=users, action="deleted")
+    return {"ok": True}
+
+
+class MemberIn(BaseModel):
+    role: str | None = Field(None, pattern="^(viewer|editor|owner)$")
+
+
+@app.put("/api/projects/{pid}/members/{uid}")
+async def set_member(pid: str, uid: str, body: MemberIn, u: dict = Me):
+    await need(u, pid, "owner")
+    target = await db().get_user(uid)
+    if not target or target["role"] == "owner":
+        raise HTTPException(404, "Пользователь не найден")
+    before = await db().project_user_ids(pid)
+    await db().set_member(pid, uid, body.role)
+    await broker().publish("project", pid, users=before | {uid}, action="members")
+    return {"ok": True}
+
+
+class SourcesIn(BaseModel):
+    source_ids: list[str]
+
+
+@app.put("/api/projects/{pid}/memory-sources")
+async def set_sources(pid: str, body: SourcesIn, u: dict = Me):
+    await need(u, pid, "owner")
+    for s in body.source_ids:
+        await need(u, s, "viewer")  # нельзя открыть доступ к памяти, которую сам не видишь
+    await db().set_memory_sources(pid, body.source_ids)
+    await broker().publish("project", pid, action="updated")
+    return await db().memory_sources(pid)
+
+
+# ================================================================== память
+class MemoryIn(BaseModel):
+    content: str = Field(..., min_length=1, max_length=8000)
+    tags: str = ""
+    pinned: bool = False
+
+
+class MemoryPatch(BaseModel):
+    content: str | None = Field(None, min_length=1, max_length=8000)
+    tags: str | None = None
+    pinned: bool | None = None
+
+
+@app.get("/api/projects/{pid}/memory")
+async def list_memory(pid: str, q: str = "", linked: bool = False, u: dict = Me):
+    await need(u, pid)
+    ids = [pid]
+    if linked:
+        ids += [s["id"] for s in await db().memory_sources(pid)]
+    if q.strip():
+        return await db().search_memories(ids, q, 100)
+    out = []
+    for i in ids:
+        rows = await db().list_memories(i)
+        if i != pid:
+            name = (await db().get_project(i) or {}).get("name")
+            for r in rows:
+                r["project_name"] = name
+        out += rows
+    return out
+
+
+@app.post("/api/projects/{pid}/memory")
+async def add_memory(pid: str, body: MemoryIn, u: dict = Me):
+    await need(u, pid, "editor")
+    m = await db().add_memory(pid, body.content.strip(), body.tags, "user", u["display_name"], pinned=body.pinned)
+    await broker().publish("memory", pid, action="added", memory=m, by=u["display_name"])
+    return m
+
+
+async def _memory_for_edit(mid: int, u: dict) -> dict:
+    m = await db().get_memory(mid)
+    if not m:
+        raise HTTPException(404, "Запись не найдена")
+    await need(u, m["project_id"], "editor")
+    return m
+
+
+@app.patch("/api/memory/{mid}")
+async def patch_memory(mid: int, body: MemoryPatch, u: dict = Me):
+    m = await _memory_for_edit(mid, u)
+    await db().update_memory(mid, **body.model_dump(exclude_none=True))
+    nm = await db().get_memory(mid)
+    await broker().publish("memory", m["project_id"], action="updated", memory=nm, by=u["display_name"])
+    return nm
+
+
+@app.delete("/api/memory/{mid}")
+async def delete_memory(mid: int, u: dict = Me):
+    m = await _memory_for_edit(mid, u)
+    await db().delete_memory(mid)
+    await broker().publish("memory", m["project_id"], action="deleted", memory_id=mid, by=u["display_name"])
+    return {"ok": True}
+
+
+# ================================================================== скилы
+class SkillIn(BaseModel):
+    description: str = Field(..., min_length=1, max_length=1024)
+    body: str = Field(..., max_length=150_000)
+    rename_from: str | None = None
+
+
+def _skill_err(e: SkillError):
+    raise HTTPException(400, str(e))
+
+
+@app.get("/api/skills")
+async def list_skills(u: dict = Me):
+    return {"writable": skills().writable, "items": skills().list()}
+
+
+@app.get("/api/skills/{name}")
+async def get_skill(name: str, u: dict = Me):
+    try:
+        return skills().get(name)
+    except SkillError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.put("/api/skills/{name}")
+async def save_skill(name: str, body: SkillIn, u: dict = Me):
+    owner_only(u)
+    try:
+        s = skills().save(name, body.description, body.body, body.rename_from)
+    except SkillError as e:
+        _skill_err(e)
+    await broker().publish("skill", None, action="saved", name=name)
+    return s
+
+
+@app.delete("/api/skills/{name}")
+async def delete_skill(name: str, u: dict = Me):
+    owner_only(u)
+    try:
+        skills().delete(name)
+    except SkillError as e:
+        _skill_err(e)
+    await broker().publish("skill", None, action="deleted", name=name)
+    return {"ok": True}
+
+
+# ================================================================== чаты
+class ConvIn(BaseModel):
+    model: str | None = None
+    title: str | None = None
+
+
+def _check_model(m: str | None) -> str:
+    models = settings.model_list
+    if m and m not in models:
+        raise HTTPException(400, f"Неизвестная модель {m}")
+    return m or models[0]
+
+
+@app.get("/api/projects/{pid}/conversations")
+async def list_convs(pid: str, u: dict = Me):
+    await need(u, pid)
+    convs = await db().list_conversations(pid)
+    for c in convs:
+        r = agent().active_run(c["id"])
+        c["running"] = bool(r and r.status == "running")
+    return convs
+
+
+@app.post("/api/projects/{pid}/conversations")
+async def create_conv(pid: str, body: ConvIn, u: dict = Me):
+    await need(u, pid, "editor")
+    model = _check_model(body.model)
+    # в общем пространстве спонсора назначает выбор модели с условиями оплаты (POST /model)
+    c = await db().create_conversation(model, pid, u["id"], body.title or "Новый чат")
+    await broker().publish("conversation", pid, action="created", conversation_id=c["id"], by=u["display_name"])
+    return c
+
+
+def is_team() -> bool:
+    return settings.is_space and settings.space_kind == "team"
+
+
+@app.patch("/api/conversations/{cid}")
+async def update_conv(cid: str, body: ConvIn, u: dict = Me):
+    c = await conv_access(u, cid, "editor")
+    if body.model and body.model != c["model"] and is_team():
+        raise HTTPException(409, "В общем чате модель меняется через предложение участникам")
+    await db().update_conversation(cid, title=body.title, model=_check_model(body.model) if body.model else None)
+    await broker().publish("conversation", c["project_id"], action="updated", conversation_id=cid)
+    return await db().get_conversation(cid)
+
+
+@app.delete("/api/conversations/{cid}")
+async def delete_conv(cid: str, u: dict = Me):
+    c = await conv_access(u, cid, "editor")
+    if r := agent().active_run(cid):
+        await agent().cancel(r)
+    for p in await db().delete_conversation(cid):
+        Path(p).unlink(missing_ok=True)
+    await broker().publish("conversation", c["project_id"], action="deleted", conversation_id=cid)
+    return {"ok": True}
+
+
+@app.get("/api/conversations/{cid}")
+async def get_conv(cid: str, u: dict = Me):
+    c = await conv_access(u, cid)
+    c["my_role"] = await db().project_role(u, c["project_id"])
+    c.update(await chat_model_state(c, u))
+    msgs = await db().get_messages(cid)
+    items = []
+    for m in msgs:
+        it = {"id": m["id"], "role": m["role"], "content": m["content"], "created_at": m["created_at"]}
+        if m["role"] == "assistant" and m["tool_calls"]:
+            calls = []
+            for tc in m["tool_calls"]:
+                try:
+                    args = json.loads(tc["function"]["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    args = {"_raw": tc["function"]["arguments"]}
+                calls.append({"id": tc["id"], "name": tc["function"]["name"], "args": args})
+            it["tool_calls"] = calls
+        if m["role"] == "tool":
+            it["tool_call_id"] = m["tool_call_id"]
+            it["name"] = m["name"]
+            try:
+                parsed = json.loads(m["content"] or "null")
+                it["ok"] = not (isinstance(parsed, dict) and "error" in parsed and len(parsed) == 1)
+            except json.JSONDecodeError:
+                it["ok"] = True
+            it["content"] = (m["content"] or "")[:3000]
+        if m["meta"]:
+            it["meta"] = m["meta"]
+        items.append(it)
+    run = agent().active_run(cid)
+    running = run and run.status == "running"
+    c["active_run"] = run.id if running else None
+    c["active_run_started_at"] = run.started_at if running else None
+    c["messages"] = items
+    return c
+
+
+SAFE = re.compile(r"[^\w.\-() ]+", re.UNICODE)
+
+
+@app.post("/api/conversations/{cid}/attachments")
+async def upload(cid: str, file: UploadFile = File(...), u: dict = Me):
+    await conv_access(u, cid, "editor")
+    name = SAFE.sub("_", Path(file.filename or "file").name)[:120] or "file"
+    aid_dir = settings.data_dir / "attachments" / cid
+    aid_dir.mkdir(parents=True, exist_ok=True)
+    dest = aid_dir / f"{new_id()}_{name}"
+    limit, size = settings.max_upload_mb * 1024 * 1024, 0
+    with dest.open("wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, f"Файл больше {settings.max_upload_mb} МБ")
+            f.write(chunk)
+    mime = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return await db().add_attachment(cid, name, mime, size, str(dest))
+
+
+class MessageIn(BaseModel):
+    content: str
+    attachment_ids: list[str] = []
+    model: str | None = None
+
+
+@app.post("/api/conversations/{cid}/messages")
+async def send(cid: str, body: MessageIn, u: dict = Me):
+    c = await conv_access(u, cid, "editor")
+    keys = vault().get(u["id"])
+    llm_key, budget = None, None
+    if is_team():
+        # одна модель на чат; платит спонсор — участник, который её выбрал и разрешил свой ключ
+        model = c["model"]
+        llm_key, budget, why = await sponsor_access(c)
+        if why:
+            raise HTTPException(409, why)
+    else:
+        model = _check_model(body.model or c["model"])
+        if not agent().llm_key(split_model(model)[0], keys):
+            raise HTTPException(400, f"Нет ключа для {split_model(model)[0]}: разблокируйте ключи в приложении"
+                                if settings.is_space else f"На сервере не задан ключ {split_model(model)[0]}")
+    atts = []
+    for aid in body.attachment_ids:
+        a = await db().get_attachment(aid)
+        if not a or a["conversation_id"] != cid:
+            raise HTTPException(400, f"Вложение {aid} не найдено")
+        atts.append({"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": a["size"]})
+    run = agent().active_run(cid)
+    if run and run.status == "running":
+        raise HTTPException(409, "В этом чате уже идёт выполнение")
+    meta: dict = {"author": u["display_name"], "author_id": u["id"]}
+    if atts:
+        meta["attachments"] = atts
+    await db().add_message(cid, "user", body.content, meta=meta)
+    updates: dict = {} if is_team() else {"model": model}
+    if c["title"] == "Новый чат":
+        t = body.content.strip().splitlines()[0] if body.content.strip() else (atts[0]["filename"] if atts else "")
+        updates["title"] = (t[:60] + "…") if len(t) > 60 else t or "Новый чат"
+    await db().update_conversation(cid, **updates)
+    run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
+                              payer_id=c.get("sponsor_id") if is_team() else u["id"])
+    return {"run_id": run.id}
+
+
+async def _run_access(rid: str, u: dict, min_role: str = "viewer"):
+    run = agent().runs.get(rid)
+    if not run:
+        raise HTTPException(404, "Запуск не найден (возможно, сервер перезапускался)")
+    await need(u, run.project_id, min_role)
+    return run
+
+
+@app.get("/api/runs/{rid}/events")
+async def events(rid: str, request: Request, after: int = 0, u: dict = Me):
+    run = await _run_access(rid, u)
+
+    started = time.time()
+
+    async def gen():
+        pos = after
+        yield "retry: 2000\n\n"
+        while True:
+            if await request.is_disconnected():
+                return
+            if spaceauth.revoked_since(u["id"], started):
+                yield "event: end\ndata: {}\n\n"
+                return
+            evs = await run.wait_events(pos)
+            for e in evs:
+                yield f"id: {e['seq']}\ndata: {json.dumps(e, ensure_ascii=False, default=str)}\n\n"
+            pos += len(evs)
+            if not evs:
+                yield ": ping\n\n"
+            if run.status != "running" and pos >= len(run.events):
+                yield "event: end\ndata: {}\n\n"
+                return
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/runs/{rid}/cancel")
+async def cancel(rid: str, u: dict = Me):
+    await agent().cancel(await _run_access(rid, u, "editor"))
+    return {"ok": True}
+
+
+class ApprovalIn(BaseModel):
+    approve: bool
+    comment: str = ""
+    action: dict | None = None   # подписанное действие (с телефона)
+    sig: str | None = None
+
+
+@app.post("/api/approvals/{aid}")
+async def approve(aid: str, body: ApprovalIn, u: dict = Me):
+    run = next((r for r in agent().runs.values() if aid in r.approvals), None)
+    if not run:
+        raise HTTPException(404, "Запрос на подтверждение не найден или уже обработан")
+    await need(u, run.project_id, "editor")
+    if u.get("_device"):  # с телефона подтверждение «за» действует только с подписью ключом подтверждения (биометрия)
+        meta = run.approval_meta.get(aid) or {}
+        if body.approve or body.action:
+            d = u["_device"]
+            state["device_auth"].check_action(body.action or {}, body.sig or "", d["confirm_jwk"], d["id"], {
+                "type": "approve_tool", "approval_id": aid, "tool": meta.get("name"),
+                "args_sha256": devices.args_hash(meta.get("args")), "approve": body.approve})
+    agent().resolve_approval(aid, body.approve, body.comment)
+    await broker().publish("run.approval_resolved", run.project_id, conversation_id=run.conversation_id,
+                           run_id=run.id, approved=body.approve, by=u["display_name"])
+    return {"ok": True}
+
+
+# ================================================================== модель общего чата: спонсор и предложения
+async def sponsor_blocker(c: dict) -> str | None:
+    """Почему спонсор сейчас не может оплатить запуск: лимит в $ / токенах или срок спонсорства."""
+    now = time.time()
+    until = c.get("sponsor_until")
+    if until and now >= until:
+        return "Срок спонсорства истёк — спонсор может продлить его или кто-то предложит свою модель"
+    used = await db().sponsor_usage(c["id"], c.get("sponsor_since"))
+    lim_usd, lim_tok = c.get("sponsor_limit_usd"), c.get("sponsor_limit_tokens")
+    if lim_usd is not None and used["usd"] >= lim_usd:
+        return f"Лимит спонсора ${lim_usd:g} исчерпан"
+    if lim_tok is not None and used["tokens"] >= lim_tok:
+        return f"Лимит спонсора {lim_tok:,} токенов исчерпан".replace(",", " ")
+    return None
+
+
+async def sponsor_access(c: dict):
+    """Ключ спонсора для запуска + проверка лимитов на каждом шаге. Возвращает (key, budget_fn, причина_отказа)."""
+    if not c.get("sponsor_id"):
+        return None, None, "У чата нет спонсора модели — предложите модель, которую оплатите своим ключом"
+    pname = split_model(c["model"])[0]
+    key = vault().get(c["sponsor_id"]).get(pname)
+    sponsor = await db().get_user(c["sponsor_id"])
+    name = sponsor["display_name"] if sponsor else "спонсор"
+    if not key:
+        return None, None, f"Ключ спонсора недоступен: {name} сейчас не в сети. Можно предложить свою модель"
+    if why := await sponsor_blocker(c):
+        return None, None, why
+    cid = c["id"]
+
+    async def budget():
+        cur = await db().get_conversation(cid)
+        if not cur or cur.get("sponsor_id") != c["sponsor_id"] or cur.get("model") != c["model"]:
+            return "Модель или спонсор чата изменились — остановлено"
+        why = await sponsor_blocker(cur)
+        return f"{why} — остановлено" if why else None
+
+    return key, budget, None
+
+
+async def chat_model_state(c: dict, u: dict) -> dict:
+    out: dict = {"team": is_team()}
+    if not is_team():
+        return out
+    sp = await db().get_user(c["sponsor_id"]) if c.get("sponsor_id") else None
+    pname = split_model(c["model"])[0]
+    if sp:
+        used = await db().sponsor_usage(c["id"], c.get("sponsor_since"))
+        out["sponsor"] = {"id": sp["id"], "name": sp["display_name"],
+                          "online": bool(vault().get(sp["id"]).get(pname)),
+                          "limit_usd": c.get("sponsor_limit_usd"), "limit_tokens": c.get("sponsor_limit_tokens"),
+                          "until": c.get("sponsor_until"), "since": c.get("sponsor_since"),
+                          "spent_usd": round(used["usd"], 4), "spent_tokens": used["tokens"],
+                          "blocked": await sponsor_blocker(c)}
+    else:
+        out["sponsor"] = None
+    await expire_due()
+    out["proposal"] = await proposal_view(await db().pending_proposal(c["id"]), u)
+    out["model_policy"] = c.get("model_policy") or "vote"
+    out["created_by"] = c.get("created_by")
+    out["proposal_ttl_hours"] = round(settings.proposal_ttl_seconds / 3600)
+    return out
+
+
+async def _note(c: dict, text: str) -> None:
+    """Служебная отметка в ленте чата (модели не отправляется)."""
+    await db().add_message(c["id"], "note", text)
+    await broker().publish("conversation", c["project_id"], action="updated", conversation_id=c["id"])
+
+
+def _title(model: str) -> str:
+    return model.split(":", 1)[-1]
+
+
+def _terms(limit_usd, limit_tokens, days, until=None) -> str:
+    parts = []
+    if until:
+        days = None
+    if limit_usd is not None:
+        parts.append(f"до ${limit_usd:g}")
+    if limit_tokens is not None:
+        parts.append(f"до {int(limit_tokens):,} токенов".replace(",", " "))
+    if days:
+        parts.append(f"на {days:g} дн.")
+    if until:
+        try:
+            tz = ZoneInfo(settings.display_tz)
+        except Exception:
+            tz = timezone.utc
+        parts.append("до " + datetime.fromtimestamp(until, tz).strftime("%d.%m.%Y"))
+    return ", ".join(parts) or "без ограничений"
+
+
+NEED_LIMIT = "Нужно ограничение спонсорства: сумма ($ или токены) или срок"
+
+
+def _check_until(until: float | None) -> None:
+    if until is not None and not (time.time() + 60 < until <= time.time() + 366 * 86400):
+        raise HTTPException(400, "Дата окончания спонсорства — от завтрашнего дня и не дальше года")
+
+
+class ProposalIn(BaseModel):
+    model: str
+    limit_usd: float | None = Field(None, gt=0, le=100000)
+    limit_tokens: int | None = Field(None, ge=1000, le=10_000_000_000)
+    days: float | None = Field(None, gt=0, le=365)
+    until: float | None = None  # дата окончания (unix-время), выбирается в календаре
+    model_policy: str | None = Field(None, pattern="^(vote|open)$")  # только при создании чата
+
+    def has_limit(self) -> bool:
+        return any(v is not None for v in (self.limit_usd, self.limit_tokens, self.days, self.until))
+
+
+POLICIES = {"vote": "по голосованию", "open": "свободно для коллег"}
+
+
+async def voters() -> list[dict] | None:
+    """Кто голосует: редакторы и владельцы пространства (состав присылает control-plane)."""
+    r = await db().roster()
+    return [m for m in r if m["role"] in ("editor", "owner")] if r else None
+
+
+async def expire_due() -> None:
+    """Предложения старше срока (24 ч) закрываем и отмечаем в чате."""
+    for p in await db().expire_proposals():
+        c = await db().get_conversation(p["conversation_id"])
+        if c:
+            await _note(c, f"Предложение перейти на {_title(p['model'])} истекло: за сутки не набрало голосов")
+
+
+async def proposal_view(p: dict | None, u: dict) -> dict | None:
+    if not p:
+        return None
+    vs = await db().votes(p["id"])
+    eligible = await voters()
+    total = len(eligible) if eligible else None
+    need = total // 2 + 1 if total else 2  # большинство; без состава — автор + ещё один коллега
+    mine = next((v["vote"] for v in vs if v["user_id"] == u["id"]), None)
+    return {**p, "yes": [v["name"] for v in vs if v["vote"]], "no": [v["name"] for v in vs if not v["vote"]],
+            "need": need, "voters": total, "my_vote": None if mine is None else bool(mine)}
+
+
+async def _apply(c: dict, model: str, sponsor: dict, terms: dict) -> None:
+    await db().set_sponsor(c["id"], model, sponsor["id"], terms.get("limit_usd"), terms.get("limit_tokens"),
+                           terms.get("days"), terms.get("until"))
+
+
+@app.post("/api/conversations/{cid}/model")
+async def propose_model(cid: str, body: ProposalIn, u: dict = Me):
+    """Выбрать, сменить или предложить модель чата. Кто выбирает модель — тот спонсор и платит своим ключом."""
+    c = await conv_access(u, cid, "editor")
+    model = _check_model(body.model)
+    if not is_team():
+        await db().update_conversation(cid, model=model)
+        return {"applied": True}
+    if not body.has_limit():
+        raise HTTPException(400, NEED_LIMIT)
+    _check_until(body.until)
+    if not agent().llm_key(split_model(model)[0], vault().get(u["id"])):
+        raise HTTPException(400, "Выбрать можно только модель, для которой у вас есть ключ: вы становитесь спонсором")
+    run = agent().active_run(cid)
+    if run and run.status == "running":
+        raise HTTPException(409, "Дождитесь окончания работы агента")
+    await expire_due()
+    terms = body.model_dump(include={"limit_usd", "limit_tokens", "days", "until"})
+    text_terms = _terms(body.limit_usd, body.limit_tokens, body.days, body.until)
+    # новый чат: создатель выбирает модель и правило её смены
+    if not await db().has_messages(cid) and c.get("created_by") == u["id"]:
+        if body.model_policy:
+            await db().set_model_policy(cid, body.model_policy)
+        await _apply(c, model, u, terms)
+        pol = POLICIES[body.model_policy or c.get("model_policy") or "vote"]
+        await _note(c, f"{u['display_name']} выбрал(а) {_title(model)} и оплачивает чат ({text_terms}). Смена модели: {pol}")
+        return {"applied": True}
+    if c.get("model_policy") == "open":
+        # смена модели разрешена коллегам — без голосования
+        await _apply(c, model, u, terms)
+        await _note(c, f"{u['display_name']} сменил(а) модель на {_title(model)} и теперь оплачивает чат ({text_terms})")
+        await broker().publish("model.proposal", c["project_id"], conversation_id=cid, by=u["display_name"], model=model)
+        return {"applied": True}
+    p = await db().create_proposal(cid, model, u["id"], body.limit_usd, body.limit_tokens, body.days, body.until,
+                                   ttl=settings.proposal_ttl_seconds)
+    hours = round(settings.proposal_ttl_seconds / 3600)
+    await _note(c, f"{u['display_name']} предлагает перейти на {_title(model)} (платит {u['display_name']}: {text_terms}). "
+                   f"Голосование {hours} ч")
+    await broker().publish("model.proposal", c["project_id"], conversation_id=cid, proposal_id=p["id"],
+                           by=u["display_name"], model=model)
+    res = await _tally(p["id"], c, u)  # если голосует только автор — решится сразу
+    return {"applied": res == "approved", "proposal": await proposal_view(await db().proposal(p["id"]), u)}
+
+
+async def _tally(pid: str, c: dict, u: dict) -> str:
+    """Подсчёт голосов: большинство «за» — переход, большинство уже недостижимо — отклонено."""
+    p = await db().proposal(pid)
+    if not p or p["status"] != "pending":
+        return p["status"] if p else "missing"
+    vs = await db().votes(pid)
+    eligible = await voters()
+    yes = sum(1 for v in vs if v["vote"])
+    no = sum(1 for v in vs if not v["vote"])
+    if eligible:
+        ids = {m["id"] for m in eligible}
+        yes = sum(1 for v in vs if v["vote"] and v["user_id"] in ids)
+        no = sum(1 for v in vs if not v["vote"] and v["user_id"] in ids)
+        total = len(eligible)
+        need = total // 2 + 1
+        can_still = yes + (total - yes - no) >= need
+    else:  # состав неизвестен: нужен хотя бы один коллега «за», любой «против» — отклоняет
+        need, can_still = 2, no == 0
+    if yes >= need:
+        await db().decide_proposal(pid, "approved", u["id"])
+        proposer = await db().get_user(p["proposer_id"]) or {"id": p["proposer_id"]}
+        await _apply(c, p["model"], proposer, {"limit_usd": p["limit_usd"], "limit_tokens": p["limit_tokens"],
+                                               "days": p["days"], "until": p.get("until")})
+        names = ", ".join(v["name"] for v in vs if v["vote"])
+        await _note(c, f"Голосование прошло ({yes} из {need} нужных: {names}): чат переходит на {_title(p['model'])}, "
+                       f"платит {p['proposer_name']}")
+        return "approved"
+    if not can_still:
+        await db().decide_proposal(pid, "rejected", u["id"])
+        await _note(c, f"Переход на {_title(p['model'])} отклонён голосованием")
+        return "rejected"
+    return "pending"
+
+
+class DecideIn(BaseModel):
+    approve: bool
+
+
+@app.post("/api/model-proposals/{pid}")
+async def decide_proposal(pid: str, body: DecideIn, u: dict = Me):
+    """Голос «за» или «против». Автор предложения голосом «против» отменяет его."""
+    await expire_due()
+    p = await db().proposal(pid)
+    if not p or p["status"] != "pending":
+        raise HTTPException(404, "Предложение не найдено, уже решено или истекло")
+    c = await conv_access(u, p["conversation_id"], "editor")
+    if p["proposer_id"] == u["id"]:
+        if body.approve:
+            raise HTTPException(403, "Ваш голос «за» уже учтён")
+        await db().decide_proposal(pid, "cancelled", u["id"])
+        await _note(c, f"{u['display_name']} отменил(а) предложение {_title(p['model'])}")
+        return {"ok": True, "status": "cancelled"}
+    run = agent().active_run(c["id"])
+    if body.approve and run and run.status == "running":
+        raise HTTPException(409, "Дождитесь окончания работы агента")
+    await db().vote(pid, u["id"], body.approve)
+    status = await _tally(pid, c, u)
+    if status == "pending":
+        await _note(c, f"{u['display_name']} голосует {'за' if body.approve else 'против'} {_title(p['model'])}")
+    return {"ok": True, "status": status}
+
+
+class PolicyIn(BaseModel):
+    model_policy: str = Field(..., pattern="^(vote|open)$")
+
+
+@app.patch("/api/conversations/{cid}/policy")
+async def set_policy(cid: str, body: PolicyIn, u: dict = Me):
+    """Правило смены модели меняет создатель чата или владелец пространства."""
+    c = await conv_access(u, cid, "editor")
+    if c.get("created_by") != u["id"] and u.get("space_role") != "owner":
+        raise HTTPException(403, "Правило меняет создатель чата или владелец")
+    await db().set_model_policy(cid, body.model_policy)
+    await _note(c, f"{u['display_name']}: смена модели в этом чате — {POLICIES[body.model_policy]}")
+    return {"ok": True}
+
+
+class SponsorPatch(BaseModel):
+    # передайте только то, что меняете; null — снять ограничение
+    limit_usd: float | None = Field(None, gt=0, le=100000)
+    limit_tokens: int | None = Field(None, ge=1000, le=10_000_000_000)
+    days: float | None = Field(None, gt=0, le=365)  # срок считается от текущего момента
+    until: float | None = None  # или конкретная дата окончания
+    withdraw: bool = False
+
+
+@app.patch("/api/conversations/{cid}/sponsor")
+async def patch_sponsor(cid: str, body: SponsorPatch, u: dict = Me):
+    c = await conv_access(u, cid, "editor")
+    if c.get("sponsor_id") != u["id"]:
+        raise HTTPException(403, "Это может только спонсор чата")
+    if body.withdraw:
+        await db().set_sponsor(cid, c["model"], None, None)
+        for r in list(agent().runs.values()):  # запуски на его ключе останавливаем
+            if r.status == "running" and r.conversation_id == cid:
+                await agent().cancel(r)
+        await _note(c, f"{u['display_name']} больше не оплачивает этот чат — нужна новая модель")
+    else:
+        fs = body.model_fields_set
+        upd: dict = {}
+        if "limit_usd" in fs:
+            upd["sponsor_limit_usd"] = body.limit_usd
+        if "limit_tokens" in fs:
+            upd["sponsor_limit_tokens"] = body.limit_tokens
+        if "days" in fs:
+            upd["sponsor_until"] = time.time() + body.days * 86400 if body.days else None
+        if "until" in fs:
+            _check_until(body.until)
+            upd["sponsor_until"] = body.until
+        if not upd:
+            raise HTTPException(400, "Нечего менять")
+        after = {"sponsor_limit_usd": c.get("sponsor_limit_usd"), "sponsor_limit_tokens": c.get("sponsor_limit_tokens"),
+                 "sponsor_until": c.get("sponsor_until"), **upd}
+        if all(v is None for v in after.values()):
+            raise HTTPException(400, NEED_LIMIT)
+        await db().set_sponsor_limits(cid, **upd)
+        cur = await db().get_conversation(cid)
+        await _note(c, f"{u['display_name']} изменил(а) условия оплаты: "
+                       f"{_terms(cur.get('sponsor_limit_usd'), cur.get('sponsor_limit_tokens'), None, cur.get('sponsor_until'))}")
+    return {"ok": True}
+
+
+# ================================================================== ключи (только в памяти)
+class KeysIn(BaseModel):
+    keys: dict[str, str]
+
+
+@app.post("/api/session/keys")
+async def put_keys(body: KeysIn, u: dict = Me):
+    """Телефон присылает расшифрованные ключи после Face ID. Хранятся только в RAM."""
+    return {"providers": vault().put(u["id"], body.keys), "ttl": vault().ttl}
+
+
+@app.get("/api/session/keys")
+async def get_keys(u: dict = Me):
+    return {"providers": vault().providers(u["id"])}
+
+
+@app.delete("/api/session/keys")
+async def wipe_keys(u: dict = Me):
+    vault().wipe(u["id"])
+    return {"ok": True}
+
+
+# ================================================================== экспорт/импорт проекта (перенос в общий)
+@app.get("/api/projects/{pid}/export")
+async def export_project(pid: str, u: dict = Me):
+    await need(u, pid, "editor")
+    p = await db().get_project(pid)
+    mems = await db().list_memories(pid, 5000)
+    sk = []
+    for s in skills().list():
+        if "*" in p["skills"] or s["name"] in p["skills"]:
+            full = skills().get(s["name"])
+            sk.append({"name": full["name"], "description": full["description"], "body": full["body"]})
+    return {"format": "fugu-deck-project/1", "name": p["name"], "description": p["description"],
+            "instructions": p["instructions"], "skills": sk,
+            "memories": [{"content": m["content"], "tags": m["tags"], "pinned": bool(m["pinned"])} for m in mems]}
+
+
+class ImportIn(BaseModel):
+    format: str
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = ""
+    instructions: str = ""
+    skills: list[dict] = []
+    memories: list[dict] = []
+
+
+@app.post("/api/projects/import")
+async def import_project(body: ImportIn, u: dict = Me):
+    if body.format != "fugu-deck-project/1":
+        raise HTTPException(400, "Неизвестный формат")
+    if settings.is_space and ROLES[u["space_role"]] < ROLES["editor"]:
+        raise HTTPException(403, "Нужна роль редактора")
+    p = await db().create_project(body.name, body.description, u)
+    names = []
+    can_write_skills = skills().writable and (not settings.is_space or u["space_role"] == "owner")
+    for sk in body.skills[:50]:
+        try:
+            name = str(sk["name"])
+            if can_write_skills and name not in {x["name"] for x in skills().list()}:
+                skills().save(name, str(sk.get("description", ""))[:1024], str(sk.get("body", ""))[:150_000])
+            names.append(name)
+        except (SkillError, KeyError):
+            continue
+    await db().update_project(p["id"], instructions=body.instructions[:20000], skills=names or ["*"])
+    for m in body.memories[:5000]:
+        c = str(m.get("content", "")).strip()[:8000]
+        if c:
+            await db().add_memory(p["id"], c, str(m.get("tags", ""))[:200], "import", u["display_name"],
+                                  pinned=bool(m.get("pinned")))
+    await broker().publish("project", p["id"], action="created")
+    return await db().get_project(p["id"])
+
+
+# ================================================================== служебное для control-plane
+class RevokeIn(BaseModel):
+    token: str
+
+
+class RosterIn(BaseModel):
+    token: str
+
+
+@app.post("/internal/roster")
+async def internal_roster(body: RosterIn):
+    """Control-plane присылает состав участников (для голосования). Подписано ключом control-plane."""
+    if not settings.is_space:
+        raise HTTPException(404)
+    cl = spaceauth.verify(body.token, settings, audience=f"space-internal:{settings.space_id}")
+    if cl.get("action") != "roster" or not isinstance(cl.get("members"), list):
+        raise HTTPException(400, "bad action")
+    await db().set_roster([{"id": m["id"], "name": m["name"], "role": m["role"]} for m in cl["members"]
+                           if m.get("role") in ("viewer", "editor", "owner")])
+    return {"ok": True, "members": len(cl["members"])}
+
+
+@app.post("/internal/revoke")
+async def internal_revoke(body: RevokeIn):
+    """Control-plane сообщает: участника удалили из пространства. Подписано ключом control-plane."""
+    if not settings.is_space:
+        raise HTTPException(404)
+    cl = spaceauth.verify(body.token, settings, audience=f"space-internal:{settings.space_id}")
+    if cl.get("action") != "revoke" or not cl.get("user_id"):
+        raise HTTPException(400, "bad action")
+    uid = cl["user_id"]
+    spaceauth.revoke(uid)
+    vault().wipe(uid)
+    broker().kick(uid)
+    for r in list(agent().runs.values()):  # его запуски останавливаем
+        if r.status == "running" and r.user.get("id") == uid:
+            await agent().cancel(r)
+    return {"ok": True}
+
+
+# ================================================================== realtime
+@app.get("/api/events")
+async def event_stream(request: Request, device_id: str = "", u: dict = Me):
+    device_id = device_id[:64] or new_id()
+    sub = broker().subscribe(u["id"], device_id)
+
+    async def gen():
+        try:
+            yield "retry: 2000\n\n"
+            yield f"data: {json.dumps({'type': 'hello', 'device_id': device_id})}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    ev = await asyncio.wait_for(sub.queue.get(), 20)
+                    yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+                    if sub.kicked:
+                        return
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            await broker().unsubscribe(sub)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class PresenceIn(BaseModel):
+    device_id: str = Field(..., max_length=64)
+    project_id: str | None = None
+    conversation_id: str | None = None
+
+
+@app.post("/api/presence")
+async def presence(body: PresenceIn, u: dict = Me):
+    if body.project_id:
+        await need(u, body.project_id)
+    await broker().set_presence(u, body.device_id, body.project_id, body.conversation_id)
+    return {"online": broker().project_presence(body.project_id) if body.project_id else []}
+
+
+# ================================================================== статика (для запуска без Caddy)
+_static = Path(__file__).resolve().parent.parent / "static"
+if _static.exists():
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str):
+        f = _static / path
+        if path and f.is_file() and _static in f.resolve().parents:
+            return FileResponse(f)
+        return FileResponse(_static / "index.html")

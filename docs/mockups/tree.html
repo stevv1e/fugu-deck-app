@@ -1,0 +1,727 @@
+<title>Древо знаний Fugu Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen app — top bar with species switch, branch chips, canvas tree fills the stage,
+   note panel docks right (desktop) or as a bottom sheet (phone). Single night look by choice; the accent follows the chosen tree. */
+:root {
+  color-scheme: dark;
+  --ground: #0b0a16;
+  --surface: #111020;
+  --surface-2: #181629;
+  --line: #27233f;
+  --ink: #eeeaf5;
+  --muted: #958fae;
+  --faint: #5f5a78;
+  --accent: #f7a8c8;
+  --spark: #fff4d1;
+  --stale: #ff5d73;
+  --rust: #d9622b;
+  --d-dec: #f5a524;
+  --d-inf: #4cc9f0;
+  --d-code: #a78bfa;
+  --d-ppl: #f472b6;
+  --d-ops: #34d399;
+  --e-dep: #c7d2fe;
+  --e-dec: #fbbf24;
+  --e-con: #ff5d73;
+  --e-ex: #5eead4;
+  --e-ref: #9aa3c7;
+  --f-display: "Shippori Mincho", "Noto Serif JP", Georgia, serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+html, body { height: 100%; }
+body { background: var(--ground); color: var(--ink); font-family: var(--f-body); font-size: 14px; overflow: hidden; }
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { height: 100%; display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: 1fr 360px; grid-template-areas: "top top" "chips panel" "stage panel"; }
+.top { grid-area: top; display: flex; align-items: center; gap: 12px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.brand small { font-family: var(--f-mono); font-size: 10px; letter-spacing: .18em; color: var(--faint); text-transform: uppercase; }
+.brand h1 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 21px; letter-spacing: .02em; }
+.brand h1 span { color: var(--accent); font-weight: 600; }
+.species { min-width: 0; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
+.species button { border: 0; background: transparent; padding: 6px 10px; border-radius: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.species button span { font-family: var(--f-display); font-size: 13px; margin-right: 4px; color: var(--faint); }
+.species button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.species button[aria-pressed="true"] span { color: var(--accent); }
+.search { flex: 0 1 300px; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; min-width: 0; }
+.search svg { flex: none; color: var(--faint); }
+.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--ink); font: inherit; padding: 9px 0; outline: none; }
+.search input::placeholder { color: var(--faint); }
+
+.chips { grid-area: chips; display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; scrollbar-width: none; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 12.5px; color: var(--muted); }
+.chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.chip b { font-weight: 500; color: var(--ink); }
+.chip small { font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); }
+.chip[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
+
+.stage { grid-area: stage; position: relative; min-height: 0; overflow: hidden; touch-action: none; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+.zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+.zoom button { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); font-size: 17px; line-height: 1; }
+.hint { position: absolute; left: 12px; top: 10px; font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); pointer-events: none; }
+
+.panel { grid-area: panel; border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); margin: 0; }
+.panel h2 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 19px; line-height: 1.3; text-wrap: balance; }
+.panel p { margin: 0; line-height: 1.55; }
+.muted { color: var(--muted); }
+.section { display: flex; flex-direction: column; gap: 10px; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { font-family: var(--f-mono); font-size: 10.5px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+.pill.dom { color: var(--c); border-color: color-mix(in srgb, var(--c) 45%, var(--line)); }
+.pill.stale { color: var(--stale); border-color: color-mix(in srgb, var(--stale) 50%, var(--line)); }
+.pill.fresh { color: var(--d-ops); border-color: color-mix(in srgb, var(--d-ops) 45%, var(--line)); }
+.pill.ext { color: var(--e-dec); border-color: color-mix(in srgb, var(--e-dec) 45%, var(--line)); }
+.body { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; line-height: 1.55; }
+.body code, .log code, .answer code { font-family: var(--f-mono); font-size: 12px; color: var(--e-ex); }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12.5px; margin: 0; }
+.meta dt { color: var(--faint); font-family: var(--f-mono); font-size: 11px; padding-top: 1px; }
+.meta dd { margin: 0; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-direction: column; gap: 4px; }
+.link { display: flex; align-items: center; gap: 10px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; }
+.link:hover { background: var(--surface-2); border-color: var(--line); }
+.link .ty { flex: none; width: 92px; font-family: var(--f-mono); font-size: 10.5px; color: var(--t); }
+.link .nm { flex: 1; min-width: 0; font-size: 13px; }
+.link .st { flex: none; width: 34px; height: 3px; border-radius: 2px; background: var(--line); position: relative; overflow: hidden; }
+.link .st::after { content: ""; position: absolute; inset: 0; width: var(--s); background: var(--t); }
+.btn > span:first-child { min-width: 0; }
+.btn { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 9px 12px; font-size: 13px; text-align: left; display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.btn .k { font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); flex: none; }
+.btn.back { padding: 6px 10px; font-size: 12px; align-self: flex-start; }
+.log { display: flex; flex-direction: column; gap: 6px; padding: 0; margin: 0; }
+.log li { list-style: none; display: grid; grid-template-columns: 18px 1fr; gap: 8px; font-size: 13px; line-height: 1.45; }
+.log li::before { content: ""; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--c, var(--spark)); box-shadow: 0 0 10px var(--c, var(--spark)); }
+.log li.warn::before { background: var(--stale); box-shadow: 0 0 10px var(--stale); }
+.answer { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--surface-2)); border-radius: 10px; padding: 12px; line-height: 1.55; display: flex; flex-direction: column; gap: 8px; }
+.saving { font-family: var(--f-mono); font-size: 11px; color: var(--d-ops); }
+.map { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; font-size: 12.5px; }
+.map b { font-weight: 600; font-family: var(--f-display); font-size: 13.5px; color: var(--accent); }
+.map span { color: var(--muted); }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 12px; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.legend svg { flex: none; }
+.divider { height: 1px; background: var(--line); }
+
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr auto; grid-template-areas: "top" "chips" "stage" "panel"; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); max-height: 40vh; max-height: 40dvh; border-radius: 16px 16px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .brand { margin-right: 0; flex: 1 1 100%; }
+  .species { flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
+  .species button { flex: 1; }
+  .search { flex: 1 1 100%; }
+  .hint { display: none; }
+}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <small>Fugu Deck · пространство Shop</small>
+      <h1>Древо знаний <span id="spname">· Сакура</span></h1>
+    </div>
+    <div class="species" id="species" role="group" aria-label="Вид дерева"></div>
+    <label class="search" for="q">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Найти заметку: prod-1, деплой, OpenBao…" autocomplete="off">
+    </label>
+  </header>
+  <nav class="chips" id="chips" aria-label="Ветви"></nav>
+  <main class="stage" id="stage">
+    <canvas id="cv" aria-label="Заметки проекта в виде дерева"></canvas>
+    <div class="zoom">
+      <button id="zin" aria-label="Приблизить">+</button>
+      <button id="zout" aria-label="Отдалить">−</button>
+      <button id="zfit" aria-label="Показать всё дерево">⤢</button>
+    </div>
+    <div class="hint">колесо — масштаб · перетаскивание — сдвиг · касание цветка — заметка</div>
+  </main>
+  <aside class="panel" id="panel" aria-live="polite"></aside>
+</div>
+
+<script>
+(() => {
+"use strict";
+const root = document.documentElement;
+const css = (n) => getComputedStyle(root).getPropertyValue(n).trim();
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- Виды деревьев ----------
+const SPECIES = {
+  sakura: { name: "Сакура", kanji: "桜", shape: "blossom", leaf: "#ffc2da", leaf2: "#f48fb1", glow: "#ff9ec7", bark: "#3b2730", barkHi: "#6a4552", root: "#3a2530", rootGlow: "#ff9ec7", sky1: "#0c0b1d", sky2: "#22163a", moon: true, accent: "#f7a8c8",
+    about: "Цветы — заметки. Свежие распускаются ярко, старые бледнеют и роняют лепестки." },
+  momiji: { name: "Момидзи", kanji: "紅葉", shape: "maple", leaf: "#ff6a3d", leaf2: "#f59e3b", glow: "#ff7a45", bark: "#2e2220", barkHi: "#5a3e36", root: "#2c201d", rootGlow: "#ff8a4c", sky1: "#0f0a12", sky2: "#2a1520", moon: true, accent: "#ff8a5c",
+    about: "Японский клён. Листья — заметки: свежие алые, старые жёлтые и опадают." },
+  ginkgo: { name: "Гинкго", kanji: "銀杏", shape: "fan", leaf: "#ffd45e", leaf2: "#e3a930", glow: "#ffd166", bark: "#3a3428", barkHi: "#6b604a", root: "#322c21", rootGlow: "#ffd166", sky1: "#0d0c0a", sky2: "#221d12", moon: true, accent: "#f4c84a",
+    about: "Храмовое дерево Японии, символ стойкости. Веер-листья — заметки." },
+  ygg: { name: "Иггдрасиль", kanji: "ᛃ", shape: "ash", leaf: "#8ff0b4", leaf2: "#4fd1c5", glow: "#5eead4", bark: "#566273", barkHi: "#94a3b8", root: "#3c4a57", rootGlow: "#5eead4", sky1: "#050b0e", sky2: "#0b1f24", moon: false, accent: "#6ee7c8",
+    about: "Мировой ясень. Корни уходят в миры-источники, листья — заметки." },
+};
+let spKey = "sakura"; try { const s = localStorage.getItem("fd-tree-species"); if (SPECIES[s]) spKey = s; } catch (e) {}
+let SP = SPECIES[spKey];
+
+// ---------- Пример данных (макет): пространство «Shop» ----------
+const DOM = {
+  dec:  { name: "Решения",        c: "--d-dec",  ang: -152, y: 472, len: 250, groups: [["Модели и оплата", ["d1","d2","d3"]], ["Безопасность", ["d5","d8"]], ["Платформа", ["d6","d7"]], ["Процессы", ["d4"]]] },
+  ppl:  { name: "Люди и агенты",  c: "--d-ppl",  ang: -118, y: 432, len: 190, groups: [["Участники", ["p1","p2","p3"]], ["Агенты", ["p5","p6"]]] },
+  inf:  { name: "Инфраструктура", c: "--d-inf",  ang: -88,  y: 378, len: 205, groups: [["Кластер", ["i1","i2","i3","i10","i6"]], ["Ключи и доступ", ["i4","i5","i7"]], ["prod-1", ["i8","i9"]]] },
+  code: { name: "Код",            c: "--d-code", ang: -58,  y: 426, len: 215, groups: [["shop-api", ["c1","c3","c4","c6"]], ["CI и тесты", ["c5","c7"]], ["shop-web", ["c2"]]] },
+  ops:  { name: "Операции",       c: "--d-ops",  ang: -28,  y: 482, len: 245, groups: [["Инциденты", ["o2","o3"]], ["Runbook", ["o1","o6"]], ["Платформа", ["o4","o5"]]] },
+};
+const SOURCES = {
+  docs:  { name: "Документы", x: 170, y: 742 },
+  chats: { name: "Чаты", x: 330, y: 778 },
+  api:   { name: "shop-api", x: 520, y: 790 },
+  web:   { name: "shop-web", x: 690, y: 770 },
+  prod:  { name: "prod-1", x: 840, y: 735 },
+};
+const ETYPES = {
+  part: { name: "часть", c: "--e-ref" },
+  dep:  { name: "зависит от", c: "--e-dep" },
+  dec:  { name: "решение по", c: "--e-dec" },
+  con:  { name: "противоречит", c: "--e-con", dash: [5, 5] },
+  ex:   { name: "пример", c: "--e-ex", dash: [1.5, 4] },
+  ref:  { name: "ссылка", c: "--e-ref" },
+};
+// id, ветвь, заголовок, текст, дней с последнего использования, источник (текст), корень-источник
+const N = [
+  ["d1","dec","Одна модель на общий чат","Данные чата уходят одному провайдеру, и понятно, кто платит. Смена модели — через предложение.",2,"решение · чат «Модель общего чата», 26.09","chats"],
+  ["d2","dec","Спонсор платит своим ключом","Запросы всех участников идут через ключ спонсора. Лимит ($, токены или дата) обязателен. Ключ подставляет keyguard.",1,"решение · 26.09","chats"],
+  ["d3","dec","Смена модели — голосование 24 ч","Нужно большинство редакторов и владельцев. Через 24 ч без решения предложение закрывается.",3,"архитектура · коммит 42fd6b5","docs"],
+  ["d4","dec","Деплой Shop — только по вторникам","Выкатываем во вторник до 16:00, чтобы до выходных успеть откатить.",4,"заметка Анны · чат «рефакторинг API»","chats"],
+  ["d5","dec","Ключи API видит только keyguard","Ни control-plane, ни пространства, ни Kubernetes Secret не содержат ключей.",1,"архитектура v2 · §5","docs"],
+  ["d6","dec","Сервер вне ЕС/UK/CH","Требование Sakana к использованию Fugu.",34,"архитектура v1","docs"],
+  ["d7","dec","Удаление после 30 дней без входа","Напоминания на 23-й и 29-й день, затем удаление с задержкой 24 ч.",9,"архитектура v2 · §10","docs"],
+  ["d8","dec","Вход только из приложения","mTLS с сертификатом устройства, DPoP, регистрация по приглашению.",2,"архитектура v2 · §3.3","docs"],
+  ["i1","inf","k3s-кластер","Одна нода: 4 vCPU, 16 ГБ, 100 ГБ NVMe. GitOps через Argo CD.",3,"infra/README.md@eb8d998","docs"],
+  ["i2","inf","Traefik","TLS 1.3, mTLS на <code>api</code>, forwardAuth для приглашений, лимиты частоты.",6,"infra/control-plane/base/ingress.yaml","docs"],
+  ["i3","inf","Keycloak","Realm <code>deck</code> — только passkey. Realm <code>ops</code> — админы, только из VPN.",5,"архитектура v2 · §4","docs"],
+  ["i4","inf","OpenBao","KV ключей (только keyguard), PKI, SSH CA. Распечатывание — 3 из 5 ключей Шамира.",2,"архитектура v2 · §5.4","docs"],
+  ["i5","inf","keyguard","Единственный читатель ключей. Прокси к провайдерам ИИ и Git, реестр устройств, лимиты.",1,"архитектура v2 · §5","docs"],
+  ["i6","inf","Postgres (CNPG)","Базы keycloak, controlplane, keyguard. WAL непрерывно уходит в S3.",7,"архитектура v2 · §2","docs"],
+  ["i7","inf","ssh-gateway","Единственный путь к серверам. Сертификаты на 10 мин с source-address.",2,"архитектура v2 · §7.3","docs"],
+  ["i8","inf","prod-1","Ubuntu 24.04, 2 vCPU. Пользователь <code>deck-agent</code>, sudo только на <code>systemctl restart app</code>.",0,"сервер · отпечаток SHA256:Qm4…f9","prod"],
+  ["i9","inf","nginx на prod-1","Проксирует <code>:443 → app:8080</code>, таймаут upstream 30 с.",0,"/etc/nginx/sites-enabled/shop · изменён после заметки","prod"],
+  ["i10","inf","Argo CD","app-of-apps: cert-manager, platform, control-plane. CI меняет тег образа в overlays/prod.",12,"infra/apps/*.yaml","docs"],
+  ["c1","code","repo: shop-api","Python, FastAPI. Модули: заказы, оплата, каталог.",1,"github.com/anna/shop-api","api"],
+  ["c2","code","repo: shop-web","Фронтенд магазина, React.",14,"github.com/anna/shop-web","web"],
+  ["c3","code","Модуль оплаты","<code>payments/checkout.py</code>: вызов платёжного шлюза, ретраи — 3 раза по 10 с.",0,"shop-api/payments/checkout.py@a91c3e2","api"],
+  ["c4","code","Миграции БД","Alembic. Последняя — 0042, индекс по orders.created_at.",6,"shop-api/migrations · появилась миграция 0043","api"],
+  ["c5","code","CI: GitHub Actions","Тесты → сборка образа → деплой по тегу. Деплой вручную, кнопкой.",4,"shop-api/.github/workflows/ci.yml","api"],
+  ["c6","code","API заказов","<code>POST /orders</code>, <code>GET /orders/{id}</code>. Идемпотентность по ключу запроса.",8,"shop-api/orders/api.py","api"],
+  ["c7","code","Тесты e2e","Сценарий оформления заказа, 14 шагов, ~3 мин.",10,"shop-api/tests/e2e","api"],
+  ["p1","ppl","Анна","Владелец Shop. Пишет решения по архитектуре, ключ Claude.",0,"участник · владелец","chats"],
+  ["p2","ppl","Боб","Редактор. Спонсирует Sakana в чате «Релиз» до 04.10, $20.",1,"участник · редактор","chats"],
+  ["p3","ppl","Вика","Читатель. Смотрит ревью и отчёты.",26,"участник · читатель","chats"],
+  ["p4","trunk","Проект Shop","Интернет-магазин: API, фронтенд, сервер prod-1. Ствол дерева — всё растёт из проекта.",0,"проект","chats"],
+  ["p5","ppl","Агент «Дежурный»","Читает логи на prod-1 без подтверждения. Перезапуск — с подписью.",0,"агент · права подписаны Анной","chats"],
+  ["p6","ppl","Агент «Ревьюер»","Ревью PR в shop-api и shop-web. Только чтение.",2,"агент","chats"],
+  ["o1","ops","Runbook: перезапуск app","1) <code>journalctl -u app</code>; 2) снимок диска; 3) <code>sudo systemctl restart app</code>; 4) проверить <code>/health</code>.",1,"заметка Анны","chats"],
+  ["o2","ops","Инцидент 12.09: 502 на checkout","Платёжный шлюз отвечал 40 с, nginx рвал соединение через 30 с. Фикс пришлось выкатить в пятницу.",3,"чат «инцидент 12.09» · логи prod-1","chats"],
+  ["o3","ops","Логи: /var/log/app","JSON-логи, ротация 7 дней. Ошибки оплаты — по ключу <code>payment_error</code>.",0,"вывод команды на prod-1","prod"],
+  ["o4","ops","Бэкапы: WAL + Litestream","Postgres — на любую секунду, SQLite пространств — секунды. Хранение 30 дней.",11,"архитектура v2 · §12","docs"],
+  ["o5","ops","Алерт: OpenBao sealed","После перезапуска нужен человек с частью ключа. keyguard 15 мин работает из кэша.",19,"архитектура v2 · §5.4","docs"],
+  ["o6","ops","Снимок диска перед изменениями","На prod-1 — LVM-снимок, хранится 24 ч.",28,"заметка Вики","chats"],
+];
+const STALE = new Set(["i9","c4"]);
+const EXT = new Set(["o3"]);
+const E = [
+  ["d1","d2","ref"],["d3","d1","part"],["d2","i5","dec"],["d5","i5","dec"],["d5","i4","dec"],["d8","i2","dec"],["d8","i3","dec"],
+  ["d6","i1","dec"],["d7","o4","ref"],["d4","p4","dec"],["d4","c5","dec"],["o2","d4","con"],
+  ["i1","i2","part"],["i1","i3","part"],["i1","i4","part"],["i1","i5","part"],["i1","i6","part"],["i1","i7","part"],["i1","i10","part"],
+  ["i5","i4","dep"],["i3","i6","dep"],["i7","i4","dep"],["i7","i8","ref"],["i9","i8","part"],["i10","c5","ref"],
+  ["c3","c1","part"],["c4","c1","part"],["c6","c1","part"],["c2","c6","dep"],["c1","c5","ref"],["c7","c5","part"],["c4","i8","dep"],["c3","o2","ref"],["c6","c3","dep"],
+  ["c1","p4","part"],["c2","p4","part"],["p1","p4","part"],["p2","p4","part"],["p3","p4","part"],["p1","d4","ref"],["p2","d2","ex"],
+  ["p5","i8","ref"],["p5","o1","ref"],["p5","o2","ref"],["o3","c3","ref"],["p6","c1","ref"],["p6","c7","ref"],["p5","p4","part"],["p6","p4","part"],
+  ["o1","i9","ref"],["o1","o6","dep"],["o2","i9","ref"],["o3","o2","ex"],["o3","i8","part"],["o4","i6","ref"],["o5","i4","ref"],["o2","o1","ex"],
+];
+const STRENGTH0 = { "o2|i9": .85, "o3|o2": .8, "p5|i8": .9, "o1|i9": .7, "c3|o2": .65, "i5|i4": .9, "d2|i5": .75, "p5|o2": .6 };
+
+// ---------- Модель ----------
+const nodes = N.map(([id, dom, title, body, days, source, src]) => ({ id, dom, title, body, days, source, src, stale: STALE.has(id), ext: EXT.has(id), deg: 0, act: 0 }));
+const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+const edges = E.map(([a, b, t]) => ({ a: byId[a], b: byId[b], t, s: STRENGTH0[a + "|" + b] ?? STRENGTH0[b + "|" + a] ?? 0.35, gain: 0, pulse: 0 }));
+edges.forEach(e => { e.a.deg++; e.b.deg++; });
+nodes.forEach(n => { n.r = 5.5 + Math.sqrt(n.deg) * 2.1; });
+const threads = edges.filter(e => e.t !== "part");
+
+let seed = 11; const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+
+// ---------- Геометрия ----------
+const q = (c, t) => { const u = 1 - t; return [u * u * c.p0[0] + 2 * u * t * c.c[0] + t * t * c.p1[0], u * u * c.p0[1] + 2 * u * t * c.c[1] + t * t * c.p1[1]]; };
+const qd = (c, t) => { const u = 1 - t; return [2 * u * (c.c[0] - c.p0[0]) + 2 * t * (c.p1[0] - c.c[0]), 2 * u * (c.c[1] - c.p0[1]) + 2 * t * (c.p1[1] - c.c[1])]; };
+const sample = (c, ta, tb, steps = 14) => { const out = []; for (let i = 0; i <= steps; i++) out.push(q(c, ta + (tb - ta) * i / steps)); return out; };
+const rad = (d) => d * Math.PI / 180;
+
+const W0 = 1000, H0 = 820, GROUND = 600;
+const trunk = { p0: [500, GROUND + 8], c: [478, 500], p1: [506, 360], w0: 42, w1: 15 };
+const trunkT = (y) => { let lo = 0, hi = 1; for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (q(trunk, m)[1] > y) lo = m; else hi = m; } return (lo + hi) / 2; };
+const mains = {}, subs = [], decor = [];
+const p4 = byId.p4; { const t = trunkT(512); p4.trunkT = t; [p4.x, p4.y] = q(trunk, t); p4.r = 11; }
+
+Object.entries(DOM).forEach(([k, D]) => {
+  const tt = trunkT(D.y); const p0 = q(trunk, tt); const a = rad(D.ang);
+  const p1 = [p0[0] + Math.cos(a) * D.len, p0[1] + Math.sin(a) * D.len];
+  const bend = D.ang < -95 ? -0.32 : D.ang > -85 ? 0.32 : 0.05;
+  const c = [p0[0] + Math.cos(a + bend) * D.len * .55, p0[1] + Math.sin(a + bend) * D.len * .55];
+  const main = { p0, c, p1, w0: 15, w1: 5, dom: k, trunkT: tt };
+  mains[k] = main;
+  const G = D.groups.length;
+  D.groups.forEach(([gname, ids], gi) => {
+    const t = G === 1 ? .9 : .42 + .56 * gi / (G - 1);
+    const base = q(main, t); const d = qd(main, t); const ta = Math.atan2(d[1], d[0]);
+    const side = G === 1 || gi === G - 1 ? 0 : (gi % 2 === 0 ? -1 : 1);
+    const sa = ta + side * 0.62 + (D.ang < -90 ? -0.12 : 0.12) * (side === 0 ? 0 : 1);
+    const len = 62 + ids.length * 15;
+    const p1s = [base[0] + Math.cos(sa) * len, base[1] + Math.sin(sa) * len];
+    const cs = [base[0] + Math.cos(sa - side * 0.25) * len * .5, base[1] + Math.sin(sa - side * 0.25) * len * .5 - 8];
+    const sub = { p0: base, c: cs, p1: p1s, w0: 5.5, w1: 1.8, dom: k, main, mainT: t, name: gname };
+    subs.push(sub);
+    const m = ids.length;
+    ids.forEach((id, i) => {
+      const n = byId[id];
+      const ti = m === 1 ? .98 : .38 + .6 * (i + .5) / m;
+      const bp = q(sub, ti); const sd = qd(sub, ti); const st = Math.atan2(sd[1], sd[0]);
+      const last = i === m - 1;
+      const sgn = i % 2 === 0 ? -1 : 1;
+      const dist = 15 + n.r + (i % 3) * 5;
+      const ang = last ? st + sgn * 0.15 : st + sgn * 1.15;
+      n.x = bp[0] + Math.cos(ang) * dist; n.y = bp[1] + Math.sin(ang) * dist;
+      n.twig = bp; n.sub = sub; n.subT = ti; n.rot = Math.atan2(n.y - bp[1], n.x - bp[0]);
+    });
+    // декоративная крона вокруг ветки
+    const tip = p1s;
+    for (let j = 0; j < 26 + m * 10; j++) {
+      const tt2 = .3 + rnd() * .75; const bpt = q(sub, Math.min(1, tt2));
+      const r = 10 + rnd() * 38; const an = rnd() * Math.PI * 2;
+      decor.push({ x: bpt[0] + Math.cos(an) * r, y: bpt[1] + Math.sin(an) * r * .85 - 6, s: 2 + rnd() * 3.6, rot: rnd() * 6.28, a: .18 + rnd() * .32, ph: rnd() * 6.28, dom: k });
+    }
+    for (let j = 0; j < 8; j++) { const an = rnd() * Math.PI * 2, r = rnd() * 22; decor.push({ x: tip[0] + Math.cos(an) * r, y: tip[1] + Math.sin(an) * r, s: 2 + rnd() * 3, rot: rnd() * 6.28, a: .25 + rnd() * .3, ph: rnd() * 6.28, dom: k }); }
+  });
+});
+// лёгкое расталкивание цветков
+for (let it = 0; it < 60; it++) {
+  const L = nodes.filter(n => n.sub);
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+    const a = L[i], b = L[j]; const dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx, dy) || .1; const min = a.r + b.r + 9;
+    if (d < min) { const f = (min - d) / 2; a.x -= dx / d * f; a.y -= dy / d * f; b.x += dx / d * f; b.y += dy / d * f; }
+  }
+}
+nodes.forEach(n => { n.bx = n.x; n.by = n.y; n.ph = rnd() * 6.28; if (n.twig) n.rot = Math.atan2(n.y - n.twig[1], n.x - n.twig[0]); });
+
+// корни к источникам
+const roots = {};
+Object.entries(SOURCES).forEach(([k, S], i) => {
+  const off = (S.x - 500) * .06;
+  const p0 = [500 + off, GROUND + 4];
+  const c = [500 + (S.x - 500) * .45, GROUND + 40 + rnd() * 30];
+  roots[k] = { p0, c, p1: [S.x, S.y], w0: 12, w1: 2 };
+});
+// ещё тонкие корешки
+const rootlets = [];
+Object.values(roots).forEach(R => { for (let j = 0; j < 3; j++) { const t = .35 + rnd() * .5; const p = q(R, t); const a = rad(40 + rnd() * 100); const L = 26 + rnd() * 40; rootlets.push({ p0: p, c: [p[0] + Math.cos(a) * L * .5 + (rnd() - .5) * 20, p[1] + Math.sin(a) * L * .5], p1: [p[0] + Math.cos(a) * L, p[1] + Math.sin(a) * L], w0: 2.2, w1: .6 }); } });
+
+// звёзды
+const stars = []; for (let i = 0; i < 90; i++) stars.push({ x: rnd() * W0, y: rnd() * (GROUND - 40), r: rnd() * 1.2 + .3, ph: rnd() * 6.28 });
+
+// ---------- Путь «сока»: от заметки к стволу и дальше ----------
+function upPath(n) {
+  if (n === p4) return { pts: [[p4.x, p4.y]], trunkT: p4.trunkT };
+  const sub = n.sub, main = sub.main;
+  const pts = [[n.x, n.y], n.twig, ...sample(sub, n.subT, 0, 8).slice(1), ...sample(main, sub.mainT, 0, 12).slice(1)];
+  return { pts, trunkT: main.trunkT, main, sub };
+}
+function treePath(a, b) {
+  const A = upPath(a), B = upPath(b);
+  if (A.sub && A.sub === B.sub) { return [[a.x, a.y], a.twig, ...sample(A.sub, a.subT, b.subT, 6), b.twig, [b.x, b.y]]; }
+  if (A.main && A.main === B.main) {
+    const ua = [[a.x, a.y], a.twig, ...sample(A.sub, a.subT, 0, 6)];
+    const ub = [[b.x, b.y], b.twig, ...sample(B.sub, b.subT, 0, 6)].reverse();
+    return [...ua, ...sample(A.main, A.sub.mainT, B.sub.mainT, 8), ...ub];
+  }
+  return [...A.pts, ...sample(trunk, A.trunkT, B.trunkT, 8), ...B.pts.slice().reverse()];
+}
+function rootPath(n) { const R = roots[n.src]; const A = upPath(n); const tT = A.trunkT; return [...sample(R, 1, 0, 14), ...sample(trunk, 0, tT, 12), ...A.pts.slice().reverse()]; }
+function threadCurve(e) { const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2; const d = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y); return { p0: [e.a.x, e.a.y], c: [mx, my - d * .28 - 10], p1: [e.b.x, e.b.y] }; }
+
+// ---------- Холст ----------
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d"), stage = document.getElementById("stage");
+let view = { s: 1, x: 0, y: 0 }, fitView = { s: 1, x: 0, y: 0 }, dpr = 1, cw = 0, ch = 0, touched = false;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2); cw = stage.clientWidth; ch = stage.clientHeight;
+  cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+  const s = Math.min(cw / 740, ch / 745); fitView = { s, x: cw / 2 - 500 * s, y: ch / 2 - 458 * s };
+  if (!touched) view = { ...fitView };
+}
+const toWorld = (x, y) => [(x - view.x) / view.s, (y - view.y) / view.s];
+
+let selected = null, query = "", focusDom = null, hover = null, thinking = false;
+const flies = [], petals = [];
+const cache = {}; const C = (v) => cache[v] || (cache[v] = css(v));
+function rgba(hex, a) { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+function mix(h1, h2, k) { const p = (h) => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }; const a = p(h1), b = p(h2); return "#" + a.map((v, i) => Math.round(v + (b[i] - v) * k).toString(16).padStart(2, "0")).join(""); }
+
+const matches = (n) => !query || (n.title + " " + n.body.replace(/<[^>]+>/g, "") + " " + n.source).toLowerCase().includes(query.toLowerCase());
+const linksOf = (n) => edges.filter(e => e.a === n || e.b === n);
+function isDim(n) {
+  if (focusDom && n.dom !== focusDom && n !== p4) return true;
+  if (query && !matches(n)) return true;
+  if (selected && n !== selected && !linksOf(selected).some(e => e.a === n || e.b === n)) return true;
+  return false;
+}
+
+// ---------- Рисование формы листа ----------
+function leafShape(x, y, r, rot, shape) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.beginPath();
+  if (shape === "blossom") {
+    for (let k = 0; k < 5; k++) { const a = k * 1.2566; const px = Math.cos(a) * r * .52, py = Math.sin(a) * r * .52; ctx.moveTo(px + Math.cos(a) * r * .5, py + Math.sin(a) * r * .5); ctx.ellipse(px, py, r * .52, r * .36, a, 0, Math.PI * 2); }
+  } else if (shape === "maple") {
+    const P = 7; for (let k = 0; k <= P * 2; k++) { const a = -Math.PI / 2 + k * Math.PI / P; const rr = k % 2 === 0 ? r * (k === 0 || k === P * 2 ? 1.05 : (k === P ? .3 : 1)) : r * .45; const px = Math.cos(a + Math.PI / 2) * rr, py = Math.sin(a + Math.PI / 2) * rr; k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); }
+  } else if (shape === "fan") {
+    ctx.moveTo(-r * .15, 0); ctx.arc(-r * .15, 0, r * 1.15, -1.0, -0.08); ctx.lineTo(-r * .15 + r * .62, 0); ctx.arc(-r * .15, 0, r * 1.15, 0.08, 1.0); ctx.closePath();
+  } else {
+    ctx.moveTo(-r * 1.1, 0); ctx.quadraticCurveTo(0, -r * .7, r * 1.1, 0); ctx.quadraticCurveTo(0, r * .7, -r * 1.1, 0);
+  }
+  ctx.restore();
+}
+function taper(c, steps = 16) {
+  for (let i = 0; i < steps; i++) {
+    const t0 = i / steps, t1 = (i + 1) / steps; const a = q(c, t0), b = q(c, t1);
+    ctx.lineWidth = c.w0 + (c.w1 - c.w0) * (t0 + t1) / 2;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+}
+function polyLen(p) { let L = [0]; for (let i = 1; i < p.length; i++) L.push(L[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1])); return L; }
+function polyAt(p, L, d) { let i = 1; while (i < L.length - 1 && L[i] < d) i++; const k = (d - L[i - 1]) / ((L[i] - L[i - 1]) || 1); return [p[i - 1][0] + (p[i][0] - p[i - 1][0]) * k, p[i - 1][1] + (p[i][1] - p[i - 1][1]) * k]; }
+
+// ---------- Кадр ----------
+function draw(time) {
+  const t = time / 1000;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, ch); sky.addColorStop(0, SP.sky1); sky.addColorStop(1, SP.sky2);
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, cw, ch);
+  ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.x, dpr * view.y);
+
+  // звёзды и луна
+  stars.forEach(s => { ctx.fillStyle = rgba("#ffffff", .25 + .25 * Math.sin(t * .8 + s.ph) * (REDUCED ? 0 : 1)); ctx.fillRect(s.x, s.y, s.r, s.r); });
+  if (SP.moon) {
+    const mg = ctx.createRadialGradient(700, 205, 20, 700, 205, 210); mg.addColorStop(0, rgba("#f6eedd", .16)); mg.addColorStop(.55, rgba("#f6eedd", .05)); mg.addColorStop(1, rgba("#f6eedd", 0));
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(700, 205, 210, 0, 6.29); ctx.fill();
+    ctx.fillStyle = rgba("#f6eedd", .1); ctx.beginPath(); ctx.arc(700, 205, 118, 0, 6.29); ctx.fill();
+  } else {
+    const ag = ctx.createRadialGradient(500, 220, 30, 500, 240, 380); ag.addColorStop(0, rgba(SP.glow, .1)); ag.addColorStop(1, rgba(SP.glow, 0)); ctx.fillStyle = ag; ctx.fillRect(80, -100, 840, 640);
+  }
+
+  // земля
+  const gr = ctx.createLinearGradient(0, GROUND - 30, 0, H0 + 60); gr.addColorStop(0, rgba("#000000", 0)); gr.addColorStop(.18, rgba("#05040a", .75)); gr.addColorStop(1, rgba("#020205", .95));
+  ctx.fillStyle = gr; ctx.fillRect(-400, GROUND - 30, W0 + 800, H0);
+  ctx.strokeStyle = rgba(SP.leaf, .12); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(40, GROUND); ctx.quadraticCurveTo(500, GROUND - 14, 960, GROUND); ctx.stroke();
+
+  // корни
+  ctx.lineCap = "round"; ctx.strokeStyle = SP.root;
+  rootlets.forEach(c => taper(c, 6));
+  Object.entries(roots).forEach(([k, R]) => {
+    const hl = selected && selected.src === k;
+    ctx.strokeStyle = hl ? SP.rootGlow : SP.root; if (hl) { ctx.shadowColor = SP.rootGlow; ctx.shadowBlur = 12; }
+    taper(R); ctx.shadowBlur = 0;
+  });
+  // миры-источники
+  Object.entries(SOURCES).forEach(([k, S]) => {
+    const hl = selected && selected.src === k;
+    const g = ctx.createRadialGradient(S.x, S.y, 1, S.x, S.y, 22); g.addColorStop(0, rgba(SP.rootGlow, hl ? .9 : .5)); g.addColorStop(1, rgba(SP.rootGlow, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(S.x, S.y, 22, 0, 6.29); ctx.fill();
+    ctx.fillStyle = rgba("#ffffff", hl ? .95 : .7); ctx.beginPath(); ctx.arc(S.x, S.y, 3, 0, 6.29); ctx.fill();
+    ctx.font = `500 ${11 / view.s}px ${C("--f-mono")}`; ctx.textAlign = "center"; ctx.fillStyle = rgba(SP.rootGlow, hl ? 1 : .75);
+    ctx.fillText(S.name, S.x, S.y + 22 + 6 / view.s);
+  });
+
+  // ствол и ветви
+  const barkGrad = ctx.createLinearGradient(470, 0, 540, 0); barkGrad.addColorStop(0, SP.bark); barkGrad.addColorStop(.5, SP.barkHi); barkGrad.addColorStop(1, SP.bark);
+  ctx.strokeStyle = barkGrad; taper(trunk, 22);
+  Object.values(mains).forEach(m => { const dim = focusDom && focusDom !== m.dom; ctx.strokeStyle = dim ? rgba(SP.bark, .5) : SP.bark; taper(m, 18); ctx.strokeStyle = rgba(SP.barkHi, dim ? .1 : .45); ctx.lineWidth = 1.2; ctx.beginPath(); const s = sample(m, .05, .9, 10); ctx.moveTo(s[0][0] - 1.5, s[0][1] - 1.5); s.forEach(p => ctx.lineTo(p[0] - 1.5, p[1] - 1.5)); ctx.stroke(); });
+  subs.forEach(s => { const dim = focusDom && focusDom !== s.dom; ctx.strokeStyle = dim ? rgba(SP.bark, .5) : SP.bark; taper(s, 10); });
+  // веточки к заметкам
+  nodes.forEach(n => { if (!n.twig) return; const dim = isDim(n); ctx.strokeStyle = rgba(SP.barkHi, dim ? .15 : .55); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(n.twig[0], n.twig[1]); ctx.quadraticCurveTo((n.twig[0] + n.x) / 2, (n.twig[1] + n.y) / 2 - 3, n.x, n.y); ctx.stroke(); });
+
+  // подсветка пути «сока» выбранной заметки
+  if (selected) {
+    const path = [...sample(roots[selected.src], 1, 0, 14), ...sample(trunk, 0, upPath(selected).trunkT, 12), ...upPath(selected).pts.slice().reverse()];
+    ctx.strokeStyle = rgba(SP.glow, .55); ctx.lineWidth = 2.2; ctx.shadowColor = SP.glow; ctx.shadowBlur = 10; ctx.setLineDash([2, 5]);
+    ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0;
+  }
+
+  // декоративная крона
+  decor.forEach(d => {
+    const dim = focusDom && focusDom !== d.dom;
+    const sw = REDUCED ? 0 : Math.sin(t * .9 + d.ph) * .9;
+    ctx.fillStyle = rgba(mix(SP.leaf2, SP.leaf, .4), dim ? d.a * .25 : d.a);
+    leafShape(d.x + sw, d.y, d.s, d.rot + sw * .05, SP.shape); ctx.fill();
+  });
+  const crownGlow = ctx.createRadialGradient(500, 300, 40, 500, 300, 360); crownGlow.addColorStop(0, rgba(SP.glow, .06)); crownGlow.addColorStop(1, rgba(SP.glow, 0)); ctx.fillStyle = crownGlow; ctx.fillRect(100, -60, 800, 700);
+
+  // нити-связи
+  threads.forEach(e => {
+    const T = ETYPES[e.t]; const col = C(T.c);
+    const hot = selected && (e.a === selected || e.b === selected);
+    const dim = isDim(e.a) || isDim(e.b);
+    const alpha = hot ? .85 : e.pulse > 0 ? .3 + e.pulse * .6 : dim ? .03 : .1;
+    if (alpha < .02) return;
+    const tc = threadCurve(e); const s = Math.min(1, e.s + e.gain);
+    ctx.setLineDash(T.dash || []); ctx.strokeStyle = rgba(col, alpha); ctx.lineWidth = .5 + s * 2.2;
+    if (e.pulse > 0) { ctx.shadowColor = C("--spark"); ctx.shadowBlur = 10 * e.pulse; }
+    ctx.beginPath(); ctx.moveTo(tc.p0[0], tc.p0[1]); ctx.quadraticCurveTo(tc.c[0], tc.c[1], tc.p1[0], tc.p1[1]); ctx.stroke(); ctx.shadowBlur = 0;
+    e.pulse = Math.max(0, e.pulse - .01);
+  });
+  ctx.setLineDash([]);
+
+  // падающие лепестки (с давно не нужных заметок)
+  if (!REDUCED && Math.random() < .05) {
+    const old = nodes.filter(n => n.days > 21 && n.sub); const src = old.length && Math.random() < .55 ? old[(Math.random() * old.length) | 0] : decor[(Math.random() * decor.length) | 0];
+    petals.push({ x: src.x, y: src.y, vy: .35 + Math.random() * .35, ph: Math.random() * 6.28, s: 2.4 + Math.random() * 2, rot: Math.random() * 6.28, life: 1, old: !!src.title });
+  }
+  for (let i = petals.length - 1; i >= 0; i--) {
+    const p = petals[i]; p.y += p.vy; p.x += Math.sin(t * 1.4 + p.ph) * .5 - .15; p.rot += .02;
+    if (p.y > GROUND + 4) p.life -= .03;
+    if (p.life <= 0) { petals.splice(i, 1); continue; }
+    ctx.fillStyle = rgba(p.old ? mix(SP.leaf2, "#8a7f75", .5) : SP.leaf, .55 * p.life); leafShape(p.x, p.y, p.s, p.rot, SP.shape); ctx.fill();
+  }
+
+  // заметки
+  nodes.forEach(n => {
+    const dim = isDim(n);
+    const fresh = Math.max(0, 1 - n.days / 30), faded = n.days > 21;
+    const sw = REDUCED || !n.sub ? 0 : Math.sin(t * .9 + n.ph) * 1.2;
+    n.x = n.bx + sw; n.y = n.by;
+    if (n === p4) {
+      ctx.shadowColor = SP.glow; ctx.shadowBlur = 16 + n.act * 20;
+      ctx.fillStyle = rgba(SP.glow, .25 + n.act * .5); ctx.beginPath(); ctx.ellipse(n.x, n.y, 15, 11, 0, 0, 6.29); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = rgba(SP.leaf, .8); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.ellipse(n.x, n.y, 15, 11, 0, 0, 6.29); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(n.x, n.y, 8, 5.5, 0, 0, 6.29); ctx.stroke();
+      if (n === selected) { ctx.setLineDash([3, 3]); ctx.strokeStyle = C("--ink"); ctx.beginPath(); ctx.ellipse(n.x, n.y, 21, 16, 0, 0, 6.29); ctx.stroke(); ctx.setLineDash([]); }
+      n.act = Math.max(0, n.act - .008);
+      return;
+    }
+    let fill = n.stale ? C("--rust") : faded ? mix(SP.leaf2, "#8a8178", .55) : mix(SP.leaf2, SP.leaf, fresh);
+    if (n.act > .05) fill = mix(fill, C("--spark"), n.act);
+    const alpha = dim ? .16 : faded ? .55 : 1;
+    ctx.shadowColor = n.act > .05 ? C("--spark") : SP.glow; ctx.shadowBlur = dim ? 0 : 3 + fresh * 16 + n.act * 26;
+    ctx.fillStyle = rgba(fill, alpha); leafShape(n.x, n.y, n.r + n.act * 3, n.rot, SP.shape); ctx.fill(); ctx.shadowBlur = 0;
+    // сердцевина — цвет ветви
+    ctx.fillStyle = rgba(C(DOM[n.dom].c), dim ? .2 : .95); ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(1.6, n.r * .2), 0, 6.29); ctx.fill();
+    if (n.stale && !dim) { const fl = REDUCED ? .8 : .45 + .45 * Math.abs(Math.sin(t * 3 + n.ph)); ctx.strokeStyle = rgba(C("--stale"), fl); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 5, 0, 6.29); ctx.stroke(); }
+    if (n.ext && !dim) { ctx.strokeStyle = rgba(C("--e-dec"), .85); ctx.lineWidth = 1.2; ctx.setLineDash([1.5, 3]); ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 5, 0, 6.29); ctx.stroke(); ctx.setLineDash([]); }
+    if (n === selected) { ctx.strokeStyle = C("--ink"); ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 9, 0, 6.29); ctx.stroke(); ctx.setLineDash([]); }
+    n.act = Math.max(0, n.act - .008);
+  });
+
+  // светлячки (мысль агента)
+  for (let i = flies.length - 1; i >= 0; i--) {
+    const f = flies[i]; f.d += f.v;
+    const d = Math.min(f.d, f.L[f.L.length - 1]);
+    const [x, y] = polyAt(f.p, f.L, d);
+    f.trail.push([x, y]); if (f.trail.length > 14) f.trail.shift();
+    ctx.strokeStyle = rgba(C("--spark"), .35); ctx.lineWidth = 2; ctx.beginPath(); f.trail.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+    ctx.shadowColor = C("--spark"); ctx.shadowBlur = 18; ctx.fillStyle = C("--spark"); ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 6.29); ctx.fill(); ctx.shadowBlur = 0;
+    if (f.d >= f.L[f.L.length - 1]) { flies.splice(i, 1); f.onEnd && f.onEnd(); }
+  }
+
+  // подписи ветвей
+  ctx.textAlign = "center";
+  Object.entries(mains).forEach(([k, m]) => {
+    const dim = focusDom && focusDom !== k; const D = DOM[k];
+    const lp = [m.p1[0], m.p1[1] - 6]; ctx.font = `600 ${10.5 / view.s}px ${C("--f-mono")}`; ctx.fillStyle = rgba(C(D.c), dim ? .2 : .85);
+    ctx.fillText(D.name.toUpperCase(), lp[0], lp[1]);
+  });
+  // подписи заметок
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  const fs = 11.5 / view.s; ctx.font = `500 ${fs}px ${C("--f-body")}`;
+  nodes.forEach(n => {
+    const dim = isDim(n);
+    const show = n === selected || n === hover || n.act > .1 || n === p4 || (!dim && (view.s > 1.4 || (selected && !dim) || (query && matches(n))));
+    if (!show) return;
+    const tx = n.x + n.r + 6 / view.s + (n === p4 ? 8 : 0), ty = n.y; const w = ctx.measureText(n.title).width;
+    ctx.fillStyle = rgba("#06050c", .72); ctx.fillRect(tx - 3 / view.s, ty - fs * .75, w + 6 / view.s, fs * 1.5);
+    ctx.fillStyle = dim ? C("--faint") : n.days > 21 ? C("--muted") : C("--ink"); ctx.fillText(n.title, tx, ty);
+  });
+  ctx.textBaseline = "alphabetic";
+
+  requestAnimationFrame(draw);
+}
+
+// ---------- Ввод ----------
+const pts = new Map(); let moved = false, pinch0 = null, start = null;
+function zoomAt(f, sx, sy) { const [wx, wy] = toWorld(sx, sy); view.s = Math.min(4, Math.max(.4, view.s * f)); view.x = sx - wx * view.s; view.y = sy - wy * view.s; touched = true; }
+function pick(sx, sy) { const [wx, wy] = toWorld(sx, sy); let best = null, bd = 1e9; nodes.forEach(n => { const d = Math.hypot(n.x - wx, n.y - wy); const lim = (n === p4 ? 16 : n.r) + 10 / view.s; if (d < lim && d < bd) { bd = d; best = n; } }); return best; }
+cv.addEventListener("pointerdown", (ev) => { cv.setPointerCapture(ev.pointerId); pts.set(ev.pointerId, [ev.offsetX, ev.offsetY]); moved = false; start = [ev.offsetX, ev.offsetY]; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: view.s }; } });
+cv.addEventListener("pointermove", (ev) => {
+  if (!pts.has(ev.pointerId)) { hover = pick(ev.offsetX, ev.offsetY); cv.style.cursor = hover ? "pointer" : "grab"; return; }
+  const prev = pts.get(ev.pointerId); pts.set(ev.pointerId, [ev.offsetX, ev.offsetY]);
+  if (pts.size === 2 && pinch0) { const [a, b] = [...pts.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); zoomAt((pinch0.s * d / pinch0.d) / view.s, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); moved = true; return; }
+  if (Math.hypot(ev.offsetX - start[0], ev.offsetY - start[1]) > 4) { moved = true; cv.classList.add("dragging"); }
+  if (moved) { view.x += ev.offsetX - prev[0]; view.y += ev.offsetY - prev[1]; touched = true; }
+});
+cv.addEventListener("pointerup", (ev) => { pts.delete(ev.pointerId); cv.classList.remove("dragging"); if (pts.size < 2) pinch0 = null; if (!moved && pts.size === 0) select(pick(ev.offsetX, ev.offsetY)); });
+cv.addEventListener("pointercancel", (ev) => { pts.delete(ev.pointerId); pinch0 = null; });
+cv.addEventListener("wheel", (ev) => { ev.preventDefault(); zoomAt(Math.exp(-ev.deltaY * .0015), ev.offsetX, ev.offsetY); }, { passive: false });
+document.getElementById("zin").onclick = () => zoomAt(1.3, cw / 2, ch / 2);
+document.getElementById("zout").onclick = () => zoomAt(1 / 1.3, cw / 2, ch / 2);
+document.getElementById("zfit").onclick = () => { focusDom = null; renderChips(); glide(fitView); };
+function glide(target) { const from = { ...view }, t0 = performance.now(), dur = REDUCED ? 1 : 450; touched = true;
+  (function step(now) { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); view = { s: from.s + (target.s - from.s) * e, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e }; if (k < 1) requestAnimationFrame(step); })(t0); }
+const focusOn = (x, y, s) => glide({ s, x: cw / 2 - x * s, y: ch / 2 - y * s });
+
+// ---------- Панель ----------
+const panel = document.getElementById("panel");
+const esc = (s) => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function ago(d) { if (d === 0) return "сегодня"; if (d === 1) return "вчера"; const w = d % 10 === 1 && d % 100 !== 11 ? "день" : [2, 3, 4].includes(d % 10) && ![12, 13, 14].includes(d % 100) ? "дня" : "дней"; return `${d} ${w} назад`; }
+function legendLeaf(fill, ring, dash) { return `<svg width="22" height="16" viewBox="-11 -8 22 16"><circle r="5" fill="${fill}"/>${ring ? `<circle r="7" fill="none" stroke="${ring}" stroke-width="1.3" ${dash ? 'stroke-dasharray="1.5 3"' : ""}/>` : ""}</svg>`; }
+
+function overview() {
+  selected = null;
+  panel.innerHTML = `
+    <div class="section">
+      <p class="eyebrow">Макет · пример данных проекта Shop</p>
+      <h2>${SP.kanji} ${SP.name}</h2>
+      <p class="muted">${SP.about}</p>
+    </div>
+    <div class="section">
+      <p class="eyebrow">Мысль агента</p>
+      <button class="btn primary" data-think="incident"><span>Почему на checkout снова 502?</span><span class="k">Дежурный</span></button>
+      <button class="btn primary" data-think="deploy"><span>Можно выкатить фикс оплаты в пятницу?</span><span class="k">Ревьюер</span></button>
+    </div>
+    <div class="divider"></div>
+    <div class="section">
+      <p class="eyebrow">Как устроено древо</p>
+      <div class="map">
+        <b>ствол</b><span>проект Shop — всё растёт из него</span>
+        <b>ветви</b><span>области: решения, инфраструктура, код, люди и агенты, операции; веточки — группы внутри</span>
+        <b>${SP.shape === "blossom" ? "цветы" : "листья"}</b><span>заметки (${nodes.length - 1}); сердцевина — цвет ветви</span>
+        <b>корни</b><span>источники: документы, чаты, репозитории, сервер. Касание заметки подсвечивает её корень</span>
+        <b>нити</b><span>связи между заметками из разных веток (${threads.length})</span>
+        <b>светлячок</b><span>мысль агента: откуда он поднимается и по каким заметкам идёт</span>
+      </div>
+    </div>
+    <div class="section">
+      <p class="eyebrow">Состояние заметки</p>
+      <div class="legend">
+        <span>${legendLeaf(SP.leaf)}свежая — ярче и светится</span>
+        <span>${legendLeaf(mix(SP.leaf2, "#8a8178", .55))}давно не нужна — блёклая, роняет лепестки</span>
+        <span>${legendLeaf(C("--rust"), C("--stale"))}устарела — источник изменился</span>
+        <span>${legendLeaf(SP.leaf2, C("--e-dec"), true)}из внешнего источника</span>
+        ${Object.entries(ETYPES).filter(([k]) => k !== "part").map(([, T]) => `<span><svg width="22" height="12"><line x1="1" y1="6" x2="21" y2="6" stroke="${C(T.c)}" stroke-width="2" ${T.dash ? `stroke-dasharray="${T.dash.join(" ")}"` : ""}/></svg>${T.name}</span>`).join("")}
+        <span><svg width="22" height="12"><line x1="1" y1="3" x2="21" y2="3" stroke="${C("--e-ref")}" stroke-width=".7"/><line x1="1" y1="9" x2="21" y2="9" stroke="${C("--e-ref")}" stroke-width="2.6"/></svg>толщина нити — сила связи</span>
+      </div>
+    </div>`;
+  panel.querySelectorAll("[data-think]").forEach(b => b.onclick = () => think(b.dataset.think));
+}
+
+function showNote(n) {
+  const D = DOM[n.dom];
+  const ls = linksOf(n).sort((a, b) => (b.s + b.gain) - (a.s + a.gain));
+  panel.innerHTML = `
+    <button class="btn back" id="back">← обзор</button>
+    <div class="section">
+      <div class="pills">
+        ${D ? `<span class="pill dom" style="--c:${C(D.c)}">${D.name}${n.sub ? " · " + n.sub.name : ""}</span>` : `<span class="pill dom" style="--c:${SP.accent}">ствол</span>`}
+        ${n.stale ? `<span class="pill stale">устарела — источник изменился</span>` : n.days <= 3 ? `<span class="pill fresh">свежая</span>` : n.days > 21 ? `<span class="pill">давно не нужна</span>` : ""}
+        ${n.ext ? `<span class="pill ext">из внешнего источника</span>` : ""}
+      </div>
+      <h2>${esc(n.title)}</h2>
+      <div class="body">${n.body}</div>
+      <dl class="meta">
+        <dt>корень</dt><dd>${SOURCES[n.src].name}</dd>
+        <dt>источник</dt><dd>${esc(n.source)}</dd>
+        <dt>использовали</dt><dd>${ago(n.days)}</dd>
+      </dl>
+      ${n.stale ? `<p class="muted">Агент перечитает источник при следующем обращении и предложит обновить заметку.</p>` : ""}
+      ${n.ext ? `<p class="muted">Текст пришёл из вывода команды. Модели он передаётся как данные, а не как инструкции.</p>` : ""}
+    </div>
+    <div class="section">
+      <p class="eyebrow">Связи · сильные первыми</p>
+      <div class="links">${ls.map(e => { const o = e.a === n ? e.b : e.a, T = ETYPES[e.t]; const dir = e.a === n ? T.name : "← " + T.name; return `<button class="link" data-go="${o.id}" style="--t:${C(T.c)};--s:${Math.round(Math.min(1, e.s + e.gain) * 100)}%"><span class="ty">${dir}</span><span class="nm">${esc(o.title)}</span><span class="st" title="сила связи"></span></button>`; }).join("")}</div>
+    </div>`;
+  document.getElementById("back").onclick = overview;
+  panel.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const o = byId[b.dataset.go]; select(o); focusOn(o.bx, o.by, Math.max(view.s, 1.6)); });
+  panel.scrollTop = 0;
+}
+function select(n) { if (thinking) return; selected = n; if (n) { n.act = .6; showNote(n); } else overview(); }
+
+// ---------- Мысль агента ----------
+const SCEN = {
+  incident: { agent: "Агент «Дежурный»", q: "Почему на checkout снова 502?",
+    steps: [["p5", "Запуск: ищу заметки по словам «checkout», «502»"], ["o2", "Похожий инцидент 12.09: шлюз оплаты отвечал 40 с, nginx рвал через 30 с"], ["i9", "Заметка о nginx устарела — конфиг изменился. Перечитываю файл на prod-1", "warn"], ["i8", "prod-1: доступ есть, чтение без подтверждения"], ["o3", "Логи: 37 ошибок <code>payment_error: timeout</code> за час"], ["c3", "Модуль оплаты: 3 ретрая по 10 с — в сумме дольше таймаута nginx"], ["o1", "Runbook: перезапуск не поможет, нужен фикс таймаутов"]],
+    answer: "Причина та же, что 12.09: ретраи в <code>payments/checkout.py</code> (3 × 10 с) дольше таймаута nginx (30 с — в конфиге его вернули). Предлагаю уменьшить ретраи до 2 × 8 с и поднять <code>proxy_read_timeout</code> до 45 с. Обновить заметку «nginx на prod-1»?", tokens: [2100, 41000] },
+  deploy: { agent: "Агент «Ревьюер»", q: "Можно выкатить фикс оплаты в пятницу?",
+    steps: [["p6", "Запуск: ищу решения о деплое для проекта Shop"], ["p4", "Проект Shop: API, фронтенд, prod-1"], ["d4", "Решение: деплой только по вторникам до 16:00"], ["o2", "Противоречие: 12.09 фикс уже выкатывали в пятницу как исключение", "warn"], ["c5", "CI: деплой вручную, тесты e2e ~3 мин"], ["c7", "Тесты e2e покрывают оформление заказа"]],
+    answer: "По правилу — нет: деплой только по вторникам. Но 12.09 было исключение для срочного фикса оплаты, и это тот же случай. Если Анна (владелец) подтвердит, выкатывайте после зелёных e2e. Записать правило «срочные фиксы оплаты — исключение» как решение?", tokens: [1500, 26000] },
+};
+const threadBetween = (a, b) => threads.find(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+function think(key) {
+  if (thinking) return;
+  const S = SCEN[key]; thinking = true; selected = null; focusDom = null; query = ""; qi.value = ""; renderChips(); glide(fitView);
+  panel.innerHTML = `<div class="section"><p class="eyebrow">${S.agent} · мысль</p><h2>${S.q}</h2></div><ol class="log" id="log"></ol><div id="ans"></div>`;
+  const log = document.getElementById("log"); let i = 0, prev = null; const used = [];
+  const speed = REDUCED ? 1e6 : 7.5;
+  const next = () => {
+    if (i >= S.steps.length) return finish();
+    const [id, text, kind] = S.steps[i++]; const n = byId[id];
+    const fire = () => {
+      n.act = 1; used.push(n);
+      const li = document.createElement("li"); if (kind) li.className = kind; li.style.setProperty("--c", n.dom === "trunk" ? SP.accent : C(DOM[n.dom].c));
+      li.innerHTML = `<span><b>${esc(n.title)}</b><br><span class="muted">${text}</span></span>`; log.appendChild(li); panel.scrollTop = panel.scrollHeight;
+      setTimeout(next, REDUCED ? 200 : 650);
+    };
+    let path;
+    if (!prev) path = rootPath(n);
+    else { const th = threadBetween(prev, n); if (th) { th.pulse = 1; const tc = threadCurve(th); path = sample(tc, th.a === prev ? 0 : 1, th.a === prev ? 1 : 0, 24); } else path = treePath(prev, n); }
+    prev = n;
+    flies.push({ p: path, L: polyLen(path), d: 0, v: speed, trail: [], onEnd: fire });
+  };
+  const finish = () => {
+    let grown = 0;
+    for (let a = 0; a < used.length; a++) for (let b = a + 1; b < used.length; b++) { const e = edges.find(x => (x.a === used[a] && x.b === used[b]) || (x.a === used[b] && x.b === used[a])); if (e) { e.gain = Math.min(.4, e.gain + .12); e.pulse = .8; grown++; } }
+    used.forEach(n => n.days = 0);
+    const [tok, raw] = S.tokens;
+    document.getElementById("ans").innerHTML = `<div class="answer"><p class="eyebrow">Ответ</p><p>${S.answer}</p>
+      <span class="saving">прочитано заметок: ${used.length} · ≈ ${tok.toLocaleString("ru-RU")} токенов вместо ≈ ${raw.toLocaleString("ru-RU")} по исходникам (оценка макета)</span>
+      <span class="saving">усилено связей: ${grown} · использованные заметки снова свежие</span></div>
+      <button class="btn back" id="done" style="margin-top:12px">← обзор</button>`;
+    panel.scrollTop = panel.scrollHeight; document.getElementById("done").onclick = overview; thinking = false;
+  };
+  setTimeout(next, 350);
+}
+
+// ---------- Поиск, ветви, виды ----------
+const qi = document.getElementById("q");
+qi.addEventListener("input", () => { query = qi.value.trim(); });
+qi.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { const n = nodes.find(matches); if (n) { select(n); focusOn(n.bx, n.by, Math.max(view.s, 1.6)); } } if (ev.key === "Escape") { qi.value = ""; query = ""; } });
+const chips = document.getElementById("chips");
+function renderChips() {
+  chips.innerHTML = Object.entries(DOM).map(([k, D]) => `<button class="chip" data-d="${k}" aria-pressed="${focusDom === k}" style="--c:${C(D.c)}"><i></i><b>${D.name}</b><small>${nodes.filter(n => n.dom === k).length}</small></button>`).join("");
+  chips.querySelectorAll(".chip").forEach(b => b.onclick = () => {
+    const k = b.dataset.d;
+    if (focusDom === k) { focusDom = null; glide(fitView); }
+    else { focusDom = k; const L = nodes.filter(n => n.dom === k); const xs = L.map(n => n.bx), ys = L.map(n => n.by); const x0 = Math.min(...xs) - 40, x1 = Math.max(...xs) + 40, y0 = Math.min(...ys) - 50, y1 = Math.max(...ys) + 40; const s = Math.min(cw / (x1 - x0), ch / (y1 - y0), 2.6); focusOn((x0 + x1) / 2, (y0 + y1) / 2, s); }
+    renderChips();
+  });
+}
+const spBox = document.getElementById("species");
+function renderSpecies() {
+  spBox.innerHTML = Object.entries(SPECIES).map(([k, S]) => `<button data-sp="${k}" aria-pressed="${k === spKey}"><span>${S.kanji}</span>${S.name}</button>`).join("");
+  spBox.querySelectorAll("button").forEach(b => b.onclick = () => { spKey = b.dataset.sp; SP = SPECIES[spKey]; try { localStorage.setItem("fd-tree-species", spKey); } catch (e) {} applySpecies(); });
+}
+function applySpecies() { root.style.setProperty("--accent", SP.accent); document.getElementById("spname").textContent = "· " + SP.name; renderSpecies(); petals.length = 0; if (!thinking) { selected ? showNote(selected) : overview(); } }
+
+window.addEventListener("resize", resize);
+resize(); renderChips(); applySpecies(); requestAnimationFrame(draw);
+})();
+</script>

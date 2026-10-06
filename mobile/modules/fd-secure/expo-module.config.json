@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["FdSecureModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.fdsecure.FdSecureModule"]
+  }
+}

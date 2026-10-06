@@ -1,0 +1,73 @@
+# Единственный выход пространств в интернет: только к провайдерам ИИ и git-хостингам.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deck-egress
+  labels: { pod-security.kubernetes.io/enforce: restricted }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: tinyproxy, namespace: deck-egress }
+data:
+  tinyproxy.conf: |
+    Port 3128
+    Listen 0.0.0.0
+    Timeout 900
+    MaxClients 200
+    LogLevel Notice
+    DisableViaHeader Yes
+    # только HTTPS-туннели и только к разрешённым доменам
+    ConnectPort 443
+    FilterDefaultDeny Yes
+    Filter "/etc/tinyproxy/allow.txt"
+    FilterExtended Yes
+    FilterURLs No
+  allow.txt: |
+    ^api\.anthropic\.com$
+    ^api\.sakana\.ai$
+    ^api\.openai\.com$
+    ^api\.x\.ai$
+    ^api\.github\.com$
+    ^github\.com$
+    ^gitlab\.com$
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: egress-proxy, namespace: deck-egress, labels: { app.kubernetes.io/name: egress-proxy } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: egress-proxy } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: egress-proxy } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: tinyproxy
+          image: docker.io/vimagick/tinyproxy:latest   # закрепите digest в проде
+          args: ["-d", "-c", "/etc/tinyproxy/tinyproxy.conf"]
+          ports: [{ name: proxy, containerPort: 3128 }]
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 128Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: conf, mountPath: /etc/tinyproxy }]
+      volumes: [{ name: conf, configMap: { name: tinyproxy } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: egress-proxy, namespace: deck-egress }
+spec:
+  selector: { app.kubernetes.io/name: egress-proxy }
+  ports: [{ name: proxy, port: 3128, targetPort: proxy }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: egress-proxy, namespace: deck-egress }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { app.kubernetes.io/part-of: fugu-deck } }
+      ports: [{ port: 3128, protocol: TCP }]

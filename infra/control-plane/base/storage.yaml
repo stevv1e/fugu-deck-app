@@ -1,0 +1,7 @@
+# Ключи подписи и база учётных записей control-plane (без ключей API и данных пользователей)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: control-plane-data }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }

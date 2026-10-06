@@ -1,0 +1,70 @@
+name: ci-cd
+
+# Тесты → образы в GHCR → GitOps: CI меняет тег образа в infra/…/kustomization.yaml,
+# Argo CD видит коммит и выкатывает новую версию в кластер.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["infra/**", "**.md"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r backend/requirements-dev.txt -r control-plane/requirements.txt pytest-asyncio
+      - run: cd backend && DATA_DIR=/tmp/fd pytest -q
+      - run: cd control-plane && CP_DATA_DIR=/tmp/cp pytest -q
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: cd frontend && npm ci && npm run build
+
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      matrix:
+        include:
+          - { image: fugu-deck-space, context: backend, file: backend/Dockerfile }
+          - { image: fugu-deck-cp, context: ., file: control-plane/Dockerfile }
+          - { image: fugu-deck-web, context: frontend, file: frontend/Dockerfile }   # одиночный режим
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  gitops:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump image tags in the cluster repo
+        run: |
+          f=infra/control-plane/overlays/prod/kustomization.yaml
+          sed -i "s|newTag: .*|newTag: ${GITHUB_SHA}|" $f
+          sed -i "s|CP_SPACE_IMAGE=.*|CP_SPACE_IMAGE=${REGISTRY,,}/fugu-deck-space:${GITHUB_SHA}|" $f
+          git config user.name "deck-bot"
+          git config user.email "deck-bot@users.noreply.github.com"
+          git commit -am "deploy: ${GITHUB_SHA::7}" && git push || echo "nothing to deploy"

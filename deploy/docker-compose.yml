@@ -1,0 +1,51 @@
+# Fugu Deck: API-агент + веб-приложение за Caddy (HTTPS).
+# Образы собирает CI и кладёт в registry; сервер только делает pull.
+# Локальная сборка без registry:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+name: fugu-deck
+
+services:
+  api:
+    image: ${REGISTRY:-local}/fugu-deck-space:${IMAGE_TAG:-latest}
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - api-data:/data
+      # Скилы из отдельного git-репозитория (GitOps). Раскомментируйте и задайте SKILLS_DIR=/skills.
+      # С :ro скилы в приложении только просматриваются, а меняются через git.
+      # - ./skills:/skills:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        limits: { memory: 512m }
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    image: ${REGISTRY:-local}/fugu-deck-web:${IMAGE_TAG:-latest}
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+volumes:
+  api-data:
+  caddy-data:
+  caddy-config:

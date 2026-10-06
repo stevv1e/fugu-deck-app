@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.fdsecure'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.fdsecure"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation "androidx.biometric:biometric:1.2.0-alpha04"
+  implementation "androidx.fragment:fragment-ktx:1.8.5"
+  // OkHttp уже есть в React Native; объявляем явно — модуль им пользуется для mTLS
+  implementation "com.squareup.okhttp3:okhttp:4.12.0"
+}

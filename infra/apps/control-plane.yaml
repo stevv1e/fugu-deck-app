@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: deck-control-plane
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_LOGIN/fugu-deck.git
+    targetRevision: main
+    path: infra/control-plane/overlays/prod
+  destination: { server: https://kubernetes.default.svc, namespace: deck-system }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]

@@ -1,0 +1,83 @@
+# Тот же конвейер для GitLab: тесты → образы в GitLab Container Registry → деплой по SSH.
+stages: [test, build, deploy]
+# Кластер (GitOps): job «gitops» меняет тег образов в infra/ и пушит — Argo CD выкатывает сам.
+# Одиночный сервер: job «deploy» (ручной) — как раньше, по SSH.
+
+variables:
+  REGISTRY: $CI_REGISTRY_IMAGE
+
+test:api:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install -r backend/requirements-dev.txt
+    - cd backend && DATA_DIR=/tmp/fd pytest -q
+
+test:cp:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install -r control-plane/requirements.txt pytest pytest-asyncio
+    - cd control-plane && CP_DATA_DIR=/tmp/cp pytest -q
+
+test:web:
+  stage: test
+  image: node:22-alpine
+  script:
+    - cd frontend && npm ci && npm run build
+
+.build:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build -f "$DOCKERFILE" -t "$REGISTRY/fugu-deck-$COMPONENT:$CI_COMMIT_SHA" -t "$REGISTRY/fugu-deck-$COMPONENT:latest" "$CONTEXT"
+    - docker push --all-tags "$REGISTRY/fugu-deck-$COMPONENT"
+
+build:space:
+  extends: .build
+  variables: { COMPONENT: space, CONTEXT: backend, DOCKERFILE: backend/Dockerfile }
+
+build:cp:
+  extends: .build
+  variables: { COMPONENT: cp, CONTEXT: ., DOCKERFILE: control-plane/Dockerfile }
+
+build:web:
+  extends: .build
+  variables: { COMPONENT: web, CONTEXT: frontend, DOCKERFILE: frontend/Dockerfile }
+
+deploy:
+  stage: deploy
+  image: alpine:3.20
+  environment: production
+  resource_group: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual   # уберите, если хотите деплой без ручного подтверждения
+  before_script:
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh && echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+    - echo "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+  script:
+    - DIR=${DEPLOY_DIR:-/opt/fugu-deck}
+    - scp deploy/docker-compose.yml "$DEPLOY_USER@$DEPLOY_HOST:$DIR/docker-compose.yml"
+    - >
+      ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd $DIR &&
+      sed -i 's|^IMAGE_TAG=.*|IMAGE_TAG=$CI_COMMIT_SHA|; s|^REGISTRY=.*|REGISTRY=$REGISTRY|' .env &&
+      docker compose pull && docker compose up -d --remove-orphans && docker image prune -f"
+
+gitops:
+  stage: deploy
+  image: alpine/git:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE !~ /^deploy:/
+  script:
+    - f=infra/control-plane/overlays/prod/kustomization.yaml
+    - 'sed -i "s|newTag: .*|newTag: $CI_COMMIT_SHA|" $f'
+    - sed -i "s|CP_SPACE_IMAGE=.*|CP_SPACE_IMAGE=$REGISTRY/fugu-deck-space:$CI_COMMIT_SHA|" $f
+    - git config user.name deck-bot && git config user.email deck-bot@example.invalid
+    - 'git commit -am "deploy: ${CI_COMMIT_SHORT_SHA}" || exit 0'
+    - git push "https://oauth2:${GITOPS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:$CI_DEFAULT_BRANCH

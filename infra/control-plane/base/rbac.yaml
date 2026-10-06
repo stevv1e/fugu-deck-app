@@ -1,0 +1,31 @@
+# Control-plane создаёт и удаляет пространства (namespace + ресурсы внутри).
+# Права кластерные: храните доступ к control-plane так же бережно, как к kubeconfig.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: control-plane }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: deck-control-plane }
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch, create, patch, delete]
+  - apiGroups: [""]
+    resources: [resourcequotas, configmaps, persistentvolumeclaims, services]
+    verbs: [get, list, create, patch, update, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, patch, update, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, create, patch, update, delete]
+  - apiGroups: [traefik.io]
+    resources: [ingressroutes, middlewares]
+    verbs: [get, list, create, patch, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: deck-control-plane }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: deck-control-plane }
+subjects: [{ kind: ServiceAccount, name: control-plane, namespace: deck-system }]

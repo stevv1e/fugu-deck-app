@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Fugu Deck",
+    "slug": "fugu-deck",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "kz.fugudeck.app",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Face ID подтверждает действия агента и подписывает их ключом этого телефона."
+      },
+      "entitlements": {
+        "com.apple.developer.devicecheck.appattest-environment": "production"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#07080c",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "kz.fugudeck.app",
+      "allowBackup": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Face ID защищает ключи этого телефона."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Face ID подтверждает действия агента."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Камера нужна, чтобы прочитать QR-приглашение сервера.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "expo-font"
+    ],
+    "scheme": "fugudeck",
+    "backgroundColor": "#07080c",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

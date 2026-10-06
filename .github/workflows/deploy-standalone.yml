@@ -1,0 +1,20 @@
+name: deploy-standalone
+# Одиночный режим (один сервер, docker compose) — запуск вручную
+on: { workflow_dispatch: {} }
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p ~/.ssh && echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/fugu-deck' }}
+        run: |
+          scp deploy/docker-compose.yml "$TARGET:$DIR/docker-compose.yml"
+          ssh "$TARGET" "cd $DIR && sed -i 's|^IMAGE_TAG=.*|IMAGE_TAG=${{ github.sha }}|; s|^REGISTRY=.*|REGISTRY=${REGISTRY,,}|' .env && docker compose pull && docker compose up -d --remove-orphans"
