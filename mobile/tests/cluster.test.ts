@@ -12,7 +12,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { buildKeyPut } from "../src/core/apikeys";
 import { b64u, randomId } from "../src/core/bytes";
 import {
-  authorizeUrl, buildEnroll, claims, clusterDeviceId, exchangeCode, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, statusRequest,
+  authorizeUrl, buildEnroll, claims, clusterDeviceId, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, statusRequest,
   type ClusterInvite,
 } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
@@ -187,4 +187,22 @@ test("Keycloak → keyguard: регистрация, ожидание, подт�
   assert.match(out[4], /^200/, "администратор подтвердил");
   assert.match(out[5], /^200 .*…/, "после подтверждения ключ принят, в ответе маска");
   assert.match(out[8], /^403 .*cnf\.jkt/, "токен Анны с ключами другого телефона не регистрируется");
+});
+
+test("вызов для аттестации: берётся до создания ключей и уходит в регистрацию только вместе с аттестацией", async () => {
+  const c: ClusterInvite = { api: "https://api.d.test", issuer: "https://id.d.test/realms/deck", join: "https://join.d.test", invite: "i".repeat(20), hpke: HPKE };
+  const ch = b64u(new Uint8Array(40).fill(7));
+  const http = (status: number, text: string): Http => ({ request: async (r: { url: string }) => { assert.equal(r.url, "https://join.d.test/v1/enroll/challenge"); return { status, text, headers: {} }; } }) as unknown as Http;
+  assert.equal(await fetchChallenge(http(200, JSON.stringify({ challenge: ch, expires_in: 900 })), c), ch);
+  assert.equal(await fetchChallenge(http(404, "{}"), c), null, "сервер без аттестации — регистрация без неё");
+  await assert.rejects(fetchChallenge(http(200, JSON.stringify({ challenge: "a b" })), c), /повреждённый вызов/);
+  await assert.rejects(fetchChallenge(http(500, "boom"), c));
+  const keys = softKeys();
+  const tokens = { accessToken: "t", refreshToken: "r", expiresIn: 60, tokenType: "DPoP" };
+  const soft = await buildEnroll(c, keys, tokens, "Телефон", Date.now() / 1000, ch);
+  assert.equal(soft.challenge, undefined, "программные ключи без аттестации — вызов не отправляется");
+  const att = { session: { format: "android-key", chain: ["x"] }, confirm: { format: "android-key", chain: ["y"] } };
+  const hard = await buildEnroll(c, { ...keys, attestation: att }, tokens, "Телефон", Date.now() / 1000, ch);
+  assert.equal(hard.challenge, ch);
+  assert.deepEqual(hard.attestation, att);
 });
