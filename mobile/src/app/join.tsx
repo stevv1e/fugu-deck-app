@@ -2,12 +2,13 @@
  * Вход в кластер по QR-приглашению (fugudeck://join?…): браузер → Keycloak (passkey) → токен с DPoP →
  * регистрация устройства (ждёт подтверждения пригласившим). Открывается и по ссылке, и из сканера.
  */
+import { unb64 } from "@/core/bytes";
 import { router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useMemo, useState } from "react";
 
 import {
-  browserStartUrl, buildEnroll, clusterDeviceId, exchangeCode, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
+  browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
 import { keyProvider } from "@/platform/keys";
@@ -45,21 +46,23 @@ export default function Join() {
     try {
       const id = clusterId(inv);
       const alias = `cluster.${id}`;
+      const http = plainHttp();
       setStep("Создаю ключи устройства…");
       const provider = await keyProvider();
       await provider.remove(alias).catch(() => {});
-      const keys = await provider.create(alias);
+      // вызов сервера вписывается чипом в аттестацию ключей — его нужно получить до их создания
+      const challenge = await fetchChallenge(http, inv);
+      const keys = await provider.create(alias, challenge ? unb64(challenge) : undefined);
       const pkce = newPkce();
       setStep("Вход в браузере…");
       const res = await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
       if (res.type !== "success") throw new Error("Вход отменён");
       const code = parseRedirect(res.url, pkce);
       setStep("Получаю токен, привязанный к ключу устройства…");
-      const http = plainHttp();
       const now = () => Date.now() / 1000;
       const tokens = await exchangeCode(http, inv, keys, code, pkce, now());
       setStep("Регистрирую устройство (подтвердите биометрией)…");
-      const body = await buildEnroll(inv, keys, tokens, name.trim() || "Телефон", now());
+      const body = await buildEnroll(inv, keys, tokens, name.trim() || "Телефон", now(), challenge);
       const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (r.status !== 200) throw errorFrom(r.status, r.text);
       const out = JSON.parse(r.text) as { device_id: string; user: string; status: "pending" | "active" };

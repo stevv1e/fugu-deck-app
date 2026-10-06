@@ -133,8 +133,21 @@ export type ClusterSigned = { jws: string };
 
 export type ClusterEnrollRequest = {
   access_token: string; dpop: string; session_jwk: unknown; confirm_jwk: unknown; csr: string;
-  enroll: ClusterSigned; key_storage: string; attestation?: unknown;
+  enroll: ClusterSigned; key_storage: string; attestation?: unknown; challenge?: string;
 };
+
+/**
+ * Вызов для аттестации (keyguard, через join/v1/enroll/challenge). Берётся ДО создания ключей: чип вписывает его в
+ * аттестацию, и сервер видит, что ключи созданы для этой регистрации. null — сервер аттестацию не проверяет.
+ */
+export async function fetchChallenge(http: Http, c: ClusterInvite): Promise<string | null> {
+  const r = await http.request({ method: "POST", url: `${c.join}/v1/enroll/challenge`, headers: { "Content-Type": "application/json" }, body: "{}" });
+  if (r.status === 404) return null;
+  if (r.status !== 200) throw errorFrom(r.status, r.text);
+  const ch = (JSON.parse(r.text) as { challenge?: unknown }).challenge;
+  if (typeof ch !== "string" || !/^[A-Za-z0-9_-]{16,172}$/.test(ch)) throw new Error("Сервер прислал повреждённый вызов для аттестации");
+  return ch;
+}
 
 /**
  * JWS действия для keyguard:
@@ -167,7 +180,7 @@ export async function signClusterAction(keys: DeviceKeys, body: unknown, o: Sign
 export const deviceNameOf = (name: string) => name.trim().slice(0, 80).trim() || "Телефон";
 
 /** Тело join/v1/enroll: control-plane проверит приглашение и передаст в keyguard как есть. */
-export async function buildEnroll(c: ClusterInvite, keys: DeviceKeys, tokens: Tokens, deviceName: string, now: number): Promise<ClusterEnrollRequest> {
+export async function buildEnroll(c: ClusterInvite, keys: DeviceKeys, tokens: Tokens, deviceName: string, now: number, challenge?: string | null): Promise<ClusterEnrollRequest> {
   const enrollUrl = `${c.join}/v1/enroll`;
   const dpop = await dpopProof({ key: keys.session, method: "POST", url: enrollUrl, accessToken: tokens.accessToken, now });
   const enroll = await signClusterAction(
@@ -180,6 +193,7 @@ export async function buildEnroll(c: ClusterInvite, keys: DeviceKeys, tokens: To
   return {
     access_token: tokens.accessToken, dpop, session_jwk: keys.session.jwk, confirm_jwk: keys.confirm.jwk, csr,
     enroll, key_storage: keys.storage, attestation: keys.attestation ?? undefined,
+    challenge: keys.attestation && challenge ? challenge : undefined, // вызов, вписанный в аттестацию при создании ключей
   };
 }
 
