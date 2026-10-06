@@ -1443,19 +1443,3 @@ async def presence(body: PresenceIn, u: dict = Me):
         await need(u, body.project_id)
     await broker().set_presence(u, body.device_id, body.project_id, body.conversation_id)
     return {"online": broker().project_presence(body.project_id) if body.project_id else []}
-
-
-# ================================================================== статика (для запуска без Caddy)
-_static = Path(__file__).resolve().parent.parent / "static"
-if _static.exists():
-    from fastapi.responses import FileResponse
-    from fastapi.staticfiles import StaticFiles
-
-    app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
-
-    @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str):
-        f = _static / path
-        if path and f.is_file() and _static in f.resolve().parents:
-            return FileResponse(f)
-        return FileResponse(_static / "index.html")

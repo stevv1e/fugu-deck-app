@@ -3,8 +3,6 @@ dist/
 __pycache__/
 *.pyc
 .pytest_cache/
-backend/static/
 backend/data/
 data/
 .env
-deploy/.env

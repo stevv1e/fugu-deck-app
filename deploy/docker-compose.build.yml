@@ -1,6 +1,0 @@
-# Дополнение для сборки образов прямо на сервере/ноутбуке (без CI и registry).
-services:
-  api:
-    build: ../backend
-  web:
-    build: ../frontend
