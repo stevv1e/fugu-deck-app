@@ -77,6 +77,21 @@ npx expo run:android     # dev-сборка с модулем fd-secure (нуж�
 npx eas-cli@latest build --profile development   # то же в облаке EAS
 ```
 
+### Установка на телефон
+
+**Android.** APK собирает CI: GitHub → Actions → **mobile-android** → последний зелёный запуск → Artifacts →
+`fugu-deck-android`. Распакуйте архив и установите `app-release.apk`: откройте файл на телефоне (разрешив установку из
+этого источника) или `adb install app-release.apk`. Сборка — только для `arm64-v8a`, с нативным модулем `fd-secure`,
+JS внутри (Metro не нужен). Подписана общеизвестным отладочным ключом Expo — для проверки, не для раздачи.
+Локально то же: `npx expo prebuild --platform android && cd android && ./gradlew assembleRelease` (нужны JDK 17 и Android SDK).
+
+**iPhone.** Нужны Mac с Xcode и участие в Apple Developer Program (подпись и App Attest): `npx expo run:ios --device`
+или `npx eas-cli@latest build --platform ios`. В CI не собирается — без сертификата Apple на устройство не поставить.
+
+**После установки приложению нужен сервер**: одиночный (`../backend`, раздел ниже) — по HTTPS: само приложение
+допускает `http://` для адресов локальной сети, но release-сборка Android незашифрованный трафик не пропускает.
+Кластер — вход в него заработает только с control-plane v2, которого ещё нет.
+
 Сквозной тест ядра против одиночного сервера:
 ```bash
 cd ../backend
