@@ -136,12 +136,15 @@ export type ClusterEnrollRequest = {
   enroll: ClusterSigned; key_storage: string; attestation?: unknown; challenge?: string;
 };
 
+/** Заголовки запросов регистрации на join: токен приглашения проверяют Traefik (forwardAuth) и control-plane. */
+export const joinHeaders = (c: ClusterInvite) => ({ "Content-Type": "application/json", "X-Deck-Invite": c.invite });
+
 /**
  * Вызов для аттестации (keyguard, через join/v1/enroll/challenge). Берётся ДО создания ключей: чип вписывает его в
  * аттестацию, и сервер видит, что ключи созданы для этой регистрации. null — сервер аттестацию не проверяет.
  */
 export async function fetchChallenge(http: Http, c: ClusterInvite): Promise<string | null> {
-  const r = await http.request({ method: "POST", url: `${c.join}/v1/enroll/challenge`, headers: { "Content-Type": "application/json" }, body: "{}" });
+  const r = await http.request({ method: "POST", url: `${c.join}/v1/enroll/challenge`, headers: joinHeaders(c), body: "{}" });
   if (r.status === 404) return null;
   if (r.status !== 200) throw errorFrom(r.status, r.text);
   const ch = (JSON.parse(r.text) as { challenge?: unknown }).challenge;
