@@ -8,7 +8,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useMemo, useState } from "react";
 
 import {
-  browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
+  browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
 import { keyProvider } from "@/platform/keys";
@@ -63,7 +63,7 @@ export default function Join() {
       const tokens = await exchangeCode(http, inv, keys, code, pkce, now());
       setStep("Регистрирую устройство (подтвердите биометрией)…");
       const body = await buildEnroll(inv, keys, tokens, name.trim() || "Телефон", now(), challenge);
-      const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: joinHeaders(inv), body: JSON.stringify(body) });
       if (r.status !== 200) throw errorFrom(r.status, r.text);
       const out = JSON.parse(r.text) as { device_id: string; user: string; status: "pending" | "active" };
       if (out.device_id !== clusterDeviceId(keys)) throw new Error("Сервер вернул чужой ID устройства");
