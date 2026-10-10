@@ -49,9 +49,11 @@ export default function Join() {
       const http = plainHttp();
       setStep("Создаю ключи устройства…");
       const provider = await keyProvider();
-      await provider.remove(alias).catch(() => {});
       // вызов сервера вписывается чипом в аттестацию ключей — его нужно получить до их создания
       const challenge = await fetchChallenge(http, inv);
+      // Старые ключи этого кластера стираем только ПОСЛЕ того, как сервер принял приглашение: с просроченным или
+      // использованным QR запрос выше падает, и рабочая регистрация остаётся целой.
+      await provider.remove(alias).catch(() => {});
       const keys = await provider.create(alias, challenge ? unb64(challenge) : undefined);
       const pkce = newPkce();
       setStep("Вход в браузере…");
