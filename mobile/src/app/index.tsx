@@ -1,8 +1,10 @@
-/** Главный экран: серверы пользователя. Подключиться можно к любому серверу Fugu Deck — по QR или адресу. */
-import { router } from "expo-router";
+/** Главный экран: кластеры и серверы пользователя. Подключиться можно к любому серверу Fugu Deck — по QR или адресу. */
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { View } from "react-native";
 
 import { isInsecure, shortFp } from "@/core/invite";
+import { listClusters, type ClusterRecord } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Empty, IconBtn, Loading, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
@@ -17,6 +19,12 @@ const STORAGE: Record<string, string> = {
 export default function Servers() {
   const { p } = useTheme();
   const { ready, servers } = useServers();
+
+  // Кластеры, в которых зарегистрировано это устройство. Перечитываем при каждом возврате на экран:
+  // запись появляется после регистрации по приглашению.
+  const [clusters, setClusters] = useState<ClusterRecord[]>([]);
+  useFocusEffect(useCallback(() => { void listClusters().then(setClusters); }, []));
+  const CLUSTER_STATUS: Record<ClusterRecord["status"], string> = { active: "подтверждено", pending: "ждёт подтверждения", revoked: "отозвано" };
 
   const open = (id: string, enrolled: boolean) => router.push(enrolled ? `/s/${id}` : `/s/${id}/login`);
 
@@ -34,7 +42,7 @@ export default function Servers() {
 
       {!ready ? (
         <Loading />
-      ) : servers.length === 0 ? (
+      ) : servers.length === 0 && clusters.length === 0 ? (
         <Card accent={p.accent}>
           <Empty
             title="Подключите сервер"
@@ -45,6 +53,23 @@ export default function Servers() {
         </Card>
       ) : (
         <>
+          {clusters.map((c) => (
+            <Card key={c.id} accent={c.status === "active" ? p.ok : p.line2} onPress={() => router.push({ pathname: "/cluster/[cid]", params: { cid: c.id } })}>
+              <Row style={{ justifyContent: "space-between" }}>
+                <Txt kind="h2" numberOfLines={1} style={{ flex: 1 }}>
+                  {new URL(c.api).host}
+                </Txt>
+                <Chip text={CLUSTER_STATUS[c.status]} color={c.status === "active" ? p.ok : c.status === "revoked" ? p.accent2 : undefined} />
+              </Row>
+              <Txt kind="mono" color={p.dim} numberOfLines={1}>
+                {c.user ? `${c.user} · ` : ""}{c.name}
+              </Txt>
+              <Row gap={6} style={{ flexWrap: "wrap" }}>
+                <Chip text="кластер" color={p.accent} />
+                {c.certPem ? <Chip text="mTLS" color={p.ok} /> : null}
+              </Row>
+            </Card>
+          ))}
           {servers.map((s) => (
             <Card key={s.id} accent={s.device ? p.ok : p.line2} onPress={() => open(s.id, !!s.device)}>
               <Row style={{ justifyContent: "space-between" }}>
