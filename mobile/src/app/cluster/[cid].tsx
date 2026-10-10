@@ -4,7 +4,7 @@
  */
 import { FdSecure } from "fd-secure";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buildKeyPut, KEY_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
 import { unb64 } from "@/core/bytes";
@@ -33,6 +33,15 @@ export default function ClusterDevice() {
     if (!k) throw new Error("Ключи устройства не найдены — зарегистрируйтесь заново по приглашению");
     return k;
   }, [rec]);
+
+  // Подтверждённое устройство без сертификата: забираем его сами, как только экран открыт.
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (rec && rec.status === "active" && !rec.certPem && !autoChecked.current) {
+      autoChecked.current = true;
+      void check();
+    }
+  });
 
   const check = async () => {
     if (!rec) return;
@@ -89,19 +98,24 @@ export default function ClusterDevice() {
   };
 
   if (!rec) return <Screen title="Кластер"><Loading /></Screen>;
-  const active = rec.status === "active";
+  // Сертификат для mTLS приходит отдельным запросом статуса. У первого устройства администратора статус «активно»
+  // приходит сразу в ответе на регистрацию, и без этой проверки сертификат не был бы получен никогда.
+  const needCert = rec.status === "active" && !rec.certPem;
+  const active = rec.status === "active" && !needCert;
 
   return (
     <Screen title={new URL(rec.api).host}>
       <Card>
-        <Row><Txt>{rec.name}</Txt><Chip text={active ? "подтверждено" : rec.status === "revoked" ? "отозвано" : "ждёт подтверждения"} /></Row>
+        <Row><Txt>{rec.name}</Txt><Chip text={rec.status === "active" ? "подтверждено" : rec.status === "revoked" ? "отозвано" : "ждёт подтверждения"} /></Row>
         <Txt kind="dim">Пользователь {rec.user} · устройство</Txt>
         <Txt selectable>{rec.deviceId}</Txt>
       </Card>
       {!active ? (
         <>
-          <Txt kind="dim">Попросите пригласившего подтвердить устройство с этим кодом. Затем нажмите «Проверить».</Txt>
-          <Btn title="Проверить" onPress={check} busy={busy} />
+          <Txt kind="dim">{needCert
+            ? "Устройство подтверждено. Осталось получить сертификат для защищённого соединения."
+            : "Попросите пригласившего подтвердить устройство с этим кодом. Затем нажмите «Проверить»."}</Txt>
+          <Btn title={needCert ? "Получить сертификат" : "Проверить"} onPress={check} busy={busy} />
         </>
       ) : (
         <>
