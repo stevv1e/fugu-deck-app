@@ -252,7 +252,11 @@ class FdSecureModule : Module() {
   private fun spec(alias: String, requireBiometry: Boolean, challenge: String?, strongBox: Boolean): KeyGenParameterSpec {
     val b = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
       .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-      .setDigests(KeyProperties.DIGEST_SHA256)
+    // Ключ сессии служит и для mTLS. Conscrypt при TLS-рукопожатии хеширует сам и просит у Keystore «сырую» подпись
+    // (NONEwithECDSA); без DIGEST_NONE чип отказывает, и соединение с сертификатом рвётся на рукопожатии
+    // («I/O error during system call»). Ключу подтверждения это не нужно: он подписывает только действия.
+    if (requireBiometry) b.setDigests(KeyProperties.DIGEST_SHA256)
+    else b.setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_NONE)
     if (challenge != null) {
       b.setAttestationChallenge(Base64.decode(challenge, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
     }
