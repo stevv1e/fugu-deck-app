@@ -14,7 +14,7 @@ import { getJson } from "./server";
 import { SseParser, type SseMessage } from "./sse";
 import type { ServerRecord } from "./types";
 
-type Token = { value: string; exp: number };
+export type Token = { value: string; exp: number };
 
 export type SessionEvents = {
   /** Сервер больше не принимает это устройство (отозвано, удалено, пользователь отключён). */
@@ -26,16 +26,16 @@ export type SignedAction = { action: Record<string, unknown>; sig: string };
 const REVOKED = /отозван|не зарегистрировано|отключён/i;
 
 export class DeviceSession {
-  private token: Token | null = null;
+  protected token: Token | null = null;
   private refreshing: Promise<Token> | null = null;
-  private offset = 0;
-  private clockSynced = false;
+  protected offset = 0;
+  protected clockSynced = false;
 
   constructor(
     readonly http: Http,
     readonly server: ServerRecord,
     readonly keys: DeviceKeys,
-    private events: SessionEvents = {},
+    protected events: SessionEvents = {},
   ) {}
 
   get deviceId(): string {
@@ -62,7 +62,7 @@ export class DeviceSession {
     this.clockSynced = true;
   }
 
-  private async newToken(): Promise<Token> {
+  protected async newToken(): Promise<Token> {
     if (!this.clockSynced) await this.syncClock();
     const url = this.server.url + "/api/devices/token";
     const proof = await dpopProof({ key: this.keys.session, method: "POST", url, now: this.now() });
@@ -204,5 +204,41 @@ export class DeviceSession {
         handle?.close();
       },
     };
+  }
+}
+
+/** То, чем сессия кластера отличается от сессии одиночного сервера. */
+export type ClusterAuth = {
+  deviceId: string;
+  /** Новый токен доступа Keycloak (обновление по refresh-токену с DPoP); now — секунды. */
+  token(now: number): Promise<{ accessToken: string; expiresIn: number }>;
+};
+
+/**
+ * Сессия устройства в кластере: адрес api.<домен> (или пространство за ним — api/s/<ник>).
+ * Отличия от одиночного сервера:
+ *  • токен выпускает Keycloak, а не сам сервер; обновление — по refresh-токену с DPoP, без браузера;
+ *  • соединение — mTLS сертификатом устройства (его задаёт http), и control-plane сверяет сертификат,
+ *    токен и DPoP-доказательство: все три относятся к одному ключу сессии;
+ *  • отдельной сверки часов нет — берём часы телефона.
+ * Запросы, поток и подпись действий — общие с DeviceSession.
+ */
+export class ClusterSession extends DeviceSession {
+  constructor(http: Http, server: ServerRecord, keys: DeviceKeys, private auth: ClusterAuth, events: SessionEvents = {}) {
+    super(http, server, keys, events);
+    this.clockSynced = true;
+  }
+
+  override get deviceId(): string {
+    return this.auth.deviceId;
+  }
+
+  override async syncClock(): Promise<void> {
+    this.clockSynced = true;
+  }
+
+  protected override async newToken(): Promise<Token> {
+    const t = await this.auth.token(this.now());
+    return { value: t.accessToken, exp: this.now() + (t.expiresIn || 300) };
   }
 }

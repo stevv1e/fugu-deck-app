@@ -3,7 +3,7 @@
  * Ключ шифруется на телефоне для keyguard (HPKE) и подписывается биометрией; посредники видят только шифротекст.
  */
 import { FdSecure } from "fd-secure";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buildKeyPut, KEY_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
@@ -13,7 +13,9 @@ import { dpopProof } from "@/core/dpop";
 import { errorFrom } from "@/core/http";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { keyProvider } from "@/platform/keys";
-import { getCluster, loadRefresh, saveCluster, saveRefresh, type ClusterRecord } from "@/state/cluster";
+import { getCluster, loadRefresh, saveCluster, saveRefresh, spaceSid, type ClusterRecord } from "@/state/cluster";
+import { spaceState, type SpaceState } from "@/state/clusterSession";
+import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 
 const TITLES: Record<KeyProvider, string> = { anthropic: "Claude", sakana: "Sakana", github: "GitHub", gitlab: "GitLab" };
@@ -25,6 +27,9 @@ export default function ClusterDevice() {
   const [msg, setMsg] = useState<{ kind: "error" | "ok" | "info"; text: string } | null>(null);
   const [provider, setProvider] = useState<KeyProvider>("anthropic");
   const [apiKey, setApiKey] = useState("");
+  const [space, setSpace] = useState<SpaceState | null>(null);
+  const [spaceBusy, setSpaceBusy] = useState(false);
+  const { reloadClusters } = useServers();
 
   useEffect(() => { getCluster(cid).then(setRec); }, [cid]);
 
@@ -64,6 +69,31 @@ export default function ClusterDevice() {
       setMsg({ kind: "error", text: errText(e) });
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Личное пространство: место в кластере, где работает агент. Создаёт его space-operator по запросу control-plane;
+  // пока агент запускается, состояние опрашиваем раз в 3 секунды (не дольше двух минут).
+  const openSpace = async () => {
+    if (!rec) return;
+    setSpaceBusy(true);
+    setMsg(null);
+    try {
+      let st = await spaceState(rec, false);
+      if (!st.exists) st = await spaceState(rec, true);
+      setSpace(st);
+      for (let i = 0; i < 40 && st.phase !== "Ready" && st.phase !== "Failed"; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        st = await spaceState(rec, false);
+        setSpace(st);
+      }
+      if (st.phase !== "Ready") throw new Error(st.phase === "Failed" ? `Пространство не создано: ${st.message || "ошибка"}` : "Пространство ещё запускается — попробуйте через минуту");
+      await reloadClusters();
+      router.push(`/s/${spaceSid(rec.id)}`);
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    } finally {
+      setSpaceBusy(false);
     }
   };
 
@@ -119,6 +149,14 @@ export default function ClusterDevice() {
         </>
       ) : (
         <>
+          <Card>
+            <Row style={{ justifyContent: "space-between" }}>
+              <Txt kind="h2">Пространство</Txt>
+              {space?.exists ? <Chip text={space.phase === "Ready" ? "готово" : space.phase === "Failed" ? "ошибка" : "запускается"} /> : null}
+            </Row>
+            <Txt kind="dim">Проекты и чаты с агентом. Он работает в вашем отдельном окружении в кластере; ключи API к нему не попадают.</Txt>
+            <Btn title="Открыть пространство" onPress={openSpace} busy={spaceBusy} />
+          </Card>
           <Txt kind="dim">Ключ API шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят.</Txt>
           <Row gap={6}>{KEY_PROVIDERS.map((p) => (
             <Btn key={p} small title={TITLES[p]} kind={p === provider ? "primary" : "ghost"} onPress={() => setProvider(p)} />

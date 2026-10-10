@@ -20,6 +20,9 @@ import { keyProvider } from "@/platform/keys";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { prefs } from "@/platform/storage";
 
+import { clusterOfSid, listClusters, type ClusterRecord } from "./cluster";
+import { openClusterSession, spaceServerRecord, spaceUrl } from "./clusterSession";
+
 const KEY = "fd:servers";
 const RENEW_BEFORE = 7 * 86400;
 
@@ -38,6 +41,8 @@ type Ctx = {
   signIn(id: string, p: { username: string; password: string; totp?: string; deviceName: string }): Promise<void>;
   signOut(id: string): Promise<void>;
   api(id: string): Promise<DeckApi>;
+  /** Перечитать кластеры (после регистрации или получения сертификата): пространства видны экранам как серверы. */
+  reloadClusters(): Promise<void>;
   /** Сообщение о том, что сервер отозвал устройство (показываем на экране входа). */
   notices: Record<string, string>;
 };
@@ -65,10 +70,17 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const ref = useRef<ServerRecord[]>([]);
   const apis = useRef(new Map<string, Promise<DeckApi>>());
+  const clusters = useRef<ClusterRecord[]>([]);
+  const reloadClusters = useCallback(async () => {
+    clusters.current = await listClusters();
+    // запись кластера могла измениться (новая регистрация, сертификат) — сессии пространств строим заново
+    for (const k of [...apis.current.keys()]) if (clusterOfSid(k)) apis.current.delete(k);
+  }, []);
 
   useEffect(() => {
     (async () => {
       const list = await prefs.get<ServerRecord[]>(KEY, []);
+      clusters.current = await listClusters();
       ref.current = list;
       setServers(list);
       setCaps(await (await keyProvider()).describe());
@@ -89,7 +101,12 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     [save],
   );
 
-  const get = useCallback((id: string) => ref.current.find((s) => s.id === id), []);
+  const get = useCallback((id: string) => {
+    const cid = clusterOfSid(id);
+    if (cid === null) return ref.current.find((s) => s.id === id);
+    const c = clusters.current.find((x) => x.id === cid);
+    return c ? spaceServerRecord(c) : undefined;
+  }, []);
 
   const probe = useCallback(async (url: string, expectedFp?: string) => {
     const info = await fetchServerInfo(http0, url);
@@ -196,6 +213,12 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       const cached = apis.current.get(id);
       if (cached) return cached;
       const p = (async () => {
+        const cid = clusterOfSid(id);
+        if (cid !== null) {
+          const c = clusters.current.find((x) => x.id === cid);
+          if (!c) throw new Error("Кластер не найден — зарегистрируйтесь по приглашению");
+          return new DeckApi(await openClusterSession(c, spaceUrl(c)));
+        }
         const rec = ref.current.find((s) => s.id === id);
         if (!rec?.device) throw new Error("Сначала войдите на этот сервер");
         const info = await fetchServerInfo(http0, rec.url);
@@ -241,8 +264,8 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Ctx>(
-    () => ({ ready, servers, caps, get, probe, add, remove, rename, signIn, signOut, api, notices }),
-    [ready, servers, caps, get, probe, add, remove, rename, signIn, signOut, api, notices],
+    () => ({ ready, servers, caps, get, probe, add, remove, rename, signIn, signOut, api, notices, reloadClusters }),
+    [ready, servers, caps, get, probe, add, remove, rename, signIn, signOut, api, notices, reloadClusters],
   );
   return <ServersContext.Provider value={value}>{children}</ServersContext.Provider>;
 }
