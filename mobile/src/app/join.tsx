@@ -13,7 +13,7 @@ import {
 import { errorFrom } from "@/core/http";
 import { keyProvider } from "@/platform/keys";
 import { plainHttp } from "@/platform/http";
-import { clusterId, saveCluster, saveRefresh } from "@/state/cluster";
+import { clusterId, removeCluster, saveCluster, saveRefresh } from "@/state/cluster";
 import { Btn, Card, errText, Field, Notice, Screen, Txt } from "@/ui/kit";
 
 export default function Join() {
@@ -65,13 +65,21 @@ export default function Join() {
       const tokens = await exchangeCode(http, inv, keys, code, pkce, now());
       setStep("Регистрирую устройство (подтвердите биометрией)…");
       const body = await buildEnroll(inv, keys, tokens, name.trim() || "Телефон", now(), challenge);
-      const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: joinHeaders(inv), body: JSON.stringify(body) });
-      if (r.status !== 200) throw errorFrom(r.status, r.text);
-      const out = JSON.parse(r.text) as { device_id: string; user: string; status: "pending" | "active" };
-      if (out.device_id !== clusterDeviceId(keys)) throw new Error("Сервер вернул чужой ID устройства");
+      // Запись о кластере и токен сохраняем ДО запроса регистрации. Иначе, если приложение закроют или убьют между
+      // ответом сервера и сохранением, сервер будет считать устройство зарегистрированным, а телефон о нём забудет —
+      // и приглашение при этом уже использовано.
+      const rec = { id, api: inv.api, issuer: inv.issuer, join: inv.join, hpke: inv.hpke, alias,
+        deviceId: clusterDeviceId(keys), user: "", name, status: "pending" as const };
       await saveRefresh(id, tokens.refreshToken);
-      await saveCluster({ id, api: inv.api, issuer: inv.issuer, join: inv.join, hpke: inv.hpke, alias,
-        deviceId: out.device_id, user: out.user, name, status: out.status });
+      await saveCluster(rec);
+      const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: joinHeaders(inv), body: JSON.stringify(body) });
+      if (r.status !== 200) {
+        await removeCluster(id); // сервер ответил отказом: устройства там нет, запись не нужна
+        throw errorFrom(r.status, r.text);
+      }
+      const out = JSON.parse(r.text) as { device_id: string; user: string; status: "pending" | "active" };
+      if (out.device_id !== rec.deviceId) throw new Error("Сервер вернул чужой ID устройства");
+      await saveCluster({ ...rec, user: out.user, status: out.status });
       router.replace({ pathname: "/cluster/[cid]", params: { cid: id } });
     } catch (e) {
       setError(errText(e));
