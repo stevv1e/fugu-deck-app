@@ -2,7 +2,7 @@
  * Вход в кластер по QR-приглашению (fugudeck://join?…): браузер → Keycloak (passkey) → токен с DPoP →
  * регистрация устройства (ждёт подтверждения пригласившим). Открывается и по ссылке, и из сканера.
  */
-import { unb64 } from "@/core/bytes";
+import { randomId, unb64 } from "@/core/bytes";
 import { router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useMemo, useState } from "react";
@@ -13,7 +13,7 @@ import {
 import { errorFrom } from "@/core/http";
 import { keyProvider } from "@/platform/keys";
 import { plainHttp } from "@/platform/http";
-import { clusterId, removeCluster, saveCluster, saveRefresh } from "@/state/cluster";
+import { clusterId, getCluster, loadRefresh, removeCluster, saveCluster, saveRefresh } from "@/state/cluster";
 import { Btn, Card, errText, Field, Notice, Screen, Txt } from "@/ui/kit";
 
 export default function Join() {
@@ -43,18 +43,22 @@ export default function Join() {
   const start = async () => {
     setBusy(true);
     setError(null);
+    const id = clusterId(inv);
+    // Что уже успели создать в этой попытке — чтобы при любой ошибке убрать за собой и вернуть прежнее состояние.
+    let newAlias: string | null = null, accepted = false, replaced = false;
+    const prevRec = await getCluster(id);
     try {
-      const id = clusterId(inv);
-      const alias = `cluster.${id}`;
+      // У каждой попытки регистрации свои ключи. Прежняя регистрация в этом кластере (её ключи и запись) остаётся
+      // целой, пока сервер не принял новую: неудачная или прерванная попытка ничего не ломает.
+      const prev = prevRec;
+      const alias = `cluster.${id}.${randomId(6)}`;
       const http = plainHttp();
       setStep("Создаю ключи устройства…");
       const provider = await keyProvider();
       // вызов сервера вписывается чипом в аттестацию ключей — его нужно получить до их создания
       const challenge = await fetchChallenge(http, inv);
-      // Старые ключи этого кластера стираем только ПОСЛЕ того, как сервер принял приглашение: с просроченным или
-      // использованным QR запрос выше падает, и рабочая регистрация остаётся целой.
-      await provider.remove(alias).catch(() => {});
       const keys = await provider.create(alias, challenge ? unb64(challenge) : undefined);
+      newAlias = alias;
       const pkce = newPkce();
       setStep("Вход в браузере…");
       const res = await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
@@ -70,18 +74,28 @@ export default function Join() {
       // и приглашение при этом уже использовано.
       const rec = { id, api: inv.api, issuer: inv.issuer, join: inv.join, hpke: inv.hpke, alias,
         deviceId: clusterDeviceId(keys), user: "", name, status: "pending" as const };
+      const prevRefresh = prev ? await loadRefresh(id) : null;
       await saveRefresh(id, tokens.refreshToken);
       await saveCluster(rec);
+      replaced = true;
       const r = await http.request({ method: "POST", url: `${inv.join}/v1/enroll`, headers: joinHeaders(inv), body: JSON.stringify(body) });
       if (r.status !== 200) {
-        await removeCluster(id); // сервер ответил отказом: устройства там нет, запись не нужна
+        // сервер ответил отказом: нового устройства там нет — возвращаем прежнюю запись (или убираем новую)
+        if (prev) { await saveCluster(prev); await saveRefresh(id, prevRefresh ?? undefined); } else await removeCluster(id);
+        replaced = false;
         throw errorFrom(r.status, r.text);
       }
+      accepted = true;
       const out = JSON.parse(r.text) as { device_id: string; user: string; status: "pending" | "active" };
       if (out.device_id !== rec.deviceId) throw new Error("Сервер вернул чужой ID устройства");
       await saveCluster({ ...rec, user: out.user, status: out.status });
+      // новая регистрация принята — ключи прежней больше не нужны
+      if (prev && prev.alias !== alias) await provider.remove(prev.alias).catch(() => {});
       router.replace({ pathname: "/cluster/[cid]", params: { cid: id } });
     } catch (e) {
+      // Попытка не удалась до ответа сервера «принято»: ключи этой попытки не нужны. Запись не трогаем, только если
+      // запрос регистрации ушёл, а ответа нет (replaced): устройство могло зарегистрироваться — покажет проверка статуса.
+      if (newAlias && !accepted && !replaced) await (await keyProvider()).remove(newAlias).catch(() => {});
       setError(errText(e));
     } finally {
       setBusy(false);
