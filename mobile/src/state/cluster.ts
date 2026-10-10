@@ -24,3 +24,8 @@ export async function removeCluster(id: string) {
 }
 export const saveRefresh = (id: string, t: string | undefined) => (t ? secrets.set(`cluster.${id}.refresh`, t) : Promise.resolve());
 export const loadRefresh = (id: string) => secrets.get(`cluster.${id}.refresh`);
+
+/** Идентификатор пространства кластера в списке серверов приложения: экраны чатов работают с ним как с сервером. */
+export const SPACE_PREFIX = "cluster.";
+export const spaceSid = (clusterId: string) => SPACE_PREFIX + clusterId;
+export const clusterOfSid = (sid: string) => (sid.startsWith(SPACE_PREFIX) ? sid.slice(SPACE_PREFIX.length) : null);

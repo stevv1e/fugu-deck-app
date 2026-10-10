@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { Project } from "@/core/types";
 import { useApi, useLoad } from "@/state/hooks";
+import { clusterOfSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Empty, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
@@ -42,7 +43,12 @@ export default function Projects() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }}>
-      <TopBar title={rec.name} back right={<IconBtn glyph="⚙" label="Сервер и устройства" onPress={() => router.push(`/s/${sid}/settings`)} />} />
+      <TopBar title={rec.name} back right={
+          // у пространства кластера свой экран устройства и ключей; настройки одиночного сервера к нему не относятся
+          clusterOfSid(sid) !== null
+            ? <IconBtn glyph="⚙" label="Кластер и ключи" onPress={() => router.push({ pathname: "/cluster/[cid]", params: { cid: clusterOfSid(sid)! } })} />
+            : <IconBtn glyph="⚙" label="Сервер и устройства" onPress={() => router.push(`/s/${sid}/settings`)} />
+        } />
       <ScrollView
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}
