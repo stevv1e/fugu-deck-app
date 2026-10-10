@@ -19,5 +19,8 @@ export async function saveCluster(r: ClusterRecord) {
   const all = (await listClusters()).filter((c) => c.id !== r.id);
   await prefs.set(KEY, [...all, r]);
 }
+export async function removeCluster(id: string) {
+  await prefs.set(KEY, (await listClusters()).filter((c) => c.id !== id));
+}
 export const saveRefresh = (id: string, t: string | undefined) => (t ? secrets.set(`cluster.${id}.refresh`, t) : Promise.resolve());
 export const loadRefresh = (id: string) => secrets.get(`cluster.${id}.refresh`);
