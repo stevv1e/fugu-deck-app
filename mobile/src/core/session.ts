@@ -269,4 +269,19 @@ export class ClusterSession extends DeviceSession {
     );
     return { jws: signed.jws };
   }
+
+  /**
+   * 503 от кластера значит «пространство запускается» (обновление агента, новый ключ) — это секунды.
+   * Повторяем сами, чтобы экран не показывал ошибку на ровном месте; потоки переподключаются своим механизмом.
+   */
+  override async request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await super.request<T>(method, path, body);
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 503 || attempt >= 8) throw e;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+    }
+  }
 }
