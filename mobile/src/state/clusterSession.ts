@@ -1,5 +1,5 @@
 /** Сессии кластера: одна — к api.<домен> (пространство, ключи), другая — к пространству за ним (чаты). */
-import { refresh, type ClusterInvite } from "@/core/cluster";
+import { refresh, signClusterAction, type ClusterInvite } from "@/core/cluster";
 import { ClusterSession } from "@/core/session";
 import type { ServerRecord } from "@/core/types";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
@@ -57,10 +57,30 @@ export async function openClusterSession(c: ClusterRecord, baseUrl: string): Pro
   return new ClusterSession(mtlsHttp(c.alias + ".s"), server, keys, { deviceId: c.deviceId, space, token: (now) => clusterToken(c, now) });
 }
 
-export type SpaceState = { exists: boolean; id?: string; phase?: string; message?: string; url?: string };
+export type SpaceState = {
+  exists: boolean; id?: string; phase?: string; message?: string; url?: string;
+  /** Запрошено удаление; delete_at — оператор принял подпись и удалит в этот момент; delete_error — отклонил. */
+  delete_requested?: boolean; delete_at?: string; delete_error?: string;
+};
 
 /** Состояние личного пространства (GET) или запрос на его создание (POST) — control-plane, /v1/space. */
 export async function spaceState(c: ClusterRecord, create = false): Promise<SpaceState> {
   const s = await openClusterSession(c, c.api);
   return s.request<SpaceState>(create ? "POST" : "GET", "/v1/space");
+}
+
+/**
+ * Запросить удаление личного пространства: действие space_delete, подписанное ключом подтверждения (биометрия).
+ * Подпись проверяет space-operator через keyguard; он же отсчитывает срок, до которого удаление можно отменить.
+ */
+export async function requestSpaceDelete(c: ClusterRecord): Promise<SpaceState> {
+  const s = await openClusterSession(c, c.api);
+  const signed = await signClusterAction(s.keys, { type: "space_delete" }, { space: `u-${c.user}` });
+  return s.request<SpaceState>("POST", "/v1/space/delete", signed);
+}
+
+/** Отменить удаление, пока срок не вышел. */
+export async function restoreSpace(c: ClusterRecord): Promise<SpaceState> {
+  const s = await openClusterSession(c, c.api);
+  return s.request<SpaceState>("POST", "/v1/space/restore");
 }

@@ -14,7 +14,7 @@ import { errorFrom } from "@/core/http";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, loadRefresh, saveCluster, saveRefresh, spaceSid, type ClusterRecord } from "@/state/cluster";
-import { spaceState, type SpaceState } from "@/state/clusterSession";
+import { requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 
@@ -29,6 +29,7 @@ export default function ClusterDevice() {
   const [apiKey, setApiKey] = useState("");
   const [space, setSpace] = useState<SpaceState | null>(null);
   const [spaceBusy, setSpaceBusy] = useState(false);
+  const [armDelete, setArmDelete] = useState(false); // удаление — в два нажатия, затем биометрия
   const { reloadClusters } = useServers();
 
   useEffect(() => { getCluster(cid).then(setRec); }, [cid]);
@@ -81,6 +82,10 @@ export default function ClusterDevice() {
     try {
       let st = await spaceState(rec, false);
       // Нет пространства — создаём; спит — тем же запросом будим (просмотр состояния его не будит).
+      if (st.phase === "Deleting") {
+        setSpace(st);
+        throw new Error("Пространство ждёт удаления — отмените удаление, чтобы открыть его");
+      }
       if (!st.exists || st.phase === "Sleeping") st = await spaceState(rec, true);
       setSpace(st);
       for (let i = 0; i < 40 && st.phase !== "Ready" && st.phase !== "Failed"; i++) {
@@ -91,6 +96,52 @@ export default function ClusterDevice() {
       if (st.phase !== "Ready") throw new Error(st.phase === "Failed" ? `Пространство не создано: ${st.message || "ошибка"}` : "Пространство ещё запускается — попробуйте через минуту");
       await reloadClusters();
       router.push(`/s/${spaceSid(rec.id)}`);
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    } finally {
+      setSpaceBusy(false);
+    }
+  };
+
+  // Состояние пространства показываем сразу (просмотр его не будит): спит ли оно, не ждёт ли удаления.
+  const spaceLoaded = useRef(false);
+  useEffect(() => {
+    if (rec && rec.status === "active" && rec.certPem && !spaceLoaded.current) {
+      spaceLoaded.current = true;
+      spaceState(rec, false).then(setSpace).catch(() => {});
+    }
+  });
+
+  const deleteSpace = async () => {
+    if (!rec) return;
+    setSpaceBusy(true);
+    setMsg(null);
+    setArmDelete(false);
+    try {
+      let st = await requestSpaceDelete(rec);
+      // Подпись проверяет оператор (проход раз в 15 с): ждём, пока он примет запрос или отклонит.
+      for (let i = 0; i < 20 && st.exists && !st.delete_at && !st.delete_error; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        st = await spaceState(rec, false);
+      }
+      setSpace(st);
+      if (st.delete_error) throw new Error(`Запрос удаления отклонён: ${st.delete_error}`);
+      if (!st.delete_at) throw new Error("Запрос удаления записан, но ещё не подтверждён сервером — проверьте позже");
+      setMsg({ kind: "info", text: "Пространство остановлено и будет удалено. До этого срока удаление можно отменить." });
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    } finally {
+      setSpaceBusy(false);
+    }
+  };
+
+  const undelete = async () => {
+    if (!rec) return;
+    setSpaceBusy(true);
+    setMsg(null);
+    try {
+      setSpace(await restoreSpace(rec));
+      setMsg({ kind: "ok", text: "Удаление отменено" });
     } catch (e) {
       setMsg({ kind: "error", text: errText(e) });
     } finally {
@@ -153,10 +204,29 @@ export default function ClusterDevice() {
           <Card>
             <Row style={{ justifyContent: "space-between" }}>
               <Txt kind="h2">Пространство</Txt>
-              {space?.exists ? <Chip text={space.phase === "Ready" ? "готово" : space.phase === "Failed" ? "ошибка" : space.phase === "Sleeping" ? "спит" : "запускается"} /> : null}
+              {space?.exists ? <Chip text={space.phase === "Ready" ? "готово" : space.phase === "Failed" ? "ошибка" : space.phase === "Sleeping" ? "спит" : space.phase === "Deleting" ? "удаляется" : "запускается"} /> : null}
             </Row>
             <Txt kind="dim">Проекты и чаты с агентом. Он работает в вашем отдельном окружении в кластере; ключи API к нему не попадают.</Txt>
-            <Btn title="Открыть пространство" onPress={openSpace} busy={spaceBusy} />
+            {space?.delete_at ? (
+              <>
+                <Notice kind="warn" text={`Будет удалено ${new Date(space.delete_at).toLocaleString()}: проекты, чаты и память агента. Сейчас пространство остановлено.`} />
+                <Btn title="Отменить удаление" onPress={undelete} busy={spaceBusy} />
+              </>
+            ) : (
+              <>
+                <Btn title="Открыть пространство" onPress={openSpace} busy={spaceBusy} />
+                {space?.exists ? (
+                  armDelete ? (
+                    <Row>
+                      <Btn title="Да, удалить" small kind="danger" onPress={deleteSpace} disabled={spaceBusy} />
+                      <Btn title="Отмена" small kind="ghost" onPress={() => setArmDelete(false)} />
+                    </Row>
+                  ) : (
+                    <Btn title="Удалить пространство" small kind="ghost" onPress={() => setArmDelete(true)} disabled={spaceBusy} />
+                  )
+                ) : null}
+              </>
+            )}
           </Card>
           <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
           <Txt kind="dim">Ключ API шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят.</Txt>
