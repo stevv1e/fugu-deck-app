@@ -136,7 +136,7 @@ test("Keycloak: вход кодом приложения — токен прив
   assert.notEqual(r3.status, 200, "повтор кода");
   // Keycloak на повтор кода отзывает сессию, выпущенную по нему (OAuth 2.0): перехваченный и повторённый код
   // гасит и токены владельца — refresh больше не работает
-  await assert.rejects(refresh(http, c, keys, again.refreshToken!, now()), /400/, "после повтора кода сессия отозвана");
+  await assert.rejects(refresh(http, c, keys, again.refreshToken!, now()), (e: any) => e.status === 400, "после повтора кода сессия отозвана");
   // K5 вход паролем в обход браузера (password grant)
   const r5 = await raw({ grant_type: "password", client_id: "deck-app", username: "anna", password: "anna-pass" },
     await dpopProof({ key: keys.session, method: "POST", url: tokenEp, now: now() }));
