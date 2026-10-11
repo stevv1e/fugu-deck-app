@@ -193,7 +193,9 @@ def standalone_only():
 # ================================================================== служебное
 @app.get("/api/health")
 async def health():
-    return {"ok": True}
+    # busy — идёт ли задание агента. В кластере по нему control-plane решает, можно ли усыпить пространство:
+    # задание продолжается и после того, как человек закрыл приложение.
+    return {"ok": True, "busy": any(r.status == "running" for r in agent().runs.values())}
 
 
 class LoginIn(BaseModel):

@@ -190,3 +190,16 @@ def test_mtls_serial_header_formats(client, monkeypatch):
     assert ok.status_code == 200, ok.text
     bad = client.get("/api/config", headers={"Authorization": f"DPoP {at}", "DPoP": proof(sess, "GET", "https://deck.test/api/config", at), hdr: "12345"})
     assert bad.status_code == 401
+
+
+def test_health_reports_busy(client):
+    """По busy control-plane решает, можно ли усыпить пространство: идущее задание усыплять нельзя."""
+    assert client.get("/api/health").json() == {"ok": True, "busy": False}
+    runs = main.agent().runs
+    runs["r-test"] = type("R", (), {"status": "running"})()
+    try:
+        assert client.get("/api/health").json()["busy"] is True
+        runs["r-test"].status = "done"
+        assert client.get("/api/health").json()["busy"] is False
+    finally:
+        runs.pop("r-test", None)

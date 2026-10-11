@@ -80,7 +80,8 @@ export default function ClusterDevice() {
     setMsg(null);
     try {
       let st = await spaceState(rec, false);
-      if (!st.exists) st = await spaceState(rec, true);
+      // Нет пространства — создаём; спит — тем же запросом будим (просмотр состояния его не будит).
+      if (!st.exists || st.phase === "Sleeping") st = await spaceState(rec, true);
       setSpace(st);
       for (let i = 0; i < 40 && st.phase !== "Ready" && st.phase !== "Failed"; i++) {
         await new Promise((r) => setTimeout(r, 3000));
@@ -152,7 +153,7 @@ export default function ClusterDevice() {
           <Card>
             <Row style={{ justifyContent: "space-between" }}>
               <Txt kind="h2">Пространство</Txt>
-              {space?.exists ? <Chip text={space.phase === "Ready" ? "готово" : space.phase === "Failed" ? "ошибка" : "запускается"} /> : null}
+              {space?.exists ? <Chip text={space.phase === "Ready" ? "готово" : space.phase === "Failed" ? "ошибка" : space.phase === "Sleeping" ? "спит" : "запускается"} /> : null}
             </Row>
             <Txt kind="dim">Проекты и чаты с агентом. Он работает в вашем отдельном окружении в кластере; ключи API к нему не попадают.</Txt>
             <Btn title="Открыть пространство" onPress={openSpace} busy={spaceBusy} />

@@ -243,6 +243,10 @@ export class ClusterSession extends DeviceSession {
     this.clockSynced = true;
   }
 
+  /** Повторы при 503: 36 × 2,5 с = полторы минуты — хватает на запуск пода после сна. */
+  static retries = 36;
+  static retryMs = 2500;
+
   override get deviceId(): string {
     return this.auth.deviceId;
   }
@@ -271,16 +275,17 @@ export class ClusterSession extends DeviceSession {
   }
 
   /**
-   * 503 от кластера значит «пространство запускается» (обновление агента, новый ключ) — это секунды.
-   * Повторяем сами, чтобы экран не показывал ошибку на ровном месте; потоки переподключаются своим механизмом.
+   * 503 от кластера значит «пространство запускается»: обновление агента, новый ключ — секунды; пробуждение
+   * после сна (первый запрос сам его будит) — до минуты. Повторяем сами, чтобы экран не показывал ошибку
+   * на ровном месте; потоки переподключаются своим механизмом.
    */
   override async request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
         return await super.request<T>(method, path, body);
       } catch (e) {
-        if (!(e instanceof ApiError) || e.status !== 503 || attempt >= 8) throw e;
-        await new Promise((r) => setTimeout(r, 2500));
+        if (!(e instanceof ApiError) || e.status !== 503 || attempt >= ClusterSession.retries) throw e;
+        await new Promise((r) => setTimeout(r, ClusterSession.retryMs));
       }
     }
   }
