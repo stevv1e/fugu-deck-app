@@ -55,6 +55,7 @@ const valid: [string, string | null, Record<string, unknown>][] = [
   ["device_revoke", null, { type: "device_revoke", user: "anna", target: TARGET }],
   ["account_delete", null, { type: "account_delete", user: "anna" }],
   ["space_delete", "t-shop", { type: "space_delete" }],
+  ["tool_approve", "u-anna", { type: "tool_approve", approval: "a1b2c3d4e5f6", tool: "github_create_file", args_sha256: JKT }],
 ];
 
 const env = (body: Record<string, unknown>, space: string | null = null, i = 0) => ({

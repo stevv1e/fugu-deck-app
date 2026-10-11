@@ -40,10 +40,8 @@ export class DeckApi {
   async approve(req: ApprovalRequest, approve: boolean, comment = "") {
     const path = `/api/approvals/${enc(req.approval_id)}`;
     if (!approve) return this.s.request("POST", path, { approve: false, comment });
-    const signed = await this.s.signAction(
-      { type: "approve_tool", approval_id: req.approval_id, tool: req.name, args_sha256: argsHash(req.args), approve: true },
-      `Разрешить: ${req.title || req.name}`,
-    );
+    // Формат подписи зависит от того, кто её проверяет: одиночный сервер — сам, пространство кластера — через keyguard.
+    const signed = await this.s.signApproval({ approvalId: req.approval_id, tool: req.name, argsHash: argsHash(req.args), title: req.title || req.name });
     return this.s.request("POST", path, { approve: true, comment, ...signed });
   }
 

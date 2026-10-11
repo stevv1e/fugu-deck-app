@@ -50,7 +50,10 @@ export type ActionBody =
   | { type: 'account_delete'; user: string }
   // Удаляется пространство из конверта (space). Подпись проверяет space-operator через keyguard: без неё
   // запрос удаления от control-plane не исполняется.
-  | { type: 'space_delete' };
+  | { type: 'space_delete' }
+  // Разрешение агенту выполнить действие инструмента. Подписывается то, что человек видит на карточке:
+  // какой инструмент и хеш его аргументов; агент пространства проверяет подпись через keyguard.
+  | { type: 'tool_approve'; approval: string; tool: string; args_sha256: string };
 
 export type ActionType = ActionBody['type'];
 export type ActionEnvelope = ActionBody & { space?: string; device_id: string; nonce: string; ts: number };
@@ -97,7 +100,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 export const IN_SPACE: Record<ActionType, boolean> = {
   key_put: false, key_delete: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
-  role_change: true, space_delete: true,
+  role_change: true, space_delete: true, tool_approve: true,
 };
 const date: Check = (v, n) => {
   str(10, /^\d{4}-\d{2}-\d{2}$/)(v, n);
@@ -182,6 +185,12 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
   device_revoke: { user: id, target: deviceId },
   account_delete: { user: id },
   space_delete: {},
+  tool_approve: {
+    approval: str(64, /^[A-Za-z0-9_-]{1,64}$/),
+    tool: str(80, /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/),
+    // SHA-256 канонической формы аргументов в base64url — то же значение, что считает агент (devices.args_hash)
+    args_sha256: str(43, JKT),
+  },
 };
 
 export function validateAction(input: unknown): ActionBody {
@@ -308,6 +317,8 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
         lines: [where, 'Через 24 ч удалятся чаты, память, агенты и копии этого пространства. До этого удаление можно отменить.'],
         danger: true,
       };
+    case 'tool_approve':
+      return { title: 'Разрешить агенту действие', lines: [where, `Инструмент: ${a.tool}`], danger: false };
     case 'account_delete':
       return {
         title: 'Удалить аккаунт',

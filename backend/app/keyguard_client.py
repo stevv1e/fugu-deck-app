@@ -50,6 +50,25 @@ def headers(chat_id: str, member: str) -> dict[str, str]:
     return {"X-Deck-Chat": chat_id, "X-Deck-Member": member}
 
 
+async def verify_action(jws: str) -> dict:
+    """Проверить подписанное действие владельца через keyguard (POST /v1/actions/verify).
+
+    Пространство само подписи не проверяет: ключей устройств у него нет. keyguard сверяет подпись с реестром
+    устройств, сжигает одноразовый nonce и отвечает действием и подписавшим — только если подписал владелец
+    этого пространства и именно для него. Возвращает {"action": {...}, "user": ..., "device_id": ...}.
+    """
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(f"{_s().keyguard_url.rstrip('/')}/v1/actions/verify", json={"jws": jws},
+                         headers={"Authorization": f"Bearer {token()}"})
+    if r.status_code != 200:
+        try:
+            why = r.json().get("error") or r.text
+        except ValueError:
+            why = r.text
+        raise PermissionError(str(why)[:300])
+    return r.json()
+
+
 class Auth(httpx.Auth):
     """Свежий токен пространства на каждый запрос Git (httpx)."""
 
