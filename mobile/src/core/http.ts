@@ -40,15 +40,20 @@ export function errorFrom(status: number, text: string): ApiError {
   try {
     body = JSON.parse(text);
   } catch {}
+  // Три формата: агент отдаёт {detail}, control-plane и keyguard — {error: "текст"}, Keycloak — {error, error_description}.
+  // Без двух последних экран показывал бы «Ошибка 403» вместо причины, которую сервер назвал.
   const detail = body?.detail;
+  const named = typeof body?.error_description === "string" ? body.error_description : typeof body?.error === "string" ? body.error : null;
   const msg =
     typeof detail === "string"
       ? detail
       : Array.isArray(detail)
         ? detail.map((d: any) => d?.msg).filter(Boolean).join("; ")
-        : status === 0
-          ? "Сервер недоступен"
-          : `Ошибка ${status}`;
+        : named
+          ? named
+          : status === 0
+            ? "Сервер недоступен"
+            : `Ошибка ${status}`;
   return new ApiError(status, msg, body);
 }
 
