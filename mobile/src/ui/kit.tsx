@@ -4,6 +4,7 @@ import { create as createQr } from "qrcode";
 import { useMemo, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -68,8 +69,11 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
       {title !== undefined && <TopBar title={title} back={back} right={right} />}
-      {body}
-      {footer}
+      {/* Клавиатура не должна закрывать поле, в которое печатают (на Android окно под неё само не сжимается). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+        {body}
+        {footer}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -6,7 +6,7 @@
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApprovalRequest } from "@/core/api";
@@ -312,7 +312,9 @@ export default function Chat() {
           {runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
         </Row>
       ) : null}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* На Android окно рисуется под системными панелями (edge-to-edge), и система сама его под клавиатуру
+          не сжимает — без отступа клавиатура закрывала бы поле ввода. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {!conv && !apiError && !error ? <Loading /> : null}
         <FlatList
           ref={list}
@@ -320,6 +322,7 @@ export default function Chat() {
           keyExtractor={(i) => i.key}
           contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
+          onLayout={() => list.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) =>
             item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} /> : <Bubble item={item} meId={meId} />
           }
