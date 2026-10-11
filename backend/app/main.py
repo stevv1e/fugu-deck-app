@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import auth, devices, spaceauth
+from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
 from .db import DEFAULT_PROJECT, Database, new_id
@@ -956,6 +957,7 @@ class ApprovalIn(BaseModel):
     comment: str = ""
     action: dict | None = None   # подписанное действие (с телефона)
     sig: str | None = None
+    jws: str | None = None       # то же в кластере: компактный JWS, проверяет keyguard
 
 
 @app.post("/api/approvals/{aid}")
@@ -971,6 +973,22 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
             state["device_auth"].check_action(body.action or {}, body.sig or "", d["confirm_jwk"], d["id"], {
                 "type": "approve_tool", "approval_id": aid, "tool": meta.get("name"),
                 "args_sha256": devices.args_hash(meta.get("args")), "approve": body.approve})
+    elif settings.is_space and kgc.enabled() and body.approve:
+        # В кластере «за» действует только с подписью ключа подтверждения владельца (биометрия на телефоне).
+        # Иначе разрешить агенту действие мог бы любой, кто получил токен пространства, — в том числе control-plane.
+        meta = run.approval_meta.get(aid) or {}
+        if not body.jws:
+            raise HTTPException(403, "Нужна подпись: подтвердите действие в приложении")
+        try:
+            res = await kgc.verify_action(body.jws)
+        except PermissionError as e:
+            raise HTTPException(403, f"Подпись не принята: {e}")
+        except Exception:
+            raise HTTPException(503, "Не удалось проверить подпись — повторите")
+        a = res.get("action") or {}
+        want = {"type": "tool_approve", "approval": aid, "tool": meta.get("name"), "args_sha256": devices.args_hash(meta.get("args"))}
+        if any(a.get(k) != v for k, v in want.items()):
+            raise HTTPException(403, "Подписано другое действие — не то, что ждёт подтверждения")
     agent().resolve_approval(aid, body.approve, body.comment)
     await broker().publish("run.approval_resolved", run.project_id, conversation_id=run.conversation_id,
                            run_id=run.id, approved=body.approve, by=u["display_name"])

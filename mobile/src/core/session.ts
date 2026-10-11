@@ -7,6 +7,7 @@
  */
 import { b64u, randomId } from "./bytes";
 import { canonical } from "./canonical";
+import { signClusterAction } from "./cluster";
 import { dpopProof } from "./dpop";
 import { ApiError, errorFrom, type Http, type StreamHandle } from "./http";
 import type { DeviceKeys } from "./keys";
@@ -126,6 +127,17 @@ export class DeviceSession {
   }
 
   /**
+   * Подписать разрешение агенту выполнить действие инструмента (биометрия). Подписывается то, что человек видит
+   * на карточке: инструмент и хеш его аргументов. Возвращает поля для тела POST /api/approvals/<id>.
+   */
+  async signApproval(a: { approvalId: string; tool: string; argsHash: string; title: string }): Promise<Record<string, unknown>> {
+    return this.signAction(
+      { type: "approve_tool", approval_id: a.approvalId, tool: a.tool, args_sha256: a.argsHash, approve: true },
+      `Разрешить: ${a.title}`,
+    );
+  }
+
+  /**
    * Поток SSE с переподключением. Каждое подключение — с новым DPoP-доказательством
    * (повтор старого сервер отверг бы), поэтому стандартный EventSource не годится.
    */
@@ -210,6 +222,8 @@ export class DeviceSession {
 /** То, чем сессия кластера отличается от сессии одиночного сервера. */
 export type ClusterAuth = {
   deviceId: string;
+  /** Пространство, для которого подписываются действия (u-<ник>); у сессии самого api.<домен> его нет. */
+  space?: string;
   /** Новый токен доступа Keycloak (обновление по refresh-токену с DPoP); now — секунды. */
   token(now: number): Promise<{ accessToken: string; expiresIn: number }>;
 };
@@ -240,6 +254,20 @@ export class ClusterSession extends DeviceSession {
   protected override async newToken(): Promise<Token> {
     const t = await this.auth.token(this.now());
     return { value: t.accessToken, exp: this.now() + (t.expiresIn || 300) };
+  }
+
+  /**
+   * В кластере разрешение агенту — подписанное действие tool_approve (компактный JWS) для ЭТОГО пространства.
+   * Агент пространства сам подписи не проверяет: он отдаёт её keyguard, а тот сверяет с реестром устройств.
+   */
+  override async signApproval(a: { approvalId: string; tool: string; argsHash: string; title: string }): Promise<Record<string, unknown>> {
+    if (!this.auth.space) throw new Error("Сессия не привязана к пространству");
+    const signed = await signClusterAction(
+      this.keys,
+      { type: "tool_approve", approval: a.approvalId, tool: a.tool, args_sha256: a.argsHash },
+      { space: this.auth.space, nowMs: this.now() * 1000 },
+    );
+    return { jws: signed.jws };
   }
 
   /**

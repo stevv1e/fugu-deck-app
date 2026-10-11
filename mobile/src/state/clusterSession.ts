@@ -53,7 +53,8 @@ export async function openClusterSession(c: ClusterRecord, baseUrl: string): Pro
   const keys = await (await keyProvider()).load(c.alias);
   if (!keys) throw new Error("Ключи устройства не найдены — зарегистрируйтесь заново по приглашению");
   const server = { ...spaceServerRecord(c), url: baseUrl };
-  return new ClusterSession(mtlsHttp(c.alias + ".s"), server, keys, { deviceId: c.deviceId, token: (now) => clusterToken(c, now) });
+  const space = baseUrl === spaceUrl(c) ? `u-${c.user}` : undefined; // подписи действий — только для своего пространства
+  return new ClusterSession(mtlsHttp(c.alias + ".s"), server, keys, { deviceId: c.deviceId, space, token: (now) => clusterToken(c, now) });
 }
 
 export type SpaceState = { exists: boolean; id?: string; phase?: string; message?: string; url?: string };
