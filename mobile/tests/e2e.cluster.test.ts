@@ -24,8 +24,9 @@ import {
   parseRedirect, refresh, signClusterAction, type ClusterInvite, type Tokens,
 } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
+import { confirmDevice, createInvite, listDevices, revokeDevice, sortDevices, type ApiSession, type DeviceList } from "../src/core/devices";
 import { dpopProof } from "../src/core/dpop";
-import { ApiError, fetchHttp, type Http } from "../src/core/http";
+import { ApiError, errorFrom, fetchHttp, type Http } from "../src/core/http";
 import { makeKey, type DeviceKeys } from "../src/core/keys";
 
 const E = process.env;
@@ -257,4 +258,66 @@ test("приглашение → регистрация → сертификат
   // 10. Без приглашения шаги регистрации закрыты.
   const noInv = await plain.request({ method: "POST", url: `${inv.join}/v1/enroll/challenge`, headers: { "Content-Type": "application/json" }, body: "{}" });
   assert.equal(noInv.status, 401, "вызов для аттестации без приглашения");
+
+  // 11. Экран «Устройства»: администратор видит устройства всех, ждущие решения — первыми.
+  const session = (h: Http, i: ClusterInvite, keys: DeviceKeys, tokens: Tokens): ApiSession => ({
+    request: async (method, path, body) => {
+      const r = await apiCall(h, i, keys, tokens, method, path, body);
+      if (r.status < 200 || r.status >= 300) throw errorFrom(r.status, r.text);
+      return JSON.parse(r.text);
+    },
+  });
+  const anna = session(mtls, inv, a.keys, t2);
+  const l1 = await listDevices(anna);
+  assert.equal(l1.admin, true);
+  assert.equal(l1.device_id, a.out.device_id);
+  const byId = (l: DeviceList) => Object.fromEntries(l.devices.map((d) => [d.id, `${d.user}/${d.status}`]));
+  assert.deepEqual(byId(l1), { [a.out.device_id!]: "anna/active", [a2.out.device_id!]: "anna/pending", [b.out.device_id!]: "bob/pending" });
+  assert.equal(sortDevices(l1).at(-1)!.id, a.out.device_id, "ждущие подтверждения — выше действующих");
+  assert.doesNotMatch(JSON.stringify(l1), /BEGIN|session|confirm_jkt/i, "в списке нет ключей и сертификатов");
+
+  // 12. Администратор подтверждает устройство Боба подписью — оно получает сертификат и входит на api.
+  const bobDev = l1.devices.find((d) => d.id === b.out.device_id)!;
+  assert.equal(bobDev.name, "Телефон Боба");
+  await assert.rejects(confirmDevice(anna, a.keys, { ...bobDev, name: "Телефон Мэллори" }), /не совпадают/, "подписано не то имя, что в реестре");
+  await confirmDevice(anna, a.keys, bobDev);
+  const stB2 = await fetchStatus(plain, inv2, b.keys, now());
+  assert.equal(stB2.status, "active");
+  const bob = session(apiHttp({ key: b.keys.sessionPem, cert: stB2.cert_pem! }), inv2, b.keys, b.tokens);
+  const lb = await listDevices(bob);
+  assert.equal(lb.admin, false);
+  assert.deepEqual(byId(lb), { [b.out.device_id!]: "bob/active" }, "обычный пользователь видит только свои устройства");
+
+  // 13. Приглашения из приложения: себе — можно, другому — только администратор.
+  await assert.rejects(createInvite(bob, b.keys, "dave"), /администратор/, "Боб приглашает нового пользователя");
+  await assert.rejects(revokeDevice(bob, b.keys, l1.devices.find((d) => d.id === a.out.device_id)!), /администратор/, "Боб отзывает устройство Анны");
+  const own = await createInvite(bob, b.keys, "bob");
+  assert.equal(own.nick, "bob");
+  const b2 = await join(parseClusterInvite(own.link), "bob", "Планшет Боба");
+  assert.equal(b2.out.status, "pending", JSON.stringify(b2.out));
+  const tablet = (await listDevices(bob)).devices.find((d) => d.id === b2.out.device_id)!;
+  await confirmDevice(bob, b.keys, tablet); // своё второе устройство подтверждает сам пользователь
+  assert.equal((await fetchStatus(plain, parseClusterInvite(own.link), b2.keys, now())).status, "active");
+  // Действие, подписанное Бобом, в сеансе Анны не годится: подписать должен тот, кто вошёл.
+  const bobSigned = await signClusterAction(b.keys, { type: "invite_create", user: "bob" });
+  await assert.rejects(anna.request("POST", "/v1/invites", bobSigned), /не этим устройством/);
+
+  // 14. Администратор приглашает нового пользователя из приложения — по ссылке проходит регистрация.
+  const forDave = await createInvite(anna, a.keys, "dave");
+  await setPassword("dave", "dave-pass");
+  const d1 = await join(parseClusterInvite(forDave.link), "dave", "Телефон Дейва");
+  assert.equal(d1.out.status, "pending", JSON.stringify(d1.out));
+  assert.equal(d1.out.user, "dave");
+  await assert.rejects(createInvite(anna, a.keys, "Dave Smith"), /Ник/, "недопустимый ник отклонён до подписи");
+
+  // 15. Отзыв: отклонённое ожидающее устройство и отозванное действующее теряют доступ сразу.
+  await revokeDevice(anna, a.keys, (await listDevices(anna)).devices.find((d) => d.id === a2.out.device_id)!);
+  assert.equal((await fetchStatus(plain, inv4, a2.keys, now())).status, "revoked");
+  await revokeDevice(anna, a.keys, bobDev);
+  assert.equal((await fetchStatus(plain, inv2, b.keys, now())).status, "revoked");
+  await assert.rejects(createInvite(bob, b.keys, "bob"), ApiError, "отозванное устройство не может подписывать действия");
+  const l2 = byId(await listDevices(anna));
+  assert.equal(l2[b.out.device_id!], "bob/revoked");
+  assert.equal(l2[b2.out.device_id!], "bob/active", "второе устройство Боба не затронуто");
+  assert.equal(l2[d1.out.device_id!], "dave/pending");
 });

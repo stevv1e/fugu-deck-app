@@ -47,6 +47,8 @@ export type ActionBody =
   // user и name подтверждаемого устройства keyguard сверяет со своим реестром: подписано то, что показано.
   | { type: 'device_approve'; user: string; target: string; name: string }
   | { type: 'device_revoke'; user: string; target: string }
+  // Приглашение на ник user: себе — ещё одно своё устройство, другому (только администратор) — новый пользователь.
+  | { type: 'invite_create'; user: string }
   | { type: 'account_delete'; user: string }
   // Удаляется пространство из конверта (space). Подпись проверяет space-operator через keyguard: без неё
   // запрос удаления от control-plane не исполняется.
@@ -98,7 +100,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** Действия в пространстве несут space в конверте (и человек его видит); у остальных поля space нет вовсе. */
 export const IN_SPACE: Record<ActionType, boolean> = {
-  key_put: false, key_delete: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false,
+  key_put: false, key_delete: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
   role_change: true, space_delete: true, tool_approve: true,
 };
@@ -183,6 +185,7 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
   },
   device_enroll: { session_jkt: str(43, JKT), confirm_jkt: str(43, JKT), name: str(80) },
   device_revoke: { user: id, target: deviceId },
+  invite_create: { user: id },
   account_delete: { user: id },
   space_delete: {},
   tool_approve: {
@@ -310,6 +313,12 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
         title: 'Отозвать устройство',
         lines: [`Пользователь: ${a.user}`, `ID: ${a.target.slice(0, 10)}…`, 'Устройство сразу потеряет доступ.'],
         danger: true,
+      };
+    case 'invite_create':
+      return {
+        title: 'Выпустить приглашение',
+        lines: [`Пользователь: ${a.user}`, 'По ссылке можно подключить одно устройство в течение 24 ч.'],
+        danger: false,
       };
     case 'space_delete':
       return {
