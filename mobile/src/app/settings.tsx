@@ -2,6 +2,7 @@
 import Constants from "expo-constants";
 import { Pressable, View } from "react-native";
 
+import { versionLabel } from "@/core/version";
 import { useServers } from "@/state/servers";
 import { Card, Chip, Row, Screen, Txt } from "@/ui/kit";
 import { THEMES, useTheme } from "@/ui/theme";
@@ -70,7 +71,9 @@ export default function AppSettings() {
 
       <Card>
         <Txt kind="label">о приложении</Txt>
-        <Txt kind="dim">Fugu Deck {Constants.expoConfig?.version ?? ""} · протокол устройств v1</Txt>
+        <Txt kind="dim" selectable>
+          Fugu Deck {versionLabel(Constants.expoConfig?.version, Constants.expoConfig?.extra?.commit)} · протокол устройств v1
+        </Txt>
         <Txt kind="small">
           Вход по ключу устройства (DPoP), подтверждения подписываются ключом с биометрией, сервер проверяется по отпечатку его ключа.
         </Txt>
