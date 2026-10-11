@@ -54,6 +54,7 @@ const valid: [string, string | null, Record<string, unknown>][] = [
   ["device_approve", null, { type: "device_approve", user: "anna", target: TARGET, name: "iPhone 17 Pro — Анна" }],
   ["device_revoke", null, { type: "device_revoke", user: "anna", target: TARGET }],
   ["account_delete", null, { type: "account_delete", user: "anna" }],
+  ["invite_create", null, { type: "invite_create", user: "dave" }],
   ["space_delete", "t-shop", { type: "space_delete" }],
   ["tool_approve", "u-anna", { type: "tool_approve", approval: "a1b2c3d4e5f6", tool: "github_create_file", args_sha256: JKT }],
 ];

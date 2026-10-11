@@ -157,6 +157,7 @@ export default function ClusterDevice() {
             <Txt kind="dim">Проекты и чаты с агентом. Он работает в вашем отдельном окружении в кластере; ключи API к нему не попадают.</Txt>
             <Btn title="Открыть пространство" onPress={openSpace} busy={spaceBusy} />
           </Card>
+          <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
           <Txt kind="dim">Ключ API шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят.</Txt>
           <Row gap={6}>{KEY_PROVIDERS.map((p) => (
             <Btn key={p} small title={TITLES[p]} kind={p === provider ? "primary" : "ghost"} onPress={() => setProvider(p)} />
