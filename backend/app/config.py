@@ -79,6 +79,8 @@ class Settings(BaseSettings):
 
     # --- Хранилище ---
     data_dir: Path = Path("./data")
+    # Кластер v2: файл с токеном, по которому space-operator забирает снимок базы (app/backup.py). Пусто — выключено.
+    backup_token_file: str = ""
     # Папка скилов. По умолчанию внутри data_dir; можно смонтировать отдельный git-репозиторий.
     skills_dir: Path | None = None
     max_upload_mb: int = 25

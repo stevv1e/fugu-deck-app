@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import re
 import time
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import auth, devices, spaceauth
+from . import auth, backup, devices, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
@@ -34,6 +35,8 @@ ROLES = {"viewer": 1, "editor": 2, "owner": 3}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.is_space and backup.apply_pending_restore(settings.db_path):
+        log.warning("база пространства восстановлена из резервной копии")
     db = Database(str(settings.db_path))
     await db.connect()
     if not settings.is_space:
@@ -56,6 +59,8 @@ async def lifespan(app: FastAPI):
         await p.http.aclose()
     await db.close()
 
+
+log = logging.getLogger("fugu.deck")
 
 app = FastAPI(title="Fugu Deck", lifespan=lifespan, docs_url=None, redoc_url=None)
 if settings.cors_origins:
@@ -1387,6 +1392,9 @@ async def import_project(body: ImportIn, u: dict = Me):
 # ================================================================== служебное для control-plane
 class RevokeIn(BaseModel):
     token: str
+
+
+app.include_router(backup.router(settings))
 
 
 class RosterIn(BaseModel):
