@@ -247,6 +247,8 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string>("");
+  const [models, setModels] = useState<{ list: string[]; ready: string[] } | null>(null);
+  const [switching, setSwitching] = useState(false);
   const stream = useRef<{ close(): void } | null>(null);
   const list = useRef<FlatList<Item>>(null);
 
@@ -333,6 +335,32 @@ export default function Chat() {
     [api],
   );
 
+  // Выбор модели личного чата: список моделей сервера; недоступны те, для чьего провайдера нет ключа.
+  const openModels = async () => {
+    if (!api) return;
+    if (models) return setModels(null);
+    try {
+      const c = await api.config();
+      setModels({ list: c.models, ready: c.llm_ready });
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+  const pickModel = async (m: string) => {
+    if (!api || !conv || m === conv.model) return setModels(null);
+    setSwitching(true);
+    setError(null);
+    try {
+      await api.setModel(cid, m);
+      setConv({ ...conv, model: m });
+      setModels(null);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   // Состояние чата (модель, спонсор, предложение) перечитываем после действий с моделью общего чата.
   const refresh = useCallback(() => {
     api?.conversation(cid).then(
@@ -351,12 +379,31 @@ export default function Chat() {
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
       <TopBar title={conv?.title || "Чат"} back />
       {conv ? (
-        <Row style={{ paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.line, justifyContent: "space-between" }}>
-          <Txt kind="mono" color={p.accent} numberOfLines={1} style={{ fontSize: 11.5, flex: 1 }}>
-            {conv.model}
-          </Txt>
-          {runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
-        </Row>
+        <Pressable onPress={conv.team || runId || !canWrite ? undefined : openModels}>
+          <Row style={{ paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.line, justifyContent: "space-between" }}>
+            <Txt kind="mono" color={p.accent} numberOfLines={1} style={{ fontSize: 11.5, flex: 1 }}>
+              {conv.model}{conv.team || !canWrite ? "" : "  ▾"}
+            </Txt>
+            {runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
+          </Row>
+        </Pressable>
+      ) : null}
+      {models && conv && !conv.team ? (
+        <View style={{ padding: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }}>
+          <Row gap={6} style={{ flexWrap: "wrap" }}>
+            {models.list.map((m) => {
+              const ready = models.ready.includes(m.split(":")[0]);
+              return (
+                <Btn key={m} small title={m.split(":").pop()!} kind={m === conv.model ? "primary" : "ghost"} disabled={!ready || switching}
+                  onPress={() => pickModel(m)} />
+              );
+            })}
+            <Btn small title="Закрыть" kind="ghost" onPress={() => setModels(null)} />
+          </Row>
+          {models.list.some((m) => !models.ready.includes(m.split(":")[0])) ? (
+            <Txt kind="small">Серые модели недоступны: для их провайдера не введён ключ (экран кластера → ключи).</Txt>
+          ) : null}
+        </View>
       ) : null}
       {/* На Android окно рисуется под системными панелями (edge-to-edge), и система сама его под клавиатуру
           не сжимает — без отступа клавиатура закрывала бы поле ввода. */}
