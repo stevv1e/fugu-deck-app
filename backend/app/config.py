@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Кластер v2: модели и Git только через keyguard; ключей в пространстве нет.
     keyguard_url: str = ""                  # http://keyguard.deck-keys.svc.cluster.local:8080
     keyguard_token_path: str = "/var/run/secrets/keyguard/token"
+    # Кластер v2: серверы пользователя — только через ssh-gateway, со своим токеном (audience=ssh-gateway)
+    ssh_gateway_url: str = ""               # http://ssh-gateway.deck-ssh.svc.cluster.local:8080
+    ssh_gateway_token_path: str = "/var/run/secrets/ssh-gateway/token"
     llm_timeout_seconds: int = 900  # Ultra может думать несколько минут
     max_agent_steps: int = 30
 

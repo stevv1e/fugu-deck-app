@@ -24,6 +24,8 @@ class ToolContext:
     skills: Any = None
     broker: Any = None
     run_id: str = ""  # запуск агента: по нему ведётся журнал использования заметок базы знаний
+    ssh_need: str = ""       # какая подпись нужна шлюзу для текущей команды на сервере (ssh_write | ssh_danger)
+    approval_jws: str = ""   # подпись человека на текущее действие — инструмент передаёт её исполнителю
 
     @property
     def project_id(self) -> str:
