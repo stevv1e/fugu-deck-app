@@ -371,6 +371,10 @@ class Database:
     async def set_proposal_grant(self, pid: str, grant_id: str) -> None:
         await self._exec("UPDATE model_proposals SET grant_id=? WHERE id=? AND status='pending'", (grant_id, pid))
 
+    async def proposal_of_grant(self, grant_id: str) -> str | None:
+        r = await self._one("SELECT id FROM model_proposals WHERE grant_id=? ORDER BY created_at DESC LIMIT 1", (grant_id,))
+        return r["id"] if r else None
+
     async def set_conversation_grant(self, cid: str, grant_id: str | None) -> None:
         await self._exec("UPDATE conversations SET grant_id=? WHERE id=?", (grant_id, cid))
 

@@ -1071,6 +1071,8 @@ async def chat_model_state(c: dict, u: dict) -> dict:
         out["sponsor"] = {"id": sp["id"], "name": sp["display_name"],
                           "online": True if kg_team() else bool(vault().get(sp["id"]).get(pname)),
                           "grant_id": c.get("grant_id"),
+                          # для подписанного отзыва: разрешение в keyguard отзывается по чату и предложению
+                          "proposal_id": await db().proposal_of_grant(c["grant_id"]) if c.get("grant_id") else None,
                           "limit_usd": c.get("sponsor_limit_usd"), "limit_tokens": c.get("sponsor_limit_tokens"),
                           "until": c.get("sponsor_until"), "since": c.get("sponsor_since"),
                           "spent_usd": round(used["usd"], 4), "spent_tokens": used["tokens"],

@@ -15,7 +15,9 @@ import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
 import { useApi } from "@/state/hooks";
 import { useServers } from "@/state/servers";
+import type { TeamChatState } from "@/core/teams";
 import { Btn, Chip, errText, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { TeamModel } from "@/ui/TeamModel";
 import { alpha, MONO, useTheme } from "@/ui/theme";
 
 type Tool = Extract<Item, { kind: "tool" }>;
@@ -298,6 +300,17 @@ export default function Chat() {
     [api],
   );
 
+  // Состояние чата (модель, спонсор, предложение) перечитываем после действий с моделью общего чата.
+  const refresh = useCallback(() => {
+    api?.conversation(cid).then(
+      (c) => {
+        setConv(c);
+        if (!stream.current) setItems(fromStored(c.messages, meId));
+      },
+      () => {},
+    );
+  }, [api, cid, meId]);
+
   const pending = items.filter((i): i is Tool => i.kind === "tool" && i.status === "pending" && !!i.approval);
   const canWrite = conv?.my_role !== "viewer";
 
@@ -326,7 +339,14 @@ export default function Chat() {
           renderItem={({ item }) =>
             item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} /> : <Bubble item={item} meId={meId} />
           }
-          ListHeaderComponent={apiError || error ? <Notice text={(apiError || error)!} /> : null}
+          ListHeaderComponent={
+            <View style={{ gap: 12 }}>
+              {apiError || error ? <Notice text={(apiError || error)!} /> : null}
+              {conv?.team && api ? (
+                <TeamModel sid={sid} cid={cid} api={api} state={conv as TeamChatState} model={conv.model} meId={meId} canWrite={canWrite} onChanged={refresh} />
+              ) : null}
+            </View>
+          }
           ListFooterComponent={
             runId ? (
               <Row style={{ justifyContent: "center" }}>

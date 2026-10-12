@@ -20,7 +20,7 @@ import { keyProvider } from "@/platform/keys";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { prefs } from "@/platform/storage";
 
-import { clusterOfSid, listClusters, type ClusterRecord } from "./cluster";
+import { clusterOfSid, listClusters, parseSid, type ClusterRecord } from "./cluster";
 import { openClusterSession, spaceServerRecord, spaceUrl } from "./clusterSession";
 
 const KEY = "fd:servers";
@@ -102,10 +102,10 @@ export function ServersProvider({ children }: { children: ReactNode }) {
   );
 
   const get = useCallback((id: string) => {
-    const cid = clusterOfSid(id);
-    if (cid === null) return ref.current.find((s) => s.id === id);
-    const c = clusters.current.find((x) => x.id === cid);
-    return c ? spaceServerRecord(c) : undefined;
+    const sp = parseSid(id);
+    if (sp === null) return ref.current.find((s) => s.id === id);
+    const c = clusters.current.find((x) => x.id === sp.cluster);
+    return c ? spaceServerRecord(c, sp.team) : undefined;
   }, []);
 
   const probe = useCallback(async (url: string, expectedFp?: string) => {
@@ -213,11 +213,11 @@ export function ServersProvider({ children }: { children: ReactNode }) {
       const cached = apis.current.get(id);
       if (cached) return cached;
       const p = (async () => {
-        const cid = clusterOfSid(id);
-        if (cid !== null) {
-          const c = clusters.current.find((x) => x.id === cid);
+        const sp = parseSid(id);
+        if (sp !== null) {
+          const c = clusters.current.find((x) => x.id === sp.cluster);
           if (!c) throw new Error("Кластер не найден — зарегистрируйтесь по приглашению");
-          return new DeckApi(await openClusterSession(c, spaceUrl(c)));
+          return new DeckApi(await openClusterSession(c, spaceUrl(c, sp.team)));
         }
         const rec = ref.current.find((s) => s.id === id);
         if (!rec?.device) throw new Error("Сначала войдите на этот сервер");

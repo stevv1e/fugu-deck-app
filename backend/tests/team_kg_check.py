@@ -109,7 +109,8 @@ with TestClient(main.app) as c:
     assert r["applied"] is True and CALLS[-1] == ("activate", "g-000000a1"), (r, CALLS)
     conv = c.get(f"/api/conversations/{chat}", headers=bob).json()
     assert conv["model"] == MAX and conv["sponsor"]["id"] == "anna" and conv["sponsor"]["limit_usd"] == 20.0 \
-        and conv["sponsor"]["grant_id"] == "g-000000a1" and conv["sponsor"]["online"] is True, conv
+        and conv["sponsor"]["grant_id"] == "g-000000a1" and conv["sponsor"]["online"] is True \
+        and conv["sponsor"]["proposal_id"] == p1, conv
     # условия подписаны: менять их правкой нельзя — только новым предложением
     assert c.patch(f"/api/conversations/{chat}/sponsor", headers=anna, json={"limit_usd": 500}).status_code == 409
 
