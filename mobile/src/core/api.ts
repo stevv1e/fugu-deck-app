@@ -3,6 +3,17 @@ import { argsHash } from "./crypto";
 import type { DeviceSession } from "./session";
 import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } from "./types";
 
+/** Заметка базы знаний, как её отдаёт агент для экрана. id — для экрана (n<число>), mid — номер записи для правки. */
+export type KbNote = {
+  id: string; mid: number | null; area: string; title: string; body: string; days: number; source: string; src: string;
+  stale: boolean; ext: boolean; pinned: boolean; tags: string; hub?: boolean;
+};
+export type KbGraph = {
+  project: { id: string; name: string }; hub: string; notes: KbNote[]; edges: [string, string, string, number][];
+  areas: Record<string, { name: string; groups: [string, string[]][] }>; sources: Record<string, string>; link_types: Record<string, string>;
+};
+export type NoteInput = { content: string; title?: string | null; area?: string | null; tags?: string; grp?: string | null; source_ref?: string | null; pinned?: boolean };
+
 export type AppConfig = {
   mode: string;
   me: { id: string; username: string; display_name: string; role: string };
@@ -28,6 +39,14 @@ export class DeckApi {
   createConversation = (pid: string, model?: string) =>
     this.s.request<Conversation>("POST", `/api/projects/${enc(pid)}/conversations`, { model: model || null });
   conversation = (cid: string) => this.s.request<ConversationFull>("GET", `/api/conversations/${enc(cid)}`);
+  // ---- база знаний: заметки проекта со связями (агент: /api/projects/<id>/kb, /api/memory) ----
+  kb = (pid: string) => this.s.request<KbGraph>("GET", `/api/projects/${enc(pid)}/kb`);
+  addNote = (pid: string, n: NoteInput) => this.s.request<{ id: number }>("POST", `/api/projects/${enc(pid)}/memory`, n);
+  updateNote = (mid: number, n: Partial<NoteInput> & { stale?: boolean }) => this.s.request("PATCH", `/api/memory/${mid}`, n);
+  deleteNote = (mid: number) => this.s.request("DELETE", `/api/memory/${mid}`);
+  linkNotes = (from: number, to: number, type: string) => this.s.request("POST", `/api/memory/${from}/links`, { to, type });
+  unlinkNotes = (a: number, b: number) => this.s.request("DELETE", `/api/memory/${a}/links/${b}`);
+
   /** Удалить чат со всей перепиской и вложениями; идущее задание агента в нём останавливается. */
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
   send = (cid: string, content: string, model?: string) =>

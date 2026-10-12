@@ -67,6 +67,7 @@ export default function ProjectChats() {
       >
         {apiError || error ? <Notice text={(apiError || error)!} /> : null}
         {err ? <Notice text={err} /> : null}
+        <Btn title="База знаний проекта" kind="ghost" onPress={() => router.push(`/s/${sid}/kb/${pid}`)} />
         {canWrite && data ? <Btn title="＋ Новый чат" onPress={create} busy={busy} /> : null}
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Чатов нет" text="Начните новый чат с агентом." /> : null}
