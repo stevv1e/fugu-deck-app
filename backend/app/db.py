@@ -198,9 +198,39 @@ SCHEMA = [
     ALTER TABLE model_proposals ADD COLUMN grant_id TEXT;
     ALTER TABLE conversations ADD COLUMN grant_id TEXT;
     """,
+    # v9: база знаний — запись памяти становится заметкой (заголовок, область, группа, источник, состояние),
+    # между заметками появляются типизированные связи с силой, ведётся журнал использования агентом
+    """
+    ALTER TABLE memories ADD COLUMN title TEXT;
+    ALTER TABLE memories ADD COLUMN area TEXT;
+    ALTER TABLE memories ADD COLUMN grp TEXT;
+    ALTER TABLE memories ADD COLUMN origin TEXT;
+    ALTER TABLE memories ADD COLUMN source_ref TEXT;
+    ALTER TABLE memories ADD COLUMN external INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE memories ADD COLUMN stale INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE memories ADD COLUMN last_used_at REAL;
+    CREATE TABLE IF NOT EXISTS note_links (
+        a INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        b INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        type TEXT NOT NULL DEFAULT 'ref',
+        strength REAL NOT NULL DEFAULT 0.35,
+        auto INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        last_used_at REAL,
+        PRIMARY KEY (a, b, type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_note_links_b ON note_links(b);
+    CREATE TABLE IF NOT EXISTS note_uses (
+        memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL,
+        used_at REAL NOT NULL,
+        PRIMARY KEY (memory_id, run_id)
+    );
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
+NOTE_FIELDS = ("title", "area", "grp", "origin", "source_ref", "external")
 
 
 def new_id() -> str:
@@ -670,20 +700,107 @@ class Database:
         return await self._one("SELECT * FROM memories WHERE id=?", (mid,))
 
     async def add_memory(self, pid: str, content: str, tags: str = "", source: str = "user",
-                         author: str | None = None, conversation_id: str | None = None, pinned: bool = False) -> dict:
+                         author: str | None = None, conversation_id: str | None = None, pinned: bool = False,
+                         **note: Any) -> dict:
+        """note — поля заметки базы знаний: title, area, grp, origin, source_ref, external."""
         now = time.time()
+        extra = {k: (int(v) if k == "external" else v) for k, v in note.items() if k in NOTE_FIELDS and v is not None}
+        cols = ["project_id", "content", "tags", "pinned", "source", "author", "conversation_id", "created_at", "updated_at", *extra]
         mid = await self._exec(
-            "INSERT INTO memories (project_id,content,tags,pinned,source,author,conversation_id,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)", (pid, content, tags, int(pinned), source, author, conversation_id, now, now))
+            f"INSERT INTO memories ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+            (pid, content, tags, int(pinned), source, author, conversation_id, now, now, *extra.values()))
+        await self.sync_wiki_links(mid)
         return await self.get_memory(mid)  # type: ignore[return-value]
 
     async def update_memory(self, mid: int, **fields: Any) -> None:
-        fields = {k: (int(v) if k == "pinned" else v) for k, v in fields.items() if v is not None}
+        allowed = {"content", "tags", "pinned", *NOTE_FIELDS, "stale"}
+        fields = {k: (int(v) if k in ("pinned", "external", "stale") else v) for k, v in fields.items()
+                  if v is not None and k in allowed}
         if not fields:
             return
         fields["updated_at"] = time.time()
         sets = ",".join(f"{k}=?" for k in fields)
         await self._exec(f"UPDATE memories SET {sets} WHERE id=?", (*fields.values(), mid))
+        if "content" in fields or "title" in fields:
+            await self.sync_wiki_links(mid)
+
+    # ================================================================ база знаний: связи и использование
+    async def sync_wiki_links(self, mid: int) -> None:
+        """Ссылки [[Заголовок]] в тексте заметки становятся связями типа «ссылка» (и исчезают вместе с текстом)."""
+        from .kb import title_of, wiki_links
+        m = await self.get_memory(mid)
+        if not m:
+            return
+        wanted = [t.lower() for t in wiki_links(m["content"])]
+        targets: list[int] = []
+        if wanted:
+            for o in await self._all("SELECT id, title, content FROM memories WHERE project_id=? AND id!=?", (m["project_id"], mid)):
+                if title_of(o["content"], o["title"]).lower() in wanted:
+                    targets.append(o["id"])
+        await self._exec("DELETE FROM note_links WHERE a=? AND auto=1", (mid,))
+        for t in targets:
+            await self._exec("INSERT OR IGNORE INTO note_links (a,b,type,strength,auto,created_at) VALUES (?,?,'ref',0.35,1,?)",
+                             (mid, t, time.time()))
+        # другие заметки могли ссылаться на эту по заголовку ещё до её появления или переименования
+        mine = title_of(m["content"], m["title"]).lower()
+        for o in await self._all("SELECT id, content FROM memories WHERE project_id=? AND id!=? AND content LIKE '%[[%'",
+                                 (m["project_id"], mid)):
+            if mine in (t.lower() for t in wiki_links(o["content"])):
+                await self._exec("INSERT OR IGNORE INTO note_links (a,b,type,strength,auto,created_at) VALUES (?,?,'ref',0.35,1,?)",
+                                 (o["id"], mid, time.time()))
+
+    async def add_note_link(self, a: int, b: int, type_: str, strength: float = 0.35) -> None:
+        await self._exec("INSERT INTO note_links (a,b,type,strength,auto,created_at) VALUES (?,?,?,?,0,?) "
+                         "ON CONFLICT(a,b,type) DO UPDATE SET auto=0", (a, b, type_, strength, time.time()))
+
+    async def delete_note_link(self, a: int, b: int, type_: str | None = None) -> int:
+        cur = await self._all("SELECT a,b,type FROM note_links WHERE ((a=? AND b=?) OR (a=? AND b=?))"
+                              + (" AND type=?" if type_ else ""), (a, b, b, a, *([type_] if type_ else [])))
+        for r in cur:
+            await self._exec("DELETE FROM note_links WHERE a=? AND b=? AND type=?", (r["a"], r["b"], r["type"]))
+        return len(cur)
+
+    async def note_links(self, pid: str) -> list[dict]:
+        return await self._all("SELECT l.* FROM note_links l JOIN memories m ON m.id=l.a WHERE m.project_id=?", (pid,))
+
+    async def note_neighbors(self, ids: list[int], limit: int = 6) -> list[dict]:
+        """Заметки, связанные с данными (на один шаг), сильные связи — первыми. Каждая — с типом и направлением связи."""
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        rows = await self._all(
+            f"SELECT m.*, l.type AS link_type, l.strength AS link_strength, "
+            f"CASE WHEN l.a IN ({marks}) THEN l.a ELSE l.b END AS link_from "
+            f"FROM note_links l JOIN memories m ON m.id = CASE WHEN l.a IN ({marks}) THEN l.b ELSE l.a END "
+            f"WHERE (l.a IN ({marks}) OR l.b IN ({marks})) AND m.id NOT IN ({marks}) "
+            f"ORDER BY l.strength DESC LIMIT ?", (*ids, *ids, *ids, *ids, *ids, limit * 3))
+        seen, out = set(), []
+        for r in rows:
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                out.append(r)
+        return out[:limit]
+
+    async def record_note_uses(self, ids: list[int], run_id: str) -> None:
+        """Агент прочитал заметки в запуске: они снова «свежие», а связи между ними становятся сильнее."""
+        ids = sorted(set(ids))
+        if not ids:
+            return
+        now = time.time()
+        marks = ",".join("?" * len(ids))
+        await self._exec(f"UPDATE memories SET last_used_at=? WHERE id IN ({marks})", (now, *ids))
+        if not run_id:
+            return
+        before = {r["memory_id"] for r in await self._all("SELECT memory_id FROM note_uses WHERE run_id=?", (run_id,))}
+        fresh = [i for i in ids if i not in before]  # повторное чтение той же заметки в запуске связь не усиливает
+        for i in fresh:
+            await self._exec("INSERT OR IGNORE INTO note_uses (memory_id,run_id,used_at) VALUES (?,?,?)", (i, run_id, now))
+        used = sorted(before | set(fresh))
+        if fresh and len(used) > 1:
+            um, fm = ",".join("?" * len(used)), ",".join("?" * len(fresh))
+            await self._exec(f"UPDATE note_links SET strength=MIN(1.0, strength+0.08), last_used_at=? "
+                             f"WHERE a IN ({um}) AND b IN ({um}) AND (a IN ({fm}) OR b IN ({fm}))",
+                             (now, *used, *used, *fresh, *fresh))
 
     async def delete_memory(self, mid: int) -> None:
         await self._exec("DELETE FROM memories WHERE id=?", (mid,))

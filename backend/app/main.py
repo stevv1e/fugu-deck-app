@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import auth, backup, devices, spaceauth
+from . import auth, backup, devices, kb, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
@@ -642,16 +642,35 @@ async def set_sources(pid: str, body: SourcesIn, u: dict = Me):
 
 
 # ================================================================== память
+AREA_RE = "^(" + "|".join(kb.AREAS) + ")$"
+LINK_RE = "^(" + "|".join(kb.LINK_TYPES) + ")$"
+
+
 class MemoryIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=8000)
     tags: str = ""
     pinned: bool = False
+    # поля заметки базы знаний; область без значения определяется по тексту
+    title: str | None = Field(None, max_length=120)
+    area: str | None = Field(None, pattern=AREA_RE)
+    grp: str | None = Field(None, max_length=40)
+    source_ref: str | None = Field(None, max_length=300)
 
 
 class MemoryPatch(BaseModel):
     content: str | None = Field(None, min_length=1, max_length=8000)
     tags: str | None = None
     pinned: bool | None = None
+    title: str | None = Field(None, max_length=120)
+    area: str | None = Field(None, pattern=AREA_RE)
+    grp: str | None = Field(None, max_length=40)
+    source_ref: str | None = Field(None, max_length=300)
+    stale: bool | None = None  # человек может снять «устарела» после проверки или поставить её сам
+
+
+class NoteLinkIn(BaseModel):
+    to: int
+    type: str = Field("ref", pattern=LINK_RE)
 
 
 @app.get("/api/projects/{pid}/memory")
@@ -676,9 +695,40 @@ async def list_memory(pid: str, q: str = "", linked: bool = False, u: dict = Me)
 @app.post("/api/projects/{pid}/memory")
 async def add_memory(pid: str, body: MemoryIn, u: dict = Me):
     await need(u, pid, "editor")
-    m = await db().add_memory(pid, body.content.strip(), body.tags, "user", u["display_name"], pinned=body.pinned)
+    m = await db().add_memory(pid, body.content.strip(), body.tags, "user", u["display_name"], pinned=body.pinned,
+                              title=body.title, area=body.area, grp=body.grp, source_ref=body.source_ref, origin="web")
     await broker().publish("memory", pid, action="added", memory=m, by=u["display_name"])
     return m
+
+
+@app.get("/api/projects/{pid}/kb")
+async def knowledge_base(pid: str, u: dict = Me):
+    """База знаний проекта для экрана (мозг / паутина / Иггдрасиль): заметки, области, группы, связи, источники."""
+    await need(u, pid)
+    p = await db().get_project(pid)
+    return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid))
+
+
+@app.post("/api/memory/{mid}/links")
+async def link_notes(mid: int, body: NoteLinkIn, u: dict = Me):
+    """Связать две заметки одного проекта: часть, зависит от, решение по, противоречит, пример, ссылка."""
+    m = await _memory_for_edit(mid, u)
+    o = await db().get_memory(body.to)
+    if not o or o["project_id"] != m["project_id"] or o["id"] == mid:
+        raise HTTPException(400, "Связать можно только две разные заметки одного проекта")
+    await db().add_note_link(mid, body.to, body.type)
+    await broker().publish("memory", m["project_id"], action="linked", memory_id=mid, by=u["display_name"])
+    return {"ok": True}
+
+
+@app.delete("/api/memory/{mid}/links/{other}")
+async def unlink_notes(mid: int, other: int, type: str | None = None, u: dict = Me):
+    m = await _memory_for_edit(mid, u)
+    if type is not None and type not in kb.LINK_TYPES:
+        raise HTTPException(400, "Неизвестный тип связи")
+    n = await db().delete_note_link(mid, other, type)
+    await broker().publish("memory", m["project_id"], action="unlinked", memory_id=mid, by=u["display_name"])
+    return {"ok": True, "removed": n}
 
 
 async def _memory_for_edit(mid: int, u: dict) -> dict:

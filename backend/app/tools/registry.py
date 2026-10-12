@@ -23,6 +23,7 @@ class ToolContext:
     user: dict = field(default_factory=dict)
     skills: Any = None
     broker: Any = None
+    run_id: str = ""  # запуск агента: по нему ведётся журнал использования заметок базы знаний
 
     @property
     def project_id(self) -> str:
