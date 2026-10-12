@@ -18,11 +18,11 @@ class Settings(BaseSettings):
     sakana_base_url: str = "https://api.sakana.ai/v1"
     # Модели через запятую; первая — модель по умолчанию
     # провайдер:модель через запятую; первая — по умолчанию
-    models: str = ("sakana:fugu-max-v1.0,sakana:fugu-ultra-v2.0,"
+    models: str = ("sakana:fugu-max-v1.0,sakana:fugu-ultra-v2.0,sakana:sakana-namazu-v1.0,"
                    "anthropic:claude-sonnet-5,anthropic:claude-opus-5-5,anthropic:claude-haiku-4-5")
     # Цена за 1M токенов: {"модель": [input, output, cached_input]}
     pricing_json: str = (
-        '{"sakana:fugu-max-v1.0": [2, 6, 0.25], "sakana:fugu-ultra-v2.0": [5, 30, 0.5],'
+        '{"sakana:fugu-max-v1.0": [2, 6, 0.25], "sakana:fugu-ultra-v2.0": [5, 30, 0.5], "sakana:sakana-namazu-v1.0": [0.95, 4, 0.15],'
         ' "anthropic:claude-sonnet-5": [2, 10, 0.2, 2.5], "anthropic:claude-opus-5-5": [4, 20, 0.2, 5],'
         ' "anthropic:claude-haiku-4-5": [1, 5, 0.1, 1.25], "anthropic:claude-fable-5-1": [10, 50, 0.25, 12.5]}'
     )

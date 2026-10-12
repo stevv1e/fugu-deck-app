@@ -51,6 +51,8 @@ export class DeckApi {
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
   send = (cid: string, content: string, model?: string) =>
     this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null });
+  /** Сменить модель чата (личное пространство; в общем — через предложение и спонсора). */
+  setModel = (cid: string, model: string) => this.s.request<{ applied: boolean }>("POST", `/api/conversations/${enc(cid)}/model`, { model });
   cancel = (rid: string) => this.s.request("POST", `/api/runs/${enc(rid)}/cancel`);
 
   /**
