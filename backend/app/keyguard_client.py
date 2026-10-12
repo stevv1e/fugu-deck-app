@@ -69,6 +69,24 @@ async def verify_action(jws: str) -> dict:
     return r.json()
 
 
+async def grant_switch(grant_id: str, on: bool) -> dict:
+    """Включить или снять разрешение спонсора в keyguard (POST /v1/grants/activate | deactivate).
+
+    Включить можно только то, что спонсор подписал для ЭТОГО пространства; в ответе — условия из подписи
+    (чат, модель, лимит, срок, участники): пространство берёт их отсюда, а не из слов приложения.
+    """
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(f"{_s().keyguard_url.rstrip('/')}/v1/grants/{'activate' if on else 'deactivate'}",
+                         json={"grant_id": grant_id}, headers={"Authorization": f"Bearer {token()}"})
+    if r.status_code != 200:
+        try:
+            why = r.json().get("error") or r.text
+        except ValueError:
+            why = r.text
+        raise PermissionError(str(why)[:300])
+    return r.json().get("grant") or {}
+
+
 class Auth(httpx.Auth):
     """Свежий токен пространства на каждый запрос Git (httpx)."""
 

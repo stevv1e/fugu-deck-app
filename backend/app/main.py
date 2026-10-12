@@ -789,6 +789,11 @@ def is_team() -> bool:
     return settings.is_space and settings.space_kind == "team"
 
 
+def kg_team() -> bool:
+    """Общее пространство в кластере: модель оплачивается ключом спонсора через keyguard по подписанному разрешению."""
+    return is_team() and kgc.enabled()
+
+
 @app.patch("/api/conversations/{cid}")
 async def update_conv(cid: str, body: ConvIn, u: dict = Me):
     c = await conv_access(u, cid, "editor")
@@ -992,6 +997,10 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
             raise HTTPException(403, f"Подпись не принята: {e}")
         except Exception:
             raise HTTPException(503, "Не удалось проверить подпись — повторите")
+        # Подписать должен тот, кто нажал «Разрешить». В личном пространстве это владелец; в общем keyguard лишь
+        # подтверждает подпись и называет подписавшего, а право разрешать (роль не ниже редактора) проверено выше.
+        if res.get("user") != u["id"]:
+            raise HTTPException(403, "Подпись сделана другим пользователем")
         a = res.get("action") or {}
         want = {"type": "tool_approve", "approval": aid, "tool": meta.get("name"), "args_sha256": devices.args_hash(meta.get("args"))}
         if any(a.get(k) != v for k, v in want.items()):
@@ -1009,6 +1018,8 @@ async def sponsor_blocker(c: dict) -> str | None:
     until = c.get("sponsor_until")
     if until and now >= until:
         return "Срок спонсорства истёк — спонсор может продлить его или кто-то предложит свою модель"
+    if kg_team():
+        return None  # деньги считает keyguard по своим ценам; местный подсчёт мог бы остановить чат раньше или позже
     used = await db().sponsor_usage(c["id"], c.get("sponsor_since"))
     lim_usd, lim_tok = c.get("sponsor_limit_usd"), c.get("sponsor_limit_tokens")
     if lim_usd is not None and used["usd"] >= lim_usd:
@@ -1023,11 +1034,18 @@ async def sponsor_access(c: dict):
     if not c.get("sponsor_id"):
         return None, None, "У чата нет спонсора модели — предложите модель, которую оплатите своим ключом"
     pname = split_model(c["model"])[0]
-    key = vault().get(c["sponsor_id"]).get(pname)
-    sponsor = await db().get_user(c["sponsor_id"])
-    name = sponsor["display_name"] if sponsor else "спонсор"
-    if not key:
-        return None, None, f"Ключ спонсора недоступен: {name} сейчас не в сети. Можно предложить свою модель"
+    if kg_team():
+        # Ключа здесь нет и не будет: keyguard подставит ключ спонсора, если его разрешение на этот чат и модель
+        # действует, лимит не исчерпан и запускающий в списке допущенных. Спонсору не нужно быть в сети.
+        if not c.get("grant_id"):
+            return None, None, "У чата нет действующего разрешения спонсора — предложите модель заново"
+        key = None
+    else:
+        key = vault().get(c["sponsor_id"]).get(pname)
+        sponsor = await db().get_user(c["sponsor_id"])
+        name = sponsor["display_name"] if sponsor else "спонсор"
+        if not key:
+            return None, None, f"Ключ спонсора недоступен: {name} сейчас не в сети. Можно предложить свою модель"
     if why := await sponsor_blocker(c):
         return None, None, why
     cid = c["id"]
@@ -1051,7 +1069,8 @@ async def chat_model_state(c: dict, u: dict) -> dict:
     if sp:
         used = await db().sponsor_usage(c["id"], c.get("sponsor_since"))
         out["sponsor"] = {"id": sp["id"], "name": sp["display_name"],
-                          "online": bool(vault().get(sp["id"]).get(pname)),
+                          "online": True if kg_team() else bool(vault().get(sp["id"]).get(pname)),
+                          "grant_id": c.get("grant_id"),
                           "limit_usd": c.get("sponsor_limit_usd"), "limit_tokens": c.get("sponsor_limit_tokens"),
                           "until": c.get("sponsor_until"), "since": c.get("sponsor_since"),
                           "spent_usd": round(used["usd"], 4), "spent_tokens": used["tokens"],
@@ -1160,12 +1179,14 @@ async def propose_model(cid: str, body: ProposalIn, u: dict = Me):
     if not body.has_limit():
         raise HTTPException(400, NEED_LIMIT)
     _check_until(body.until)
-    if not agent().llm_key(split_model(model)[0], vault().get(u["id"])):
+    if not kg_team() and not agent().llm_key(split_model(model)[0], vault().get(u["id"])):
         raise HTTPException(400, "Выбрать можно только модель, для которой у вас есть ключ: вы становитесь спонсором")
     run = agent().active_run(cid)
     if run and run.status == "running":
         raise HTTPException(409, "Дождитесь окончания работы агента")
     await expire_due()
+    if kg_team():
+        return await _propose_with_grant(c, model, body, u)
     terms = body.model_dump(include={"limit_usd", "limit_tokens", "days", "until"})
     text_terms = _terms(body.limit_usd, body.limit_tokens, body.days, body.until)
     # новый чат: создатель выбирает модель и правило её смены
@@ -1211,6 +1232,11 @@ async def _tally(pid: str, c: dict, u: dict) -> str:
         can_still = yes + (total - yes - no) >= need
     else:  # состав неизвестен: нужен хотя бы один коллега «за», любой «против» — отклоняет
         need, can_still = 2, no == 0
+    if kg_team() and not p.get("grant_id"):
+        return "pending"  # спонсор ещё не подписал разрешение: голосовать не о чем
+    if yes >= need and kg_team():
+        names = ", ".join(v["name"] for v in vs if v["vote"])
+        return await _finish_with_grant(p, c, u, f"Голосование прошло ({yes} из {need} нужных: {names})")
     if yes >= need:
         await db().decide_proposal(pid, "approved", u["id"])
         proposer = await db().get_user(p["proposer_id"]) or {"id": p["proposer_id"]}
@@ -1225,6 +1251,100 @@ async def _tally(pid: str, c: dict, u: dict) -> str:
         await _note(c, f"Переход на {_title(p['model'])} отклонён голосованием")
         return "rejected"
     return "pending"
+
+
+# ---- кластер: предложение модели с подписанным разрешением спонсора (keyguard) ----
+async def _grant_members() -> list[str]:
+    """Кого спонсор допускает к своему ключу: редакторы и владелец пространства (ники из состава control-plane)."""
+    return sorted(m["id"] for m in (await voters() or []))
+
+
+async def _propose_with_grant(c: dict, model: str, body: ProposalIn, u: dict) -> dict:
+    """Шаг 1: предложение заведено, но ждёт подписи. Приложение подпишет разрешение (grant) с этим предложением
+    и условиями и отдаст его в keyguard через control-plane; затем сообщит сюда id разрешения (шаг 2)."""
+    members = await _grant_members()
+    if u["id"] not in members:
+        raise HTTPException(409, "Состав пространства ещё не получен — повторите через несколько секунд")
+    if body.limit_usd is None:
+        raise HTTPException(400, "В кластере лимит задаётся в долларах: расход считает keyguard")
+    if body.model_policy and not await db().has_dialogue(c["id"]) and c.get("created_by") == u["id"]:
+        await db().set_model_policy(c["id"], body.model_policy)
+    p = await db().create_proposal(c["id"], model, u["id"], body.limit_usd, None, body.days, body.until,
+                                   ttl=settings.proposal_ttl_seconds)
+    provider, name = split_model(model)
+    return {"applied": False, "need_grant": True, "proposal": await proposal_view(await db().proposal(p["id"]), u),
+            "grant": {"space": settings.space_id, "chat": c["id"], "proposal": p["id"], "provider": provider, "model": name,
+                      "members": members}}
+
+
+async def _finish_with_grant(p: dict, c: dict, u: dict, why: str) -> str:
+    """Утверждённое предложение вступает в силу: keyguard включает разрешение и отдаёт подписанные условия."""
+    try:
+        g = await kgc.grant_switch(p["grant_id"], True)
+    except PermissionError as e:
+        await db().decide_proposal(p["id"], "rejected", u["id"])
+        await _note(c, f"Переход на {_title(p['model'])} не состоялся: разрешение спонсора не принято ({e})")
+        return "rejected"
+    except Exception:
+        return "pending"  # keyguard недоступен — попытка повторится со следующим голосом или запросом
+    provider, name = split_model(p["model"])
+    # Спонсор подписал именно это: чат, предложение, модель — и он же автор предложения.
+    if (g.get("chat"), g.get("proposal"), g.get("provider"), g.get("model"), g.get("sponsor")) != \
+            (c["id"], p["id"], provider, name, p["proposer_id"]):
+        try:
+            await kgc.grant_switch(p["grant_id"], False)
+        except Exception:
+            pass
+        await db().decide_proposal(p["id"], "rejected", u["id"])
+        await _note(c, f"Переход на {_title(p['model'])} не состоялся: подписанное разрешение не соответствует предложению")
+        return "rejected"
+    old = c.get("grant_id")
+    if old and old != p["grant_id"]:
+        try:  # прежняя модель больше не действует: её разрешение снимаем (уменьшение прав подписи не требует)
+            await kgc.grant_switch(old, False)
+        except Exception:
+            pass
+    until = datetime.fromisoformat(g["until"].replace("Z", "+00:00")).timestamp() if g.get("until") else None
+    await db().decide_proposal(p["id"], "approved", u["id"])
+    await db().set_sponsor(c["id"], p["model"], p["proposer_id"], g.get("limit_usd"), None, None, until)
+    await db().set_conversation_grant(c["id"], p["grant_id"])
+    await _note(c, f"{why}: чат переходит на {_title(p['model'])}, платит {p.get('proposer_name') or p['proposer_id']} "
+                   f"({_terms(g.get('limit_usd'), None, None, until)})")
+    return "approved"
+
+
+class GrantIn(BaseModel):
+    grant_id: str = Field(..., pattern="^g-[0-9a-f]{8,64}$")
+
+
+@app.post("/api/model-proposals/{pid}/grant")
+async def attach_grant(pid: str, body: GrantIn, u: dict = Me):
+    """Шаг 2: спонсор подписал разрешение — предложение открыто для голосования (или вступает в силу сразу)."""
+    if not kg_team():
+        raise HTTPException(404)
+    await expire_due()
+    p = await db().proposal(pid)
+    if not p or p["status"] != "pending":
+        raise HTTPException(404, "Предложение не найдено, уже решено или истекло")
+    if p["proposer_id"] != u["id"]:
+        raise HTTPException(403, "Разрешение прикладывает автор предложения")
+    if p.get("grant_id"):
+        raise HTTPException(409, "Разрешение уже приложено")
+    c = await conv_access(u, p["conversation_id"], "editor")
+    await db().set_proposal_grant(pid, body.grant_id)
+    p = await db().proposal(pid)
+    hours = round(settings.proposal_ttl_seconds / 3600)
+    # Чат, в котором ещё не было переписки, настраивает его создатель — без голосования.
+    if not await db().has_dialogue(c["id"]) and c.get("created_by") == u["id"]:
+        status = await _finish_with_grant(p, c, u, f"{u['display_name']} выбрал(а) модель нового чата")
+    elif c.get("model_policy") == "open":
+        status = await _finish_with_grant(p, c, u, f"{u['display_name']} сменил(а) модель")
+    else:
+        await _note(c, f"{u['display_name']} предлагает перейти на {_title(p['model'])} и оплачивает чат. Голосование {hours} ч")
+        await broker().publish("model.proposal", c["project_id"], conversation_id=c["id"], proposal_id=pid,
+                               by=u["display_name"], model=p["model"])
+        status = await _tally(pid, c, u)  # если голосует только автор — решится сразу
+    return {"ok": True, "status": status, "applied": status == "approved"}
 
 
 class DecideIn(BaseModel):
@@ -1284,7 +1404,15 @@ async def patch_sponsor(cid: str, body: SponsorPatch, u: dict = Me):
     c = await conv_access(u, cid, "editor")
     if c.get("sponsor_id") != u["id"]:
         raise HTTPException(403, "Это может только спонсор чата")
+    if kg_team() and not body.withdraw:
+        raise HTTPException(409, "Условия подписаны спонсором: чтобы изменить их, предложите модель заново")
     if body.withdraw:
+        if kg_team() and c.get("grant_id"):
+            try:  # отзыв с подписью спонсор отправляет в keyguard сам; здесь — снятие со стороны пространства
+                await kgc.grant_switch(c["grant_id"], False)
+            except Exception:
+                pass
+            await db().set_conversation_grant(cid, None)
         await db().set_sponsor(cid, c["model"], None, None)
         for r in list(agent().runs.values()):  # запуски на его ключе останавливаем
             if r.status == "running" and r.conversation_id == cid:

@@ -193,6 +193,11 @@ SCHEMA = [
     );
     CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
     """,
+    # v8: кластер — разрешение спонсора в keyguard (id), привязанное к предложению и к действующей модели чата
+    """
+    ALTER TABLE model_proposals ADD COLUMN grant_id TEXT;
+    ALTER TABLE conversations ADD COLUMN grant_id TEXT;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -363,6 +368,12 @@ class Database:
                                "LEFT JOIN users u ON u.id=p.proposer_id "
                                "WHERE p.conversation_id=? AND p.status='pending' ORDER BY p.created_at DESC LIMIT 1", (cid,))
 
+    async def set_proposal_grant(self, pid: str, grant_id: str) -> None:
+        await self._exec("UPDATE model_proposals SET grant_id=? WHERE id=? AND status='pending'", (grant_id, pid))
+
+    async def set_conversation_grant(self, cid: str, grant_id: str | None) -> None:
+        await self._exec("UPDATE conversations SET grant_id=? WHERE id=?", (grant_id, cid))
+
     async def decide_proposal(self, pid: str, status: str, by: str) -> None:
         await self._exec("UPDATE model_proposals SET status=?, decided_by=?, decided_at=? WHERE id=? AND status='pending'",
                          (status, by, time.time(), pid))
@@ -405,6 +416,10 @@ class Database:
 
     async def has_messages(self, cid: str) -> bool:
         return bool(await self._one("SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1", (cid,)))
+
+    async def has_dialogue(self, cid: str) -> bool:
+        """Была ли в чате переписка (служебные отметки о выборе модели не в счёт)."""
+        return bool(await self._one("SELECT 1 FROM messages WHERE conversation_id=? AND role!='note' LIMIT 1", (cid,)))
 
     async def get_messages(self, cid: str) -> list[dict]:
         rows = await self._all("SELECT * FROM messages WHERE conversation_id=? ORDER BY id", (cid,))

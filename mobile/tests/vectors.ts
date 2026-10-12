@@ -50,6 +50,7 @@ const valid: [string, string | null, Record<string, unknown>][] = [
   ["ssh_write: кавычки, обратная косая, кириллица, <>&", "u-anna", { type: "ssh_write", agent: "duty", server: "prod-1", command: "echo \"привет\" > /tmp/a\\b && grep -c '<x>' f & 😀" }],
   ["ssh_danger", "u-anna", { type: "ssh_danger", agent: "duty", server: "prod-1", command: "sudo reboot", typed_server: "prod-1" }],
   ["role_change", "t-shop", { type: "role_change", member: "bob", role: "editor" }],
+  ["role_change: исключить", "t-shop", { type: "role_change", member: "bob", role: "none" }],
   ["device_enroll", null, { type: "device_enroll", session_jkt: JKT, confirm_jkt: JKT, name: "iPhone 17 Pro — Анна" }],
   ["device_approve", null, { type: "device_approve", user: "anna", target: TARGET, name: "iPhone 17 Pro — Анна" }],
   ["device_revoke", null, { type: "device_revoke", user: "anna", target: TARGET }],
