@@ -17,7 +17,7 @@ from typing import Any
 
 from .db import Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
-from .tools import REGISTRY, ApprovalPolicy, ToolContext
+from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
 
@@ -81,6 +81,7 @@ class Run:
     finished_at: float | None = None
     task: asyncio.Task | None = None
     approvals: dict[str, asyncio.Future] = field(default_factory=dict)
+    approval_sigs: dict[str, str] = field(default_factory=dict)  # подпись человека для исполнителя (ssh-gateway)
     approval_meta: dict[str, dict] = field(default_factory=dict)  # что именно подтверждают: для проверки подписи с телефона
     cond: asyncio.Condition = field(default_factory=asyncio.Condition)
 
@@ -183,10 +184,13 @@ class Agent:
         if run.task and not run.task.done():
             run.task.cancel()
 
-    def resolve_approval(self, approval_id: str, approve: bool, comment: str = "") -> bool:
+    def resolve_approval(self, approval_id: str, approve: bool, comment: str = "", jws: str = "") -> bool:
+        """jws — подпись человека для исполнителя действия (ssh-gateway): инструмент передаст её вместе с командой."""
         for run in self.runs.values():
             fut = run.approvals.get(approval_id)
             if fut and not fut.done():
+                if approve and jws:
+                    run.approval_sigs[approval_id] = jws
                 fut.set_result((approve, comment))
                 return True
         return False
@@ -306,7 +310,7 @@ class Agent:
             await run.emit("tool_call_building", index=i, name=name)
 
         hdrs = kgc.headers(run.conversation_id, run.user.get("username", "")) if kgc.enabled() else None
-        res = await provider.stream(key, model, messages, [t.schema() for t in REGISTRY.values()], on_text, on_tool,
+        res = await provider.stream(key, model, messages, [t.schema() for t in REGISTRY.values() if t.group != "ssh" or ssh_tools.enabled()], on_text, on_tool,
                                     headers=hdrs)
         for c in res.tool_calls:
             c["id"] = c["id"] or f"call_{new_id()}"
@@ -345,16 +349,20 @@ class Agent:
         if not tool:
             return json.dumps({"error": f"Неизвестный инструмент {name}"}, ensure_ascii=False)
 
+        ctx.ssh_need, ctx.approval_jws = "", ""
         risk = await tool.risk(ctx, args)
         approved: bool | None = None
-        if self.policy.needs_approval(risk):
+        # Команду на сервере исполняет ssh-gateway, и подпись человека нужна ему, а не нам: настройка «не спрашивать
+        # подтверждений» на неё не действует. sign — действие, которое телефон подпишет вместо обычного разрешения.
+        sign = ssh_tools.sign_request(ctx, args) if name == "ssh_exec" else None
+        if self.policy.needs_approval(risk) or sign:
             aid = new_id()
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             run.approvals[aid] = fut
-            run.approval_meta[aid] = {"name": name, "args": args, "risk": risk}
+            run.approval_meta[aid] = {"name": name, "args": args, "risk": risk, "sign": sign}
             from .devices import args_hash
             await run.emit("approval_request", approval_id=aid, call_id=call["id"], name=name,
-                           title=tool.title, args=args, risk=risk, args_sha256=args_hash(args))
+                           title=tool.title, args=args, risk=risk, args_sha256=args_hash(args), sign=sign)
             await self._publish("run.approval", run, title=tool.title, risk=risk)
             try:
                 approved, comment = await asyncio.wait_for(fut, self.settings.approval_timeout_seconds)
@@ -363,6 +371,7 @@ class Agent:
             finally:
                 run.approvals.pop(aid, None)
                 run.approval_meta.pop(aid, None)
+                ctx.approval_jws = run.approval_sigs.pop(aid, "")
             await run.emit("approval_resolved", approval_id=aid, call_id=call["id"], approved=approved)
             if not approved:
                 await self.db.audit(run.conversation_id, name, args, False, False, "отклонено")

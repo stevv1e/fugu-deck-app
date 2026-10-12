@@ -230,6 +230,7 @@ export default function ClusterDevice() {
               </>
             )}
           </Card>
+          <Btn title="Серверы для агента" kind="ghost" onPress={() => router.push({ pathname: "/servers/[cid]", params: { cid: rec.id } })} />
           <Btn title="Общие пространства" kind="ghost" onPress={() => router.push({ pathname: "/teams/[cid]", params: { cid: rec.id } })} />
           <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
           <Txt kind="dim">Ключ API шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят.</Txt>

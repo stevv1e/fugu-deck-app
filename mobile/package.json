@@ -44,7 +44,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/core.test.ts tests/keyguard.cross.test.ts tests/cluster.test.ts tests/teams.test.ts tests/kb.test.ts",
+    "test": "node --import tsx --test tests/core.test.ts tests/keyguard.cross.test.ts tests/cluster.test.ts tests/teams.test.ts tests/kb.test.ts tests/ssh.test.ts",
     "itest": "tsx tests/integration.ts",
     "vectors": "tsx tests/vectors.ts",
     "web:export": "expo export --platform web",

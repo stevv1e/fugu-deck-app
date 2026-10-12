@@ -33,6 +33,8 @@ const STATUS: Record<Tool["status"], string> = {
 function subtitle(name: string, a: any): string {
   if (!a || typeof a !== "object") return "";
   switch (name) {
+    case "ssh_exec":
+      return `${a.server} · ${String(a.command || "").slice(0, 120)}`;
     case "commit_files":
       return `${a.repo} · ${a.base_branch ? `${a.base_branch} → ` : ""}${a.branch}`;
     case "create_pull_request":
@@ -99,21 +101,26 @@ function ArgsBlock({ args, full }: { args: any; full?: boolean }) {
   );
 }
 
-function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest, ok: boolean): Promise<void> }) {
+function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest, ok: boolean, typedServer?: string): Promise<void> }) {
   const { p } = useTheme();
   const [busy, setBusy] = useState<"yes" | "no" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
   const req = t.approval!;
   const danger = req.risk === "dangerous";
   const mine = argsHash(req.args);
   const matches = !req.args_sha256 || req.args_sha256 === mine;
   const c = danger ? p.accent2 : p.warn;
+  // Команда на сервере: человек подписывает саму команду; для опасной — ещё и вводит имя сервера руками.
+  const cmd = req.sign ?? null;
+  const needName = cmd?.type === "ssh_danger";
+  const nameOk = !needName || typed.trim() === cmd!.server;
 
   const decide = async (ok: boolean) => {
     setBusy(ok ? "yes" : "no");
     setError(null);
     try {
-      await onDecide(req, ok);
+      await onDecide(req, ok, typed.trim());
     } catch (e) {
       setError(errText(e));
       setBusy(null);
@@ -128,17 +135,43 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
         </Txt>
         <Chip text={danger ? "опасно" : "изменение"} color={c} />
       </Row>
-      <Txt kind="h2">{req.title || req.name}</Txt>
-      {subtitle(req.name, req.args) ? <Txt kind="mono">{subtitle(req.name, req.args)}</Txt> : null}
-      <ArgsBlock args={req.args} />
-      <Txt kind="small">
-        Подпись покроет хэш аргументов {mine.slice(0, 10)}… {matches ? "✓ совпадает с сервером" : ""}
-      </Txt>
+      <Txt kind="h2">{cmd ? `Команда на сервере ${cmd.server}` : req.title || req.name}</Txt>
+      {cmd ? (
+        <>
+          {typeof req.args?.why === "string" && req.args.why ? <Txt kind="dim">Зачем (со слов агента): {req.args.why}</Txt> : null}
+          <View style={{ backgroundColor: p.bg2, borderWidth: 1, borderColor: c, padding: 10, borderRadius: p.radius }}>
+            <Text selectable style={{ fontFamily: MONO, fontSize: 13, color: p.text }}>{cmd.command}</Text>
+          </View>
+          <Txt kind="small">Подпись покроет эту команду целиком, сервер и агента. Сервер выполнит только её.</Txt>
+          {needName ? (
+            <>
+              <Notice kind="warn" text="Команда может уничтожить данные или лишить вас доступа к серверу. Чтобы подтвердить, введите имя сервера." />
+              <TextInput
+                value={typed}
+                onChangeText={setTyped}
+                placeholder={`Имя сервера: ${cmd.server}`}
+                placeholderTextColor={p.faint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={{ color: p.text, backgroundColor: p.bg2, borderWidth: 1, borderColor: nameOk ? p.ok : p.line2, borderRadius: p.radius, paddingHorizontal: 12, paddingVertical: 10, fontFamily: MONO }}
+              />
+            </>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {subtitle(req.name, req.args) ? <Txt kind="mono">{subtitle(req.name, req.args)}</Txt> : null}
+          <ArgsBlock args={req.args} />
+          <Txt kind="small">
+            Подпись покроет хэш аргументов {mine.slice(0, 10)}… {matches ? "✓ совпадает с сервером" : ""}
+          </Txt>
+        </>
+      )}
       {!matches ? <Notice kind="warn" text="Хэш аргументов на телефоне и на сервере не совпал. Не разрешайте: то, что вы видите, может отличаться от того, что выполнится." /> : null}
       {error ? <Notice text={error} /> : null}
       <Row>
         <Btn title="Отклонить" kind="ghost" onPress={() => decide(false)} busy={busy === "no"} disabled={!!busy} style={{ flex: 1 }} />
-        <Btn title="Разрешить ⌁" kind={danger ? "danger" : "ok"} onPress={() => decide(true)} busy={busy === "yes"} disabled={!!busy || !matches} style={{ flex: 1.4 }} />
+        <Btn title="Разрешить ⌁" kind={danger ? "danger" : "ok"} onPress={() => decide(true)} busy={busy === "yes"} disabled={!!busy || !matches || !nameOk} style={{ flex: 1.4 }} />
       </Row>
       <Txt kind="small" style={{ textAlign: "center" }}>
         «Разрешить» спросит биометрию и подпишет решение ключом этого телефона
@@ -292,9 +325,9 @@ export default function Chat() {
   };
 
   const decide = useCallback(
-    async (req: ApprovalRequest, ok: boolean) => {
+    async (req: ApprovalRequest, ok: boolean, typedServer?: string) => {
       if (!api) return;
-      await api.approve(req, ok);
+      await api.approve(req, ok, "", typedServer);
       if (ok) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     },
     [api],

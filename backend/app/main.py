@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import mimetypes
@@ -1035,6 +1036,21 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
             state["device_auth"].check_action(body.action or {}, body.sig or "", d["confirm_jwk"], d["id"], {
                 "type": "approve_tool", "approval_id": aid, "tool": meta.get("name"),
                 "args_sha256": devices.args_hash(meta.get("args")), "approve": body.approve})
+    elif (run.approval_meta.get(aid) or {}).get("sign") and body.approve:
+        # Команда на сервере: подписывается не «разрешение инструмента», а сама команда (ssh_write / ssh_danger).
+        # Проверит подпись ssh-gateway (через keyguard) — у него же она и сгорит; здесь только сверка с тем, что
+        # действительно ждёт подтверждения, чтобы человеку не пришлось подписывать заново из-за опечатки клиента.
+        want = run.approval_meta[aid]["sign"]
+        try:
+            got = json.loads(base64.urlsafe_b64decode((body.jws or "").split(".")[1] + "=="))
+        except Exception:
+            raise HTTPException(403, "Нужна подпись команды: подтвердите её в приложении")
+        if any(got.get(k) != v for k, v in want.items()) or got.get("space") != f"u-{u['id']}":
+            raise HTTPException(403, "Подписана другая команда — не та, что ждёт подтверждения")
+        agent().resolve_approval(aid, True, body.comment, jws=body.jws or "")
+        await broker().publish("run.approval_resolved", run.project_id, conversation_id=run.conversation_id,
+                               run_id=run.id, approved=True, by=u["display_name"])
+        return {"ok": True}
     elif settings.is_space and kgc.enabled() and body.approve:
         # В кластере «за» действует только с подписью ключа подтверждения владельца (биометрия на телефоне).
         # Иначе разрешить агенту действие мог бы любой, кто получил токен пространства, — в том числе control-plane.
