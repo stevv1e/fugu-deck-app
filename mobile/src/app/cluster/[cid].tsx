@@ -119,7 +119,9 @@ export default function ClusterDevice() {
     setArmDelete(false);
     try {
       let st = await requestSpaceDelete(rec);
-      // Подпись проверяет оператор (проход раз в 15 с): ждём, пока он примет запрос или отклонит.
+      // Подпись проверяет оператор (проход раз в 15 с): ждём, пока он примет запрос или отклонит. Человеку
+      // говорим, чего ждём: без этого кнопка просто «крутится» четверть минуты.
+      setMsg({ kind: "info", text: "Запрос отправлен. Сервер проверяет подпись — это занимает до 20 секунд." });
       for (let i = 0; i < 20 && st.exists && !st.delete_at && !st.delete_error; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         st = await spaceState(rec, false);
