@@ -203,3 +203,4 @@ def test_health_reports_busy(client):
         assert client.get("/api/health").json()["busy"] is False
     finally:
         runs.pop("r-test", None)
+

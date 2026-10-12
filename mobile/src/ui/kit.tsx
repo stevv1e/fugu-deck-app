@@ -179,7 +179,9 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
   );
 }
 
-export function Card({ children, accent, style, onPress }: { children: ReactNode; accent?: string; style?: StyleProp<ViewStyle>; onPress?(): void }) {
+export function Card({ children, accent, style, onPress, onLongPress }: {
+  children: ReactNode; accent?: string; style?: StyleProp<ViewStyle>; onPress?(): void; onLongPress?(): void;
+}) {
   const { p } = useTheme();
   const box: ViewStyle = {
     backgroundColor: p.panel,
@@ -193,7 +195,7 @@ export function Card({ children, accent, style, onPress }: { children: ReactNode
   };
   if (!onPress) return <View style={[box, style]}>{children}</View>;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [box, { backgroundColor: pressed ? p.panel2 : p.panel }, style]}>
+    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [box, { backgroundColor: pressed ? p.panel2 : p.panel }, style]}>
       {children}
     </Pressable>
   );
