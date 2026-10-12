@@ -25,6 +25,23 @@ export default function ProjectChats() {
   const { data, error, loading, reload } = useLoad(useCallback(() => api?.conversations(pid) ?? null, [api, pid]));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [armed, setArmed] = useState<string | null>(null); // чат, для которого показано подтверждение удаления
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const remove = async (cid: string) => {
+    if (!api) return;
+    setRemoving(cid);
+    setErr(null);
+    try {
+      await api.deleteConversation(cid);
+      setArmed(null);
+      reload();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setRemoving(null);
+    }
+  };
 
   const create = async () => {
     if (!api) return;
@@ -54,7 +71,12 @@ export default function ProjectChats() {
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Чатов нет" text="Начните новый чат с агентом." /> : null}
         {data?.map((c) => (
-          <Card key={c.id} onPress={() => router.push(`/s/${sid}/c/${c.id}`)} accent={c.running ? p.ok : undefined}>
+          <Card
+            key={c.id}
+            onPress={() => (armed === c.id ? setArmed(null) : router.push(`/s/${sid}/c/${c.id}`))}
+            onLongPress={canWrite ? () => setArmed(c.id) : undefined}
+            accent={armed === c.id ? p.accent2 : c.running ? p.ok : undefined}
+          >
             <Row style={{ justifyContent: "space-between" }}>
               <Txt kind="body" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
                 {c.title}
@@ -67,8 +89,20 @@ export default function ProjectChats() {
               </Txt>
               <Txt kind="small">{ago(c.updated_at as number | undefined)}</Txt>
             </Row>
+            {armed === c.id ? (
+              <>
+                <Txt kind="dim">
+                  Удалить чат со всей перепиской и вложениями? Вернуть его будет нельзя.{c.running ? " Агент в нём сейчас работает — задание остановится." : ""}
+                </Txt>
+                <Row>
+                  <Btn title="Удалить" small kind="danger" onPress={() => remove(c.id)} busy={removing === c.id} />
+                  <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} disabled={removing === c.id} />
+                </Row>
+              </>
+            ) : null}
           </Card>
         ))}
+        {canWrite && data && data.length > 0 ? <Txt kind="small">Чтобы удалить чат, удерживайте его.</Txt> : null}
       </ScrollView>
     </SafeAreaView>
   );

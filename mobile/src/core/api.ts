@@ -28,6 +28,8 @@ export class DeckApi {
   createConversation = (pid: string, model?: string) =>
     this.s.request<Conversation>("POST", `/api/projects/${enc(pid)}/conversations`, { model: model || null });
   conversation = (cid: string) => this.s.request<ConversationFull>("GET", `/api/conversations/${enc(cid)}`);
+  /** Удалить чат со всей перепиской и вложениями; идущее задание агента в нём останавливается. */
+  deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
   send = (cid: string, content: string, model?: string) =>
     this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null });
   cancel = (rid: string) => this.s.request("POST", `/api/runs/${enc(rid)}/cancel`);
