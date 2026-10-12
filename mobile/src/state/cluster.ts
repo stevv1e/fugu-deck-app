@@ -25,7 +25,20 @@ export async function removeCluster(id: string) {
 export const saveRefresh = (id: string, t: string | undefined) => (t ? secrets.set(`cluster.${id}.refresh`, t) : Promise.resolve());
 export const loadRefresh = (id: string) => secrets.get(`cluster.${id}.refresh`);
 
-/** Идентификатор пространства кластера в списке серверов приложения: экраны чатов работают с ним как с сервером. */
+/**
+ * Идентификатор пространства кластера в списке серверов приложения: экраны чатов работают с ним как с сервером.
+ * Личное пространство — cluster.<кластер>; общее — cluster.<кластер>~<t-id> («~» не встречается ни в имени хоста, ни в id).
+ */
 export const SPACE_PREFIX = "cluster.";
-export const spaceSid = (clusterId: string) => SPACE_PREFIX + clusterId;
-export const clusterOfSid = (sid: string) => (sid.startsWith(SPACE_PREFIX) ? sid.slice(SPACE_PREFIX.length) : null);
+export const spaceSid = (clusterId: string, team?: string | null) => SPACE_PREFIX + clusterId + (team ? "~" + team : "");
+export function parseSid(sid: string): { cluster: string; team: string | null } | null {
+  if (!sid.startsWith(SPACE_PREFIX)) return null;
+  const [cluster, team] = sid.slice(SPACE_PREFIX.length).split("~");
+  return { cluster, team: team || null };
+}
+export const clusterOfSid = (sid: string) => parseSid(sid)?.cluster ?? null;
+
+// Названия общих пространств: сервер отдаёт их списком, экраны чатов показывают в заголовке. Только в памяти.
+const titles = new Map<string, string>();
+export const rememberSpaceTitle = (sid: string, title: string) => void titles.set(sid, title);
+export const spaceTitle = (sid: string) => titles.get(sid);

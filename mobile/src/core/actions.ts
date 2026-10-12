@@ -17,7 +17,8 @@
 
 export type Provider = 'anthropic' | 'sakana' | 'github' | 'gitlab';
 export type LlmProvider = 'anthropic' | 'sakana';
-export type Role = 'reader' | 'editor' | 'owner';
+/** none — исключить участника из пространства. */
+export type Role = 'reader' | 'editor' | 'owner' | 'none';
 
 export type ActionBody =
   | { type: 'key_put'; provider: Provider; key_hint: string; ct_sha256: string }
@@ -177,7 +178,7 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
   },
   ssh_write: { agent: id, server: id, command: str(2000) },
   ssh_danger: { agent: id, server: id, command: str(2000), typed_server: id },
-  role_change: { member: id, role: oneOf('reader', 'editor', 'owner') },
+  role_change: { member: id, role: oneOf('reader', 'editor', 'owner', 'none') },
   device_approve: {
     user: id,
     target: deviceId,
@@ -225,7 +226,7 @@ const PROVIDER_NAMES: Record<Provider, string> = {
   github: 'GitHub',
   gitlab: 'GitLab',
 };
-const ROLE_NAMES: Record<Role, string> = { reader: 'читатель', editor: 'редактор', owner: 'владелец' };
+const ROLE_NAMES: Record<Role, string> = { reader: 'читатель', editor: 'редактор', owner: 'владелец', none: 'исключить из пространства' };
 const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 const num = (n: number) => n.toLocaleString('ru-RU');
 
@@ -293,7 +294,7 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
       return {
         title: 'Сменить роль участника',
         lines: [where, `Участник: ${a.member}`, `Новая роль: ${ROLE_NAMES[a.role]}`],
-        danger: a.role === 'owner',
+        danger: a.role === 'owner' || a.role === 'none',
       };
     case 'device_approve':
       return {

@@ -5,15 +5,20 @@ import type { ServerRecord } from "@/core/types";
 import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { keyProvider } from "@/platform/keys";
 
-import { loadRefresh, saveRefresh, spaceSid, type ClusterRecord } from "./cluster";
+import { loadRefresh, saveRefresh, spaceSid, spaceTitle, type ClusterRecord } from "./cluster";
 
-/** Адрес личного пространства пользователя за api.<домен>. */
-export const spaceUrl = (c: ClusterRecord) => `${c.api}/s/${c.user}`;
+/** Адрес пространства за api.<домен>: личного (по нику) или общего (по его id). */
+export const spaceUrl = (c: ClusterRecord, team?: string | null) => `${c.api}/s/${team || c.user}`;
+
+/** Как пространство названо в подписанных действиях: u-<ник> или t-<id>. */
+export const spaceKey = (c: ClusterRecord, team?: string | null) => team || `u-${c.user}`;
 
 /** Пространство кластера в виде записи сервера: экраны проектов и чатов работают с ним как с обычным сервером. */
-export function spaceServerRecord(c: ClusterRecord): ServerRecord {
+export function spaceServerRecord(c: ClusterRecord, team?: string | null): ServerRecord {
+  const sid = spaceSid(c.id, team);
   return {
-    id: spaceSid(c.id), url: spaceUrl(c), name: new URL(c.api).host, identityKey: "", fingerprint: "", verifiedBy: "qr",
+    id: sid, url: spaceUrl(c, team), name: team ? spaceTitle(sid) || "Общее пространство" : new URL(c.api).host,
+    identityKey: "", fingerprint: "", verifiedBy: "qr",
     addedAt: 0, mtls: "required",
     device: {
       id: c.deviceId, keyAlias: c.alias, keyStorage: "strongbox", enrolledAt: 0, certPem: c.certPem ?? null,
@@ -53,7 +58,9 @@ export async function openClusterSession(c: ClusterRecord, baseUrl: string): Pro
   const keys = await (await keyProvider()).load(c.alias);
   if (!keys) throw new Error("Ключи устройства не найдены — зарегистрируйтесь заново по приглашению");
   const server = { ...spaceServerRecord(c), url: baseUrl };
-  const space = baseUrl === spaceUrl(c) ? `u-${c.user}` : undefined; // подписи действий — только для своего пространства
+  // Подписи действий в пространстве (разрешение агенту) — для того пространства, с которым сессия работает.
+  const name = baseUrl.startsWith(`${c.api}/s/`) ? baseUrl.slice(`${c.api}/s/`.length) : null;
+  const space = name === null ? undefined : name === c.user ? `u-${c.user}` : name;
   return new ClusterSession(mtlsHttp(c.alias + ".s"), server, keys, { deviceId: c.deviceId, space, token: (now) => clusterToken(c, now) });
 }
 
