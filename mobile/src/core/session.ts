@@ -137,6 +137,11 @@ export class DeviceSession {
     );
   }
 
+  /** Подписать команду для сервера (ssh_write / ssh_danger). На одиночном сервере серверов пользователя нет. */
+  async signCommand(_c: { type: "ssh_write" | "ssh_danger"; agent: string; server: string; command: string }, _typedServer?: string): Promise<Record<string, unknown>> {
+    throw new Error("Команды на серверах доступны только в кластере");
+  }
+
   /**
    * Поток SSE с переподключением. Каждое подключение — с новым DPoP-доказательством
    * (повтор старого сервер отверг бы), поэтому стандартный EventSource не годится.
@@ -271,6 +276,19 @@ export class ClusterSession extends DeviceSession {
       { type: "tool_approve", approval: a.approvalId, tool: a.tool, args_sha256: a.argsHash },
       { space: this.auth.space, nowMs: this.now() * 1000 },
     );
+    return { jws: signed.jws };
+  }
+
+  /**
+   * Команда агента на сервере: подписывается сама команда — сервер, агент и текст байт в байт. Для опасной команды
+   * в подпись входит имя сервера, которое человек ввёл руками; шлюз сверит его с настоящим.
+   */
+  override async signCommand(c: { type: "ssh_write" | "ssh_danger"; agent: string; server: string; command: string }, typedServer?: string): Promise<Record<string, unknown>> {
+    if (!this.auth.space) throw new Error("Сессия не привязана к пространству");
+    const body = c.type === "ssh_danger"
+      ? { type: c.type, agent: c.agent, server: c.server, command: c.command, typed_server: typedServer ?? "" }
+      : { type: c.type, agent: c.agent, server: c.server, command: c.command };
+    const signed = await signClusterAction(this.keys, body, { space: this.auth.space, nowMs: this.now() * 1000 });
     return { jws: signed.jws };
   }
 

@@ -104,6 +104,8 @@ export type RunEvent =
       args: any;
       risk?: string;
       args_sha256?: string;
+      /** Команда на сервере: подписывается не разрешение инструмента, а сама команда — это действие проверит ssh-gateway. */
+      sign?: { type: "ssh_write" | "ssh_danger"; agent: string; server: string; command: string } | null;
     }
   | { seq: number; type: "approval_resolved"; approval_id: string; call_id: string; approved: boolean }
   | { seq: number; type: "tool_start"; call_id: string; name: string; title?: string; args: any; risk?: string }

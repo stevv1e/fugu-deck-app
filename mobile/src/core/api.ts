@@ -58,9 +58,13 @@ export class DeckApi {
    * подписываем хэш тех аргументов, которые человек видит на экране, — сервер сверит со своими.
    * «Отклонить» подписи не требует: это безопасное направление.
    */
-  async approve(req: ApprovalRequest, approve: boolean, comment = "") {
+  async approve(req: ApprovalRequest, approve: boolean, comment = "", typedServer?: string) {
     const path = `/api/approvals/${enc(req.approval_id)}`;
     if (!approve) return this.s.request("POST", path, { approve: false, comment });
+    if (req.sign) {
+      // Команда на сервере: подпись предназначена ssh-gateway и покрывает саму команду, а не «разрешение инструмента».
+      return this.s.request("POST", path, { approve: true, comment, ...(await this.s.signCommand(req.sign, typedServer)) });
+    }
     // Формат подписи зависит от того, кто её проверяет: одиночный сервер — сам, пространство кластера — через keyguard.
     const signed = await this.s.signApproval({ approvalId: req.approval_id, tool: req.name, argsHash: argsHash(req.args), title: req.title || req.name });
     return this.s.request("POST", path, { approve: true, comment, ...signed });
