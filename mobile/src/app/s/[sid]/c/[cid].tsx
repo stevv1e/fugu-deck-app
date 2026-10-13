@@ -10,9 +10,11 @@ import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApprovalRequest } from "@/core/api";
+import { attachProblem, MAX_ATTACHMENT_BYTES, sizeText, type Uploaded } from "@/core/attachments";
 import { argsHash } from "@/core/crypto";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
+import { pickFile, pickPhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
 import { useServers } from "@/state/servers";
 import type { TeamChatState } from "@/core/teams";
@@ -249,6 +251,9 @@ export default function Chat() {
   const [link, setLink] = useState<string>("");
   const [models, setModels] = useState<{ list: string[]; ready: string[] } | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [atts, setAtts] = useState<Uploaded[]>([]); // загружены и ждут отправки с сообщением
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [attachMenu, setAttachMenu] = useState(false);
   const stream = useRef<{ close(): void } | null>(null);
   const list = useRef<FlatList<Item>>(null);
 
@@ -309,15 +314,37 @@ export default function Chat() {
     };
   }, [api, cid, meId, follow]);
 
+  // Вложение: выбрать → сразу загрузить в чат → приложить к следующему сообщению.
+  const attach = async (kind: "photo" | "file") => {
+    if (!api || uploading) return;
+    setAttachMenu(false);
+    setError(null);
+    try {
+      const f = await (kind === "photo" ? pickPhoto() : pickFile());
+      if (!f) return;
+      const bad = attachProblem(f, atts.length);
+      if (bad) return setError(bad);
+      setUploading(f.name);
+      const up = await api.upload(cid, f);
+      setAtts((prev) => [...prev, up]);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setUploading(null);
+    }
+  };
+
   const send = async () => {
     const msg = text.trim();
-    if (!api || !msg || runId) return;
+    if (!api || (!msg && atts.length === 0) || runId || uploading) return;
     setSending(true);
     setError(null);
     try {
-      const r = await api.send(cid, msg);
+      const sent = atts;
+      const r = await api.send(cid, msg, undefined, sent.map((a) => a.id));
       setText("");
-      setItems((prev) => [...prev, { kind: "user", key: "u" + Date.now(), content: msg, mine: true }]);
+      setAtts([]);
+      setItems((prev) => [...prev, { kind: "user", key: "u" + Date.now(), content: msg, mine: true, attachments: sent }]);
       follow(r.run_id);
     } catch (e) {
       setError(errText(e));
@@ -437,8 +464,31 @@ export default function Chat() {
             ) : null
           }
         />
+        {canWrite && (atts.length > 0 || uploading || attachMenu) ? (
+          <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
+            {attachMenu ? (
+              <Row gap={6}>
+                <Btn small title="Фото" kind="ghost" onPress={() => attach("photo")} />
+                <Btn small title="Файл" kind="ghost" onPress={() => attach("file")} />
+                <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки и читает текстовые файлы</Txt>
+              </Row>
+            ) : null}
+            {atts.map((a) => (
+              <Row key={a.id} style={{ justifyContent: "space-between" }}>
+                <Txt kind="small" numberOfLines={1} style={{ flex: 1 }}>📎 {a.filename} · {sizeText(a.size)}</Txt>
+                <Pressable hitSlop={10} onPress={() => setAtts((prev) => prev.filter((x) => x.id !== a.id))} accessibilityLabel={`Убрать ${a.filename}`}>
+                  <Txt kind="small" color={p.accent2}>убрать</Txt>
+                </Pressable>
+              </Row>
+            ))}
+            {uploading ? <Txt kind="small" color={p.accent}>загружается: {uploading}…</Txt> : null}
+          </View>
+        ) : null}
         {canWrite ? (
-          <View style={{ flexDirection: "row", gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg, alignItems: "flex-end" }}>
+          <View style={{ flexDirection: "row", gap: 8, padding: 10, borderTopWidth: atts.length || uploading || attachMenu ? 0 : 1, borderTopColor: p.line, backgroundColor: p.bg, alignItems: "flex-end" }}>
+            {!runId ? (
+              <Btn title="📎" kind="ghost" onPress={() => setAttachMenu(!attachMenu)} disabled={!!uploading || sending} style={{ minWidth: 44, paddingHorizontal: 0 }} />
+            ) : null}
             <TextInput
               value={text}
               onChangeText={setText}
@@ -463,7 +513,7 @@ export default function Chat() {
             {runId ? (
               <Btn title="Стоп" kind="danger" onPress={() => api?.cancel(runId).catch((e) => setError(errText(e)))} />
             ) : (
-              <Btn title="↑" onPress={send} busy={sending} disabled={!text.trim()} style={{ minWidth: 52 }} />
+              <Btn title="↑" onPress={send} busy={sending} disabled={(!text.trim() && atts.length === 0) || !!uploading} style={{ minWidth: 52 }} />
             )}
           </View>
         ) : null}

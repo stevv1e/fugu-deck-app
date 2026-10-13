@@ -651,6 +651,10 @@ class Database:
         sets = ",".join(f"{k}=?" for k in fields)
         await self._exec(f"UPDATE projects SET {sets} WHERE id=?", (*fields.values(), pid))
 
+    async def project_attachment_paths(self, pid: str) -> list[str]:
+        return [r["path"] for r in await self._all(
+            "SELECT a.path FROM attachments a JOIN conversations c ON c.id=a.conversation_id WHERE c.project_id=?", (pid,))]
+
     async def delete_project(self, pid: str) -> None:
         await self._exec("DELETE FROM projects WHERE id=?", (pid,))
 

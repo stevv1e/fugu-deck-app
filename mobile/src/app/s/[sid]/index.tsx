@@ -22,6 +22,25 @@ export default function Projects() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [armed, setArmed] = useState<string | null>(null); // проект, для которого показано подтверждение удаления
+  const [removing, setRemoving] = useState<string | null>(null);
+  // Удалить проект может его владелец; проект по умолчанию не удаляется — в нём живёт всё, что не разложено.
+  const canDelete = (pr: Project) => pr.id !== "general" && (pr.my_role === undefined || pr.my_role === "owner");
+
+  const remove = async (pid: string) => {
+    if (!api) return;
+    setRemoving(pid);
+    setErr(null);
+    try {
+      await api.deleteProject(pid);
+      setArmed(null);
+      reload();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setRemoving(null);
+    }
+  };
 
   if (!rec) return <Redirect href="/" />;
   if (!rec.device) return <Redirect href={`/s/${sid}/login`} />;
@@ -64,7 +83,8 @@ export default function Projects() {
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Проектов пока нет" text="Создайте первый — в нём будут чаты, память и участники." /> : null}
         {data?.map((pr: Project) => (
-          <Card key={pr.id} onPress={() => router.push(`/s/${sid}/p/${pr.id}`)} accent={p.accent}>
+          <Card key={pr.id} onPress={() => (armed === pr.id ? setArmed(null) : router.push(`/s/${sid}/p/${pr.id}`))}
+            onLongPress={canDelete(pr) ? () => setArmed(pr.id) : undefined} accent={armed === pr.id ? p.accent2 : p.accent}>
             <Row style={{ justifyContent: "space-between" }}>
               <Txt kind="h2" numberOfLines={1} style={{ flex: 1 }}>
                 {pr.name}
@@ -79,8 +99,21 @@ export default function Projects() {
             <Txt kind="small">
               чатов: {String(pr.conversations ?? 0)} · памяти: {String(pr.memories ?? 0)}
             </Txt>
+            {armed === pr.id ? (
+              <>
+                <Txt kind="dim">
+                  Удалить проект «{pr.name}» со всеми чатами, вложениями и заметками базы знаний? Вернуть его будет нельзя.
+                </Txt>
+                <Row>
+                  <Btn title="Удалить проект" small kind="danger" onPress={() => remove(pr.id)} busy={removing === pr.id} />
+                  <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} disabled={removing === pr.id} />
+                </Row>
+              </>
+            ) : null}
           </Card>
         ))}
+        {err && !creating ? <Notice text={err} /> : null}
+        {data && data.some(canDelete) ? <Txt kind="small">Чтобы удалить проект, удерживайте его.</Txt> : null}
         {creating ? (
           <View style={{ gap: 10 }}>
             <Field label="Новый проект" value={name} onChangeText={setName} autoFocus placeholder="Название" onSubmitEditing={create} />

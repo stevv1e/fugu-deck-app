@@ -607,7 +607,14 @@ async def delete_project(pid: str, u: dict = Me):
     if pid == DEFAULT_PROJECT:
         raise HTTPException(400, "Проект по умолчанию удалить нельзя")
     users = await db().project_user_ids(pid)
+    # Идущие задания в чатах проекта останавливаем; файлы вложений удаляем с диска (строки базы уйдут каскадом).
+    for r in list(agent().runs.values()):
+        if r.status == "running" and r.project_id == pid:
+            await agent().cancel(r)
+    paths = await db().project_attachment_paths(pid)
     await db().delete_project(pid)
+    for p in paths:
+        Path(p).unlink(missing_ok=True)
     await broker().publish("project", pid, users=users, action="deleted")
     return {"ok": True}
 
@@ -925,6 +932,41 @@ async def upload(cid: str, file: UploadFile = File(...), u: dict = Me):
             f.write(chunk)
     mime = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
     return await db().add_attachment(cid, name, mime, size, str(dest))
+
+
+class UploadIn(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    mime: str = Field("", max_length=120)
+    data: str = Field(..., min_length=1)  # содержимое файла в base64
+
+
+# Вложение с телефона. Защищённый канал приложения (mTLS ключом из чипа) передаёт тело запроса только текстом,
+# поэтому файл приходит в JSON как base64, а не multipart. Предел меньше общего: base64 раздувает файл на треть,
+# и всё это проходит через память телефона и прокси.
+JSON_UPLOAD_MAX = 8 * 1024 * 1024
+
+
+@app.post("/api/conversations/{cid}/attachments/json")
+async def upload_json(cid: str, body: UploadIn, u: dict = Me):
+    await conv_access(u, cid, "editor")
+    if len(body.data) > JSON_UPLOAD_MAX * 4 // 3 + 16:
+        raise HTTPException(413, f"Файл больше {JSON_UPLOAD_MAX // 1024 // 1024} МБ")
+    try:
+        raw = base64.b64decode(body.data, validate=True)
+    except Exception:
+        raise HTTPException(400, "Содержимое файла повреждено при передаче")
+    if not raw or len(raw) > JSON_UPLOAD_MAX:
+        raise HTTPException(413 if raw else 400, f"Файл пустой или больше {JSON_UPLOAD_MAX // 1024 // 1024} МБ")
+    name = SAFE.sub("_", Path(body.filename).name)[:120] or "file"
+    aid_dir = settings.data_dir / "attachments" / cid
+    aid_dir.mkdir(parents=True, exist_ok=True)
+    dest = aid_dir / f"{new_id()}_{name}"
+    dest.write_bytes(raw)
+    # Тип файла — по расширению; присланный телефоном учитываем, только если он обычного вида (в подсказку модели
+    # и в data:-адрес картинки он попадает как есть).
+    mime = mimetypes.guess_type(name)[0] or (body.mime if re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", body.mime) else "") \
+        or "application/octet-stream"
+    return await db().add_attachment(cid, name, mime, len(raw), str(dest))
 
 
 class MessageIn(BaseModel):

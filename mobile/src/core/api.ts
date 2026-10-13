@@ -1,4 +1,5 @@
 /** API сервера Fugu Deck для приложения. Всё идёт через DeviceSession (DPoP + подписи). */
+import { uploadBody, type PickedFile, type Uploaded } from "./attachments";
 import { argsHash } from "./crypto";
 import type { DeviceSession } from "./session";
 import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } from "./types";
@@ -49,8 +50,13 @@ export class DeckApi {
 
   /** Удалить чат со всей перепиской и вложениями; идущее задание агента в нём останавливается. */
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
-  send = (cid: string, content: string, model?: string) =>
-    this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null });
+  send = (cid: string, content: string, model?: string, attachmentIds: string[] = []) =>
+    this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null, attachment_ids: attachmentIds });
+  /** Загрузить вложение в чат; файл уходит в JSON как base64 (защищённый канал передаёт тело только текстом). */
+  upload = (cid: string, f: PickedFile) =>
+    // файл до 8 МБ по мобильной сети — это не полминуты обычного запроса
+    this.s.request<Uploaded>("POST", `/api/conversations/${enc(cid)}/attachments/json`, uploadBody(f), { timeoutMs: 180000 });
+  deleteProject = (pid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/projects/${enc(pid)}`);
   /** Сменить модель чата (личное пространство; в общем — через предложение и спонсора). */
   setModel = (cid: string, model: string) => this.s.request<{ applied: boolean }>("POST", `/api/conversations/${enc(cid)}/model`, { model });
   cancel = (rid: string) => this.s.request("POST", `/api/runs/${enc(rid)}/cancel`);
