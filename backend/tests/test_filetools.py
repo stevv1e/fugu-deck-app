@@ -21,6 +21,7 @@ def make_zip(tmp_path, files: dict[str, bytes], name="a.zip"):
 def test_zip_listing_and_member(tmp_path):
     p = make_zip(tmp_path, {"src/main.py": b"print('hi')\n", "../../etc/passwd": b"root:x", "img.bin": b"\x00\x01\x02"})
     out = ft.read(p, "a.zip", "application/zip")
+    assert ft.read(p, "a.zip", "", member="")["total"] == 3  # пустой path — список, а не ошибка
     assert out["total"] == 3 and {e["path"] for e in out["entries"]} == {"src/main.py", "../../etc/passwd", "img.bin"}
     assert ft.read(p, "a.zip", "", member="src/main.py")["content"] == "print('hi')\n"
     # «опасный» путь — только имя в архиве: читается его содержимое, на диск ничего не пишется
