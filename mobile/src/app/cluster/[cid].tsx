@@ -10,18 +10,21 @@ import { fetchStatus, type ClusterInvite } from "@/core/cluster";
 import { nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, saveCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
-import { requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
+import { requestAccountDelete, requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, errText, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
+import { useTheme } from "@/ui/theme";
 
 export default function ClusterDevice() {
   const { cid } = useLocalSearchParams<{ cid: string }>();
+  const { p } = useTheme();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "error" | "ok" | "info"; text: string } | null>(null);
   const [space, setSpace] = useState<SpaceState | null>(null);
   const [spaceBusy, setSpaceBusy] = useState(false);
   const [armDelete, setArmDelete] = useState(false); // удаление — в два нажатия, затем биометрия
+  const [armAccount, setArmAccount] = useState(false);
   const { reloadClusters } = useServers();
 
   useEffect(() => { getCluster(cid).then(setRec); }, [cid]);
@@ -129,6 +132,29 @@ export default function ClusterDevice() {
     }
   };
 
+  const deleteAccount = async () => {
+    if (!rec) return;
+    setSpaceBusy(true);
+    setMsg(null);
+    setArmAccount(false);
+    try {
+      let st = await requestAccountDelete(rec);
+      setMsg({ kind: "info", text: "Запрос отправлен. Сервер проверяет подпись — это занимает до 20 секунд." });
+      for (let i = 0; i < 20 && !st.delete_at && !st.delete_error; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        st = await spaceState(rec, false);
+      }
+      setSpace(st);
+      if (st.delete_error) throw new Error(`Запрос удаления отклонён: ${st.delete_error}`);
+      if (!st.delete_at) throw new Error("Запрос записан, но ещё не подтверждён сервером — проверьте позже");
+      setMsg({ kind: "info", text: "Аккаунт будет удалён через сутки. До этого удаление можно отменить." });
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    } finally {
+      setSpaceBusy(false);
+    }
+  };
+
   const undelete = async () => {
     if (!rec) return;
     setSpaceBusy(true);
@@ -173,7 +199,9 @@ export default function ClusterDevice() {
             <Txt kind="dim">Проекты и чаты с агентом. Он работает в вашем отдельном окружении в кластере; ключи API к нему не попадают.</Txt>
             {space?.delete_at ? (
               <>
-                <Notice kind="warn" text={`Будет удалено ${new Date(space.delete_at).toLocaleString()}: проекты, чаты и память агента. Сейчас пространство остановлено.`} />
+                <Notice kind="warn" text={space.delete_account
+                  ? `Аккаунт будет удалён ${new Date(space.delete_at).toLocaleString()}: пространство с копиями, ключи API, устройства и вход. Сейчас пространство остановлено.`
+                  : `Будет удалено ${new Date(space.delete_at).toLocaleString()}: проекты, чаты и память агента. Сейчас пространство остановлено.`} />
                 <Btn title="Отменить удаление" onPress={undelete} busy={spaceBusy} />
               </>
             ) : (
@@ -196,6 +224,20 @@ export default function ClusterDevice() {
           <Btn title="Общие пространства" kind="ghost" onPress={() => router.push({ pathname: "/teams/[cid]", params: { cid: rec.id } })} />
           <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
           <Btn title="Ключи API и лимит расходов" kind="ghost" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id } })} />
+          {!space?.delete_requested ? (
+            armAccount ? (
+              <Card accent={p.accent2}>
+                <Txt kind="h2">Удалить аккаунт?</Txt>
+                <Txt kind="dim">Через сутки удалятся личное пространство (проекты, чаты, файлы, память) и его копии, ключи API, все устройства и вход в кластер. До этого удаление можно отменить. Общие пространства, где вы владелец, останутся участникам.</Txt>
+                <Row>
+                  <Btn title="Удалить аккаунт ⌁" small kind="danger" onPress={deleteAccount} disabled={spaceBusy} />
+                  <Btn title="Отмена" small kind="ghost" onPress={() => setArmAccount(false)} />
+                </Row>
+              </Card>
+            ) : (
+              <Btn title="Удалить аккаунт" small kind="ghost" onPress={() => setArmAccount(true)} disabled={spaceBusy} style={{ alignSelf: "flex-start" }} />
+            )
+          ) : null}
           {!nativeMtlsAvailable() ? <Notice kind="warn" text="Сборка без модуля fd-secure: mTLS недоступен, сервер с обязательным mTLS запрос не примет." /> : null}
         </>
       )}
