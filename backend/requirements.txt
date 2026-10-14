@@ -8,3 +8,4 @@ pyjwt[crypto]>=2.9,<3
 pyotp>=2.9,<3
 python-multipart>=0.0.9
 anthropic>=1.8
+tzdata

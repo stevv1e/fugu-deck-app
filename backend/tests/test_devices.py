@@ -194,7 +194,7 @@ def test_mtls_serial_header_formats(client, monkeypatch):
 
 def test_health_reports_busy(client):
     """По busy control-plane решает, можно ли усыпить пространство: идущее задание усыплять нельзя."""
-    assert client.get("/api/health").json() == {"ok": True, "busy": False}
+    assert client.get("/api/health").json() == {"ok": True, "busy": False, "next_wake": None}
     runs = main.agent().runs
     runs["r-test"] = type("R", (), {"status": "running"})()
     try:

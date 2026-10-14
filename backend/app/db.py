@@ -227,6 +227,29 @@ SCHEMA = [
         PRIMARY KEY (memory_id, run_id)
     );
     """,
+    # v10: задания агента по расписанию (schedules.py); свой чат у каждого задания
+    """
+    CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        model TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        at_time TEXT NOT NULL DEFAULT '09:00',
+        weekdays TEXT NOT NULL DEFAULT '[]',
+        tz TEXT NOT NULL DEFAULT 'UTC',
+        run_at REAL,
+        next_at REAL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at REAL NOT NULL,
+        last_run_at REAL,
+        last_status TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_schedules_next ON schedules(enabled, next_at);
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -462,6 +485,53 @@ class Database:
             r["meta"] = json.loads(r["meta"]) if r["meta"] else None
         return rows
 
+    # --- schedules ---
+    @staticmethod
+    def _sched(r: dict | None) -> dict | None:
+        if r:
+            r["weekdays"] = json.loads(r["weekdays"] or "[]")
+            r["enabled"] = bool(r["enabled"])
+        return r
+
+    async def create_schedule(self, **f: Any) -> dict:
+        sid, now = new_id(), time.time()
+        f = {**f, "id": sid, "created_at": now, "weekdays": json.dumps(f.get("weekdays") or [])}
+        cols = ",".join(f)
+        await self._exec(f"INSERT INTO schedules ({cols}) VALUES ({','.join('?' * len(f))})", tuple(f.values()))
+        return await self.get_schedule(sid)  # type: ignore[return-value]
+
+    async def get_schedule(self, sid: str) -> dict | None:
+        return self._sched(await self._one("SELECT * FROM schedules WHERE id=?", (sid,)))
+
+    async def list_schedules(self, pid: str) -> list[dict]:
+        return [self._sched(r) for r in await self._all(
+            "SELECT * FROM schedules WHERE project_id=? ORDER BY created_at", (pid,))]
+
+    async def count_schedules(self, pid: str) -> int:
+        return (await self._one("SELECT COUNT(*) AS n FROM schedules WHERE project_id=?", (pid,)))["n"]
+
+    async def update_schedule(self, sid: str, **f: Any) -> None:
+        # next_at может стать NULL (разовое выполнено) — поэтому None здесь значимо; пропускаются только отсутствующие
+        if "weekdays" in f:
+            f["weekdays"] = json.dumps(f["weekdays"] or [])
+        if "enabled" in f:
+            f["enabled"] = int(bool(f["enabled"]))
+        if not f:
+            return
+        sets = ",".join(f"{k}=?" for k in f)
+        await self._exec(f"UPDATE schedules SET {sets} WHERE id=?", (*f.values(), sid))
+
+    async def delete_schedule(self, sid: str) -> None:
+        await self._exec("DELETE FROM schedules WHERE id=?", (sid,))
+
+    async def due_schedules(self, now: float) -> list[dict]:
+        return [self._sched(r) for r in await self._all(
+            "SELECT * FROM schedules WHERE enabled=1 AND next_at IS NOT NULL AND next_at<=? ORDER BY next_at", (now,))]
+
+    async def next_schedule_at(self) -> float | None:
+        r = await self._one("SELECT MIN(next_at) AS t FROM schedules WHERE enabled=1 AND next_at IS NOT NULL")
+        return r["t"] if r else None
+
     # --- attachments ---
     async def add_attachment(self, cid: str, filename: str, mime: str, size: int, path: str) -> dict:
         aid = new_id()
@@ -473,6 +543,17 @@ class Database:
 
     async def get_attachment(self, aid: str) -> dict | None:
         return await self._one("SELECT * FROM attachments WHERE id=?", (aid,))
+
+    async def unsent_attachments(self, before: float) -> list[dict]:
+        """Вложения, загруженные раньше before и так и не приложенные ни к одному сообщению своего чата."""
+        return await self._all(
+            "SELECT a.id, a.path FROM attachments a WHERE a.created_at<? AND NOT EXISTS ("
+            "SELECT 1 FROM messages m WHERE m.conversation_id=a.conversation_id AND m.role='user' "
+            "AND m.meta LIKE '%\"' || a.id || '\"%')", (before,))
+
+    async def delete_attachments(self, ids: list[str]) -> None:
+        for i in ids:
+            await self._exec("DELETE FROM attachments WHERE id=?", (i,))
 
     async def list_attachments(self, cid: str) -> list[dict]:
         return await self._all(

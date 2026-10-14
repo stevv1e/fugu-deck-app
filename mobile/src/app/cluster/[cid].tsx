@@ -6,27 +6,19 @@ import { FdSecure } from "fd-secure";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { buildKeyPut, KEY_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
-import { unb64 } from "@/core/bytes";
-import { clusterDeviceId, fetchStatus, refresh, signClusterAction, type ClusterInvite } from "@/core/cluster";
-import { dpopProof } from "@/core/dpop";
-import { errorFrom } from "@/core/http";
-import { mtlsHttp, nativeMtlsAvailable, plainHttp } from "@/platform/http";
+import { fetchStatus, type ClusterInvite } from "@/core/cluster";
+import { nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { keyProvider } from "@/platform/keys";
-import { getCluster, loadRefresh, saveCluster, saveRefresh, spaceSid, type ClusterRecord } from "@/state/cluster";
+import { getCluster, saveCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
 import { requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
 import { useServers } from "@/state/servers";
-import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
-
-const TITLES: Record<KeyProvider, string> = { anthropic: "Claude", sakana: "Sakana", github: "GitHub", gitlab: "GitLab" };
+import { Btn, Card, Chip, errText, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 
 export default function ClusterDevice() {
   const { cid } = useLocalSearchParams<{ cid: string }>();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "error" | "ok" | "info"; text: string } | null>(null);
-  const [provider, setProvider] = useState<KeyProvider>("anthropic");
-  const [apiKey, setApiKey] = useState("");
   const [space, setSpace] = useState<SpaceState | null>(null);
   const [spaceBusy, setSpaceBusy] = useState(false);
   const [armDelete, setArmDelete] = useState(false); // удаление — в два нажатия, затем биометрия
@@ -151,36 +143,6 @@ export default function ClusterDevice() {
     }
   };
 
-  const saveKey = async () => {
-    if (!rec) return;
-    const bad = validateApiKey(apiKey.trim());
-    if (bad) return setMsg({ kind: "error", text: bad });
-    setBusy(true);
-    setMsg(null);
-    try {
-      const k = await keys();
-      const inv = rec as unknown as ClusterInvite;
-      const rt = await loadRefresh(rec.id);
-      if (!rt) throw new Error("Сессия истекла — войдите заново по приглашению");
-      const http = nativeMtlsAvailable() && rec.certPem ? mtlsHttp(rec.alias + ".s") : plainHttp();
-      const now = () => Date.now() / 1000;
-      const t = await refresh(plainHttp(), inv, k, rt, now());
-      await saveRefresh(rec.id, t.refreshToken);
-      const body = await buildKeyPut((b, n) => signClusterAction(k, b, { nonce: n }), { hpkePub: unb64(rec.hpke), deviceId: clusterDeviceId(k), provider, apiKey });
-      const url = `${rec.api}/v1/keys`;
-      const proof = await dpopProof({ key: k.session, method: "POST", url, accessToken: t.accessToken, now: now() });
-      const r = await http.request({ method: "POST", url, body: JSON.stringify(body),
-        headers: { "Content-Type": "application/json", Authorization: `DPoP ${t.accessToken}`, DPoP: proof } });
-      if (r.status !== 200) throw errorFrom(r.status, r.text);
-      setApiKey("");
-      setMsg({ kind: "ok", text: `Ключ ${TITLES[provider]} сохранён: ${JSON.parse(r.text).masked}. Его видит только keyguard.` });
-    } catch (e) {
-      setMsg({ kind: "error", text: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (!rec) return <Screen title="Кластер"><Loading /></Screen>;
   // Сертификат для mTLS приходит отдельным запросом статуса. У первого устройства администратора статус «активно»
   // приходит сразу в ответе на регистрацию, и без этой проверки сертификат не был бы получен никогда.
@@ -233,12 +195,7 @@ export default function ClusterDevice() {
           <Btn title="Серверы для агента" kind="ghost" onPress={() => router.push({ pathname: "/servers/[cid]", params: { cid: rec.id } })} />
           <Btn title="Общие пространства" kind="ghost" onPress={() => router.push({ pathname: "/teams/[cid]", params: { cid: rec.id } })} />
           <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
-          <Txt kind="dim">Ключ API шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят.</Txt>
-          <Row gap={6}>{KEY_PROVIDERS.map((p) => (
-            <Btn key={p} small title={TITLES[p]} kind={p === provider ? "primary" : "ghost"} onPress={() => setProvider(p)} />
-          ))}</Row>
-          <Field label={`Ключ ${TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false} />
-          <Btn title="Сохранить ключ" onPress={saveKey} busy={busy} disabled={!apiKey} />
+          <Btn title="Ключи API и лимит расходов" kind="ghost" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id } })} />
           {!nativeMtlsAvailable() ? <Notice kind="warn" text="Сборка без модуля fd-secure: mTLS недоступен, сервер с обязательным mTLS запрос не примет." /> : null}
         </>
       )}

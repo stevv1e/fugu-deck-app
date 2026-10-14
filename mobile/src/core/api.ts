@@ -26,6 +26,23 @@ export type AppConfig = {
   [k: string]: unknown;
 };
 
+export type Skill = { name: string; description: string; body?: string; [k: string]: unknown };
+export type UsageMember = {
+  user_id: string | null; name: string; me: boolean; requests: number; launched_usd: number; launched_tokens: number;
+  paid_usd: number; paid_tokens: number; paid_for_others_usd: number;
+};
+export type UsageModel = { model: string; usd: number; tokens: number; requests: number };
+export type UsageReport = { period: string; since: number; members: UsageMember[]; models: UsageModel[]; total_usd: number; total_tokens: number };
+export type ScheduleKind = "hourly" | "daily" | "weekly" | "once";
+export type Schedule = {
+  id: string; project_id: string; conversation_id: string | null; title: string; prompt: string; model: string; kind: ScheduleKind;
+  at_time: string; weekdays: number[]; tz: string; run_at: number | null; next_at: number | null; enabled: boolean;
+  last_run_at: number | null; last_status: string | null; description: string;
+};
+export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" | "at_time" | "weekdays" | "tz" | "run_at" | "model" | "enabled">>;
+/** Проект целиком для переноса: инструкции, скилы и заметки (формат fugu-deck-project/1). */
+export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
+
 export type ApprovalRequest = Extract<RunEvent, { type: "approval_request" }>;
 
 const enc = encodeURIComponent;
@@ -48,6 +65,29 @@ export class DeckApi {
   linkNotes = (from: number, to: number, type: string) => this.s.request("POST", `/api/memory/${from}/links`, { to, type });
   unlinkNotes = (a: number, b: number) => this.s.request("DELETE", `/api/memory/${a}/links/${b}`);
 
+  renameConversation = (cid: string, title: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { title });
+  /** Перенести чат в другой проект (нужна роль редактора в обоих). */
+  moveConversation = (cid: string, projectId: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { project_id: projectId });
+  updateProject = (pid: string, f: { name?: string; description?: string; instructions?: string }) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, f);
+  exportProject = (pid: string) => this.s.request<ProjectExport>("GET", `/api/projects/${enc(pid)}/export`);
+  importProject = (data: ProjectExport) => this.s.request<Project>("POST", "/api/projects/import", data, { timeoutMs: 120000 });
+
+  // ---- скилы агента (общие на пространство; править может владелец) ----
+  skills = () => this.s.request<{ writable: boolean; items: Skill[] }>("GET", "/api/skills");
+  skill = (name: string) => this.s.request<Skill>("GET", `/api/skills/${enc(name)}`);
+  saveSkill = (name: string, description: string, body: string, renameFrom?: string) =>
+    this.s.request<Skill>("PUT", `/api/skills/${enc(name)}`, { description, body, rename_from: renameFrom || null });
+  deleteSkill = (name: string) => this.s.request("DELETE", `/api/skills/${enc(name)}`);
+
+  usage = (period: "today" | "week" | "month" | "all") => this.s.request<UsageReport>("GET", `/api/usage/members?period=${period}`);
+
+  // ---- задания по расписанию ----
+  schedules = (pid: string) => this.s.request<Schedule[]>("GET", `/api/projects/${enc(pid)}/schedules`);
+  createSchedule = (pid: string, v: ScheduleInput) => this.s.request<Schedule>("POST", `/api/projects/${enc(pid)}/schedules`, v);
+  updateSchedule = (id: string, v: ScheduleInput) => this.s.request<Schedule>("PATCH", `/api/schedules/${enc(id)}`, v);
+  deleteSchedule = (id: string) => this.s.request("DELETE", `/api/schedules/${enc(id)}`);
+  runSchedule = (id: string) => this.s.request<Schedule>("POST", `/api/schedules/${enc(id)}/run`);
+
   /** Удалить чат со всей перепиской и вложениями; идущее задание агента в нём останавливается. */
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
   send = (cid: string, content: string, model?: string, attachmentIds: string[] = []) =>
@@ -56,6 +96,9 @@ export class DeckApi {
   upload = (cid: string, f: PickedFile) =>
     // файл до 8 МБ по мобильной сети — это не полминуты обычного запроса
     this.s.request<Uploaded>("POST", `/api/conversations/${enc(cid)}/attachments/json`, uploadBody(f), { timeoutMs: 180000 });
+  /** Содержимое вложения (предпросмотр картинки): JSON с base64 — как и загрузка. */
+  attachment = (aid: string) =>
+    this.s.request<Uploaded & { data: string }>("GET", `/api/attachments/${enc(aid)}/json`, undefined, { timeoutMs: 120000 });
   deleteProject = (pid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/projects/${enc(pid)}`);
   /** Сменить модель чата (личное пространство; в общем — через предложение и спонсора). */
   setModel = (cid: string, model: string) => this.s.request<{ applied: boolean }>("POST", `/api/conversations/${enc(cid)}/model`, { model });

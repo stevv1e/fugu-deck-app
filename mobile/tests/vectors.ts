@@ -40,6 +40,8 @@ const GRANT = {
 const valid: [string, string | null, Record<string, unknown>][] = [
   ["key_put", null, { type: "key_put", provider: "anthropic", key_hint: "6789", ct_sha256: CT }],
   ["key_delete", null, { type: "key_delete", provider: "sakana" }],
+  ["spend_limit", null, { type: "spend_limit", limit_usd_month: 25.5 }],
+  ["spend_limit: снять", null, { type: "spend_limit", limit_usd_month: null }],
   ["grant целая сумма", "t-shop", GRANT],
   ["grant с копейками и без дневного лимита", "t-shop", { ...GRANT, provider: "anthropic", model: "claude-x", limit_usd: 12.5, key_until: "2026-10-03", per_member_usd_day: null, members: ["anna"], proposal: "p-8" }],
   ["grant 0.25", "t-shop", { ...GRANT, chat: "c-1", limit_usd: 0.25, until: "2026-10-02", key_until: "2026-10-02", per_member_usd_day: 0.05, members: ["bob"], proposal: "p-9" }],

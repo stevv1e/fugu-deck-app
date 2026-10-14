@@ -28,3 +28,16 @@ export function attachProblem(f: Pick<PickedFile, "name" | "size">, already: num
 }
 
 export const uploadBody = (f: PickedFile) => ({ filename: f.name.slice(0, 255) || "file", mime: f.mime || "", data: f.base64 });
+
+export const isImage = (mime: string) => /^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime);
+
+/** Картинки для предпросмотра: data:-адреса по id вложения. Свои (только что загруженные) — без повторной загрузки. */
+const previews = new Map<string, string>();
+const PREVIEW_LIMIT = 40;
+
+export function rememberPreview(id: string, mime: string, base64: string) {
+  if (!isImage(mime)) return;
+  previews.set(id, `data:${mime};base64,${base64}`);
+  while (previews.size > PREVIEW_LIMIT) previews.delete(previews.keys().next().value as string);
+}
+export const cachedPreview = (id: string) => previews.get(id);

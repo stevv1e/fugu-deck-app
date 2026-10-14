@@ -23,6 +23,8 @@ export type Role = 'reader' | 'editor' | 'owner' | 'none';
 export type ActionBody =
   | { type: 'key_put'; provider: Provider; key_hint: string; ct_sha256: string }
   | { type: 'key_delete'; provider: Provider }
+  // Лимит личных расходов на модели в месяц (своим ключом в личном пространстве); null — без лимита.
+  | { type: 'spend_limit'; limit_usd_month: number | null }
   | {
       type: 'grant';
       chat: string;
@@ -101,7 +103,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** Действия в пространстве несут space в конверте (и человек его видит); у остальных поля space нет вовсе. */
 export const IN_SPACE: Record<ActionType, boolean> = {
-  key_put: false, key_delete: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
+  key_put: false, key_delete: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
   role_change: true, space_delete: true, tool_approve: true,
 };
@@ -150,6 +152,7 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
     ct_sha256: str(64, /^[0-9a-f]{64}$/),
   },
   key_delete: { provider: oneOf(...PROVIDERS) },
+  spend_limit: { limit_usd_month: nullable(money) },
   grant: {
     chat: id,
     provider: oneOf(...PROVIDERS),
@@ -241,6 +244,12 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
       };
     case 'key_delete':
       return { title: 'Удалить ключ API', lines: [`Провайдер: ${PROVIDER_NAMES[a.provider]}`], danger: true };
+    case 'spend_limit':
+      return {
+        title: 'Лимит расходов на модели',
+        lines: [a.limit_usd_month !== null ? `Не больше ${usd(a.limit_usd_month)} в месяц` : 'Без лимита', 'Своим ключом в личном пространстве'],
+        danger: a.limit_usd_month === null,
+      };
     case 'grant':
       return {
         title: 'Оплачивать модель в общем чате своим ключом',

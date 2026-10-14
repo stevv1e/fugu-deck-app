@@ -9,15 +9,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { ApprovalRequest } from "@/core/api";
-import { attachProblem, MAX_ATTACHMENT_BYTES, sizeText, type Uploaded } from "@/core/attachments";
+import type { ApprovalRequest, DeckApi } from "@/core/api";
+import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, rememberPreview, sizeText, type Uploaded } from "@/core/attachments";
 import { argsHash } from "@/core/crypto";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
-import { pickFile, pickPhoto } from "@/platform/pick";
+import { pickFile, pickPhoto, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
 import { useServers } from "@/state/servers";
 import type { TeamChatState } from "@/core/teams";
+import { AttachmentList } from "@/ui/Attachments";
 import { Btn, Chip, errText, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { TeamModel } from "@/ui/TeamModel";
 import { alpha, MONO, useTheme } from "@/ui/theme";
@@ -210,15 +211,15 @@ function ToolCard({ t }: { t: Tool }) {
   );
 }
 
-function Bubble({ item, meId }: { item: Item; meId?: string }) {
+function Bubble({ item, api }: { item: Item; api: DeckApi | null }) {
   const { p } = useTheme();
   if (item.kind === "user") {
     return (
       <View style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 4 }}>
         {!item.mine && item.author ? <Txt kind="small" style={{ textAlign: "right" }}>{item.author}</Txt> : null}
         <View style={{ backgroundColor: alpha(p.accent, 0.12), borderColor: alpha(p.accent, 0.45), borderWidth: 1, padding: 11, borderRadius: p.radius }}>
-          <Txt selectable>{item.content}</Txt>
-          {item.attachments?.length ? <Txt kind="small">📎 {item.attachments.map((a) => a.filename).join(", ")}</Txt> : null}
+          {item.content ? <Txt selectable>{item.content}</Txt> : null}
+          {item.attachments?.length ? <AttachmentList items={item.attachments} api={api} /> : null}
         </View>
       </View>
     );
@@ -315,17 +316,18 @@ export default function Chat() {
   }, [api, cid, meId, follow]);
 
   // Вложение: выбрать → сразу загрузить в чат → приложить к следующему сообщению.
-  const attach = async (kind: "photo" | "file") => {
+  const attach = async (kind: "photo" | "camera" | "file") => {
     if (!api || uploading) return;
     setAttachMenu(false);
     setError(null);
     try {
-      const f = await (kind === "photo" ? pickPhoto() : pickFile());
+      const f = await (kind === "photo" ? pickPhoto() : kind === "camera" ? takePhoto() : pickFile());
       if (!f) return;
       const bad = attachProblem(f, atts.length);
       if (bad) return setError(bad);
       setUploading(f.name);
       const up = await api.upload(cid, f);
+      rememberPreview(up.id, up.mime, f.base64); // своя картинка в ленте — без повторной загрузки
       setAtts((prev) => [...prev, up]);
     } catch (e) {
       setError(errText(e));
@@ -444,7 +446,7 @@ export default function Chat() {
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
           onLayout={() => list.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) =>
-            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} /> : <Bubble item={item} meId={meId} />
+            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} /> : <Bubble item={item} api={api} />
           }
           ListHeaderComponent={
             <View style={{ gap: 12 }}>
@@ -468,6 +470,7 @@ export default function Chat() {
           <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
             {attachMenu ? (
               <Row gap={6}>
+                <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />
                 <Btn small title="Фото" kind="ghost" onPress={() => attach("photo")} />
                 <Btn small title="Файл" kind="ghost" onPress={() => attach("file")} />
                 <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки и читает текстовые файлы</Txt>
@@ -475,7 +478,7 @@ export default function Chat() {
             ) : null}
             {atts.map((a) => (
               <Row key={a.id} style={{ justifyContent: "space-between" }}>
-                <Txt kind="small" numberOfLines={1} style={{ flex: 1 }}>📎 {a.filename} · {sizeText(a.size)}</Txt>
+                <Txt kind="small" numberOfLines={1} style={{ flex: 1 }}>{isImage(a.mime) ? "🖼" : "📎"} {a.filename} · {sizeText(a.size)}</Txt>
                 <Pressable hitSlop={10} onPress={() => setAtts((prev) => prev.filter((x) => x.id !== a.id))} accessibilityLabel={`Убрать ${a.filename}`}>
                   <Txt kind="small" color={p.accent2}>убрать</Txt>
                 </Pressable>
