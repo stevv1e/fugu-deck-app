@@ -11,6 +11,7 @@ import { useApi, useLoad } from "@/state/hooks";
 import { clusterOfSid, parseSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Empty, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { ModeSwitch, TalkChats, useMode } from "@/ui/Modes";
 import { useTheme } from "@/ui/theme";
 
 export default function Projects() {
@@ -28,6 +29,7 @@ export default function Projects() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const [mode, setMode] = useMode(sid);
   // Удалить проект может его владелец; проект по умолчанию не удаляется — в нём живёт всё, что не разложено.
   const canDelete = (pr: Project) => pr.id !== "general" && (pr.my_role === undefined || pr.my_role === "owner");
   const canRename = (pr: Project) => pr.my_role === undefined || pr.my_role === "owner";
@@ -116,6 +118,8 @@ export default function Projects() {
               : <IconBtn glyph="⚙" label="Кластер и ключи" onPress={() => router.push({ pathname: "/cluster/[cid]", params: { cid: clusterOfSid(sid)! } })} />
             : <IconBtn glyph="⚙" label="Сервер и устройства" onPress={() => router.push(`/s/${sid}/settings`)} />
         } />
+      {mode ? <ModeSwitch mode={mode} onChange={setMode} /> : null}
+      {mode === "talk" ? <TalkChats sid={sid} api={api} apiError={apiError} /> : mode === null ? <Loading /> : (
       <ScrollView
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}
@@ -200,6 +204,7 @@ export default function Projects() {
           </Row>
         ) : null}
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

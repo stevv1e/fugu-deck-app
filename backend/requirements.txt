@@ -12,3 +12,4 @@ tzdata
 pypdf>=5,<7
 openpyxl>=3.1,<4
 defusedxml>=0.7
+pillow>=11,<13

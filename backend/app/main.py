@@ -22,7 +22,7 @@ from . import auth, backup, devices, kb, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
-from .db import DEFAULT_PROJECT, Database, new_id
+from .db import DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
 from .llm import split_model
@@ -182,7 +182,8 @@ async def need(u: dict, pid: str, min_role: str = "viewer") -> str:
 
 async def conv_access(u: dict, cid: str, min_role: str = "viewer") -> dict:
     c = await db().get_conversation(cid)
-    if not c:
+    if not c or (c["project_id"] == TALK_PROJECT and not settings.is_space and u["role"] != "owner"
+                 and c.get("created_by") != u["id"]):
         raise HTTPException(404, "Чат не найден")
     await need(u, c["project_id"], min_role)
     return c
@@ -601,6 +602,8 @@ async def get_project(pid: str, u: dict = Me):
 @app.patch("/api/projects/{pid}")
 async def patch_project(pid: str, body: ProjectPatch, u: dict = Me):
     role = await need(u, pid, "editor")
+    if pid == TALK_PROJECT:
+        raise HTTPException(400, "«Общение» — не проект: его не переименовать и не настроить")
     if role != "owner" and (body.name is not None or body.description is not None):
         raise HTTPException(403, "Название и описание меняет владелец проекта")
     await db().update_project(pid, **body.model_dump(exclude_none=True))
@@ -611,8 +614,8 @@ async def patch_project(pid: str, body: ProjectPatch, u: dict = Me):
 @app.delete("/api/projects/{pid}")
 async def delete_project(pid: str, u: dict = Me):
     await need(u, pid, "owner")
-    if pid == DEFAULT_PROJECT:
-        raise HTTPException(400, "Проект по умолчанию удалить нельзя")
+    if pid in (DEFAULT_PROJECT, TALK_PROJECT):
+        raise HTTPException(400, "Этот проект удалить нельзя")
     users = await db().project_user_ids(pid)
     # Идущие задания в чатах проекта останавливаем; файлы вложений удаляем с диска (строки базы уйдут каскадом).
     for r in list(agent().runs.values()):
@@ -835,6 +838,8 @@ def _check_model(m: str | None) -> str:
 async def list_convs(pid: str, u: dict = Me):
     await need(u, pid)
     convs = await db().list_conversations(pid)
+    if pid == TALK_PROJECT and not settings.is_space and u["role"] != "owner":
+        convs = [c for c in convs if c.get("created_by") == u["id"]]  # на своём сервере разговоры — у каждого свои
     for c in convs:
         r = agent().active_run(c["id"])
         c["running"] = bool(r and r.status == "running")
@@ -1794,6 +1799,8 @@ async def list_schedules(pid: str, u: dict = Me):
 async def create_schedule(pid: str, body: ScheduleIn, u: dict = Me):
     schedules_allowed()
     await need(u, pid, "editor")
+    if pid == TALK_PROJECT:
+        raise HTTPException(400, "Задания по расписанию — в проектах инжиниринга")
     if await db().count_schedules(pid) >= sched.MAX_PER_PROJECT:
         raise HTTPException(409, f"В проекте не больше {sched.MAX_PER_PROJECT} заданий")
     s = _checked_schedule({**body.model_dump(), "title": body.title.strip(), "prompt": body.prompt.strip()})

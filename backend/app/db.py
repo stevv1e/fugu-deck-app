@@ -257,6 +257,10 @@ SCHEMA = [
 ]
 
 DEFAULT_PROJECT = "general"
+# Режим «Общение»: его чаты живут в скрытом проекте — не видны среди проектов инжиниринга, а агент в них — собеседник
+# без инструментов Git, серверов и памяти (agent.py).
+TALK_PROJECT = "talk"
+HIDDEN_PROJECTS = (TALK_PROJECT,)
 NOTE_FIELDS = ("title", "area", "grp", "origin", "source_ref", "external")
 
 
@@ -288,6 +292,11 @@ class Database:
             await self._exec(
                 "INSERT INTO projects (id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (DEFAULT_PROJECT, "Общий", "Проект по умолчанию", now, now))
+        if not await self._one("SELECT id FROM projects WHERE id=?", (TALK_PROJECT,)):
+            now = time.time()
+            await self._exec(
+                "INSERT INTO projects (id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (TALK_PROJECT, "Общение", "Чаты режима «Общение»", now, now))
         await self._exec("UPDATE conversations SET project_id=? WHERE project_id IS NULL", (DEFAULT_PROJECT,))
 
     async def close(self) -> None:
@@ -677,7 +686,8 @@ class Database:
             "SELECT p.*, ? AS my_role, "
             "(SELECT COUNT(*) FROM conversations c WHERE c.project_id=p.id) AS conversations, "
             "(SELECT COUNT(*) FROM memories m WHERE m.project_id=p.id) AS memories "
-            "FROM projects p ORDER BY p.updated_at DESC", (role,))
+            f"FROM projects p WHERE p.id NOT IN ({','.join('?' * len(HIDDEN_PROJECTS))}) ORDER BY p.updated_at DESC",
+            (role, *HIDDEN_PROJECTS))
         for r in rows:
             r["skills"] = json.loads(r["skills"])
         return rows
@@ -703,7 +713,7 @@ class Database:
         base = ("SELECT p.*, {role} AS my_role, "
                 "(SELECT COUNT(*) FROM conversations c WHERE c.project_id=p.id) AS conversations, "
                 "(SELECT COUNT(*) FROM memories m WHERE m.project_id=p.id) AS memories "
-                "FROM projects p {join} ORDER BY p.updated_at DESC")
+                "FROM projects p {join} WHERE p.id <> '" + TALK_PROJECT + "' ORDER BY p.updated_at DESC")
         if user["role"] == "owner":
             rows = await self._all(base.format(role="'owner'", join=""))
         else:
@@ -744,6 +754,8 @@ class Database:
         await self._exec("DELETE FROM projects WHERE id=?", (pid,))
 
     async def project_role(self, user: dict, pid: str) -> str | None:
+        if pid == TALK_PROJECT and user["role"] != "owner":
+            return "editor"  # «Общение» на своём сервере — у каждого пользователя, без назначения в проект
         if user["role"] == "owner":
             return "owner" if await self._one("SELECT 1 FROM projects WHERE id=?", (pid,)) else None
         r = await self._one("SELECT role FROM project_members WHERE project_id=? AND user_id=?", (pid, user["id"]))
