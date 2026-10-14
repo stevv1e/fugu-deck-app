@@ -18,6 +18,7 @@ from typing import Any
 from .db import Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
+from . import filetools
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
 
@@ -32,8 +33,11 @@ SYSTEM_PROMPT = """Ты — Fugu Deck, ИИ-ассистент разработ�
   Коммить прямо в основную ветку, только если пользователь просит об этом или репозиторий только что создан.
 - Группируй связанные изменения в один коммит. В content передавай полный текст файла, а не фрагмент.
 - Пиши понятные сообщения коммитов (conventional commits).
-- Файлы с телефона доступны через list_attachments / read_attachment; бинарные файлы (картинки, архивы)
-  коммить через attachment_id, не пересказывая их содержимое.
+- Файлы с телефона доступны через list_attachments / read_attachment: он читает текст, PDF, DOCX, XLSX и
+  заглядывает в архивы zip/tar (сначала список, затем файл по path). Бинарные файлы коммить через attachment_id,
+  не пересказывая их содержимое.
+- Если результат удобнее отдать файлом (отчёт, таблица CSV, набор файлов), создай его через create_file —
+  пользователь откроет или сохранит его на телефоне.
 - Изменяющие действия пользователь подтверждает в приложении. Если действие отклонено — не повторяй его,
   а спроси, что изменить.
 - Никогда не записывай в репозитории секреты, токены и пароли.
@@ -222,6 +226,8 @@ class Agent:
             if att["mime"].startswith("image/") and att["size"] <= VISION_MAX_BYTES and p.exists():
                 b64 = base64.b64encode(p.read_bytes()).decode()
                 images.append({"type": "image_url", "image_url": {"url": f"data:{att['mime']};base64,{b64}"}})
+            elif filetools.kind_of(att["filename"], att["mime"]) in ("zip", "tar", "gz", "pdf", "docx", "xlsx"):
+                line += " — содержимое через read_attachment"
             elif att["size"] <= INLINE_TEXT_MAX and p.exists():
                 try:
                     body = p.read_text("utf-8")

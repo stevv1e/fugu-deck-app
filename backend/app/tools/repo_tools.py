@@ -1,13 +1,22 @@
 """Инструменты для работы с репозиториями GitHub / GitLab."""
 from __future__ import annotations
 
+import asyncio
+import io
+import mimetypes
+import re
+import uuid
+import zipfile
 from pathlib import Path
+
+from .. import filetools
 
 from .providers import FileChange, GitProvider, ProviderError
 from .registry import ToolContext, obj, tool
 
 MAX_READ_CHARS = 60_000
 MAX_LIST_FILES = 1500
+SAFE_NAME = re.compile(r"[^\w.\-() ]+", re.UNICODE)
 
 PROVIDER = {"type": "string", "enum": ["github", "gitlab"], "description": "Где находится репозиторий"}
 REPO = {"type": "string", "description": "Полное имя репозитория: owner/name (для GitLab — group/subgroup/name)"}
@@ -83,24 +92,82 @@ async def ci_status(ctx, a):
 
 
 # ------------------------------------------------------------------ вложения
-@tool("list_attachments", "Файлы, которые пользователь загрузил в этот чат с телефона.",
+@tool("list_attachments", "Файлы этого чата: загруженные пользователем с телефона и созданные агентом (origin=agent).",
       obj({}), group="files", title="Вложения")
 async def list_attachments(ctx, a):
     return await ctx.db.list_attachments(ctx.conversation_id)
 
 
-@tool("read_attachment", "Прочитать текстовое содержимое загруженного пользователем файла.",
-      obj({"attachment_id": {"type": "string"}}, ["attachment_id"]), group="files", title="Чтение вложения")
+@tool("read_attachment",
+      "Прочитать вложение чата. Текст и код — как есть; PDF, DOCX, XLSX — извлечённый текст; архив zip/tar — список "
+      "файлов, а с path — содержимое файла из архива. Длинный текст отдаётся кусками: следующий — с offset=next_offset.",
+      obj({"attachment_id": {"type": "string"},
+           "path": {"type": "string", "description": "Путь файла внутри архива (из списка)"},
+           "offset": {"type": "integer", "minimum": 0, "description": "С какого символа читать длинный текст"},
+           "start": {"type": "integer", "minimum": 0, "description": "С какой строки списка архива (next_start)"}},
+          ["attachment_id"]), group="files", title="Чтение вложения")
 async def read_attachment(ctx, a):
     att = await ctx.db.get_attachment(a["attachment_id"])
     if not att or att["conversation_id"] != ctx.conversation_id:
         raise ProviderError("вложение не найдено")
-    raw = Path(att["path"]).read_bytes()
+    p = Path(att["path"])
+    if not p.is_file():
+        raise ProviderError("файл вложения не найден на диске")
     try:
-        return {"filename": att["filename"], "content": raw.decode("utf-8")[:MAX_READ_CHARS]}
-    except UnicodeDecodeError:
-        return {"filename": att["filename"], "binary": True, "size": len(raw),
-                "hint": "Бинарный файл можно закоммитить через commit_files с attachment_id"}
+        # разбор документа или архива — в отдельном потоке: PDF на сотни страниц не должен останавливать сервер
+        return await asyncio.to_thread(filetools.read, p, att["filename"], att["mime"], a.get("path"),
+                                       a.get("offset", 0), a.get("start", 0))
+    except filetools.FileError as e:
+        raise ProviderError(str(e))
+
+
+CREATE_MAX = 20 << 20
+
+
+@tool("create_file",
+      "Создать файл и приложить его к чату — пользователь откроет или сохранит его на телефоне. Либо content "
+      "(текст: отчёт, CSV, код, Markdown), либо from_attachments — собрать zip из вложений этого чата.",
+      obj({"filename": {"type": "string", "description": "Имя файла с расширением, например report.md или data.csv"},
+           "content": {"type": "string", "description": "Текст файла"},
+           "from_attachments": {"type": "array", "items": {"type": "string"}, "maxItems": 50,
+                                "description": "attachment_id вложений, которые сложить в zip"}},
+          ["filename"]), group="files", title="Файл для пользователя")
+async def create_file(ctx, a):
+    name = SAFE_NAME.sub("_", Path(a["filename"]).name)[:120].strip(" .") or "file.txt"
+    has_text, ids = a.get("content") is not None, a.get("from_attachments") or []
+    if has_text == bool(ids):
+        raise ProviderError("нужно что-то одно: content или from_attachments")
+    if has_text:
+        data = a["content"].encode("utf-8")
+    else:
+        if not name.lower().endswith(".zip"):
+            name += ".zip"
+        buf, used = io.BytesIO(), set()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for aid in ids:
+                att = await ctx.db.get_attachment(aid)
+                if not att or att["conversation_id"] != ctx.conversation_id or not Path(att["path"]).is_file():
+                    raise ProviderError(f"вложение {aid} не найдено")
+                arc, n = att["filename"], 1
+                while arc in used:  # одинаковые имена в архиве — с номером
+                    stem, dot, ext = att["filename"].rpartition(".")
+                    arc = f"{stem or ext} ({n}){dot}{ext if stem else ''}"
+                    n += 1
+                used.add(arc)
+                z.write(att["path"], arc)
+                if buf.tell() > CREATE_MAX:
+                    raise ProviderError(f"архив больше {CREATE_MAX >> 20} МБ")
+        data = buf.getvalue()
+    if len(data) > CREATE_MAX:
+        raise ProviderError(f"файл больше {CREATE_MAX >> 20} МБ")
+    d = ctx.settings.data_dir / "attachments" / ctx.conversation_id
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / f"{uuid.uuid4().hex[:16]}_{name}"
+    dest.write_bytes(data)
+    mime = mimetypes.guess_type(name)[0] or ("text/plain" if has_text else "application/octet-stream")
+    att = await ctx.db.add_attachment(ctx.conversation_id, name, mime, len(data), str(dest), origin="agent")
+    return {"attachment": {k: att[k] for k in ("id", "filename", "mime", "size")},
+            "note": "Файл приложен к чату: пользователь видит его в карточке этого инструмента"}
 
 
 # ------------------------------------------------------------------ запись

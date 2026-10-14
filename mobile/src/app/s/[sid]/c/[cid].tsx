@@ -10,11 +10,12 @@ import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApprovalRequest, DeckApi } from "@/core/api";
-import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, rememberPreview, sizeText, type Uploaded } from "@/core/attachments";
+import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, PREVIEW_MAX, rememberPreviewUri, sizeText, type PickedFile, type Uploaded } from "@/core/attachments";
 import { argsHash } from "@/core/crypto";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
-import { pickFile, pickPhoto, takePhoto } from "@/platform/pick";
+import { readAll, readChunk } from "@/platform/files";
+import { pickFiles, pickPhotos, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
 import { useServers } from "@/state/servers";
 import type { TeamChatState } from "@/core/teams";
@@ -183,7 +184,7 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
   );
 }
 
-function ToolCard({ t }: { t: Tool }) {
+function ToolCard({ t, api }: { t: Tool; api: DeckApi | null }) {
   const { p } = useTheme();
   const [open, setOpen] = useState(false);
   const color = { pending: p.warn, running: p.accent, ok: p.ok, error: p.accent2, denied: p.dim }[t.status];
@@ -201,6 +202,7 @@ function ToolCard({ t }: { t: Tool }) {
         </Txt>
       ) : null}
       {t.error ? <Txt kind="small" color={p.accent2}>{t.error}</Txt> : null}
+      {t.name === "create_file" && t.result?.attachment?.id ? <AttachmentList items={[t.result.attachment]} api={api} /> : null}
       {open ? (
         <>
           <ArgsBlock args={t.args} full />
@@ -321,14 +323,23 @@ export default function Chat() {
     setAttachMenu(false);
     setError(null);
     try {
-      const f = await (kind === "photo" ? pickPhoto() : kind === "camera" ? takePhoto() : pickFile());
-      if (!f) return;
-      const bad = attachProblem(f, atts.length);
-      if (bad) return setError(bad);
-      setUploading(f.name);
-      const up = await api.upload(cid, f);
-      rememberPreview(up.id, up.mime, f.base64); // своя картинка в ленте — без повторной загрузки
-      setAtts((prev) => [...prev, up]);
+      const room = MAX_ATTACHMENTS - atts.length;
+      if (room <= 0) return setError(`К сообщению можно приложить не больше ${MAX_ATTACHMENTS} файлов`);
+      const picked: PickedFile[] = kind === "photo" ? await pickPhotos(room) : kind === "camera" ? [await takePhoto()].filter((x): x is PickedFile => !!x) : await pickFiles(room);
+      let n = atts.length;
+      for (const f of picked) {
+        const bad = attachProblem(f, n);
+        if (bad) {
+          setError(bad);
+          continue;
+        }
+        setUploading(`${f.name} · ${sizeText(f.size)}`);
+        const up = await api.upload(cid, f, { all: readAll, chunk: readChunk }, (d, t) =>
+          setUploading(`${f.name} · ${Math.round((d / t) * 100)}% из ${sizeText(t)}`));
+        if (isImage(up.mime) && up.size <= PREVIEW_MAX) rememberPreviewUri(up.id, up.mime, f.uri); // своя картинка — с диска телефона
+        setAtts((prev) => [...prev, up]);
+        n++;
+      }
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -446,7 +457,7 @@ export default function Chat() {
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
           onLayout={() => list.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) =>
-            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} /> : <Bubble item={item} api={api} />
+            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} />
           }
           ListHeaderComponent={
             <View style={{ gap: 12 }}>
@@ -473,7 +484,7 @@ export default function Chat() {
                 <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />
                 <Btn small title="Фото" kind="ghost" onPress={() => attach("photo")} />
                 <Btn small title="Файл" kind="ghost" onPress={() => attach("file")} />
-                <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки и читает текстовые файлы</Txt>
+                <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки, читает текст, PDF, DOCX, XLSX и архивы</Txt>
               </Row>
             ) : null}
             {atts.map((a) => (
