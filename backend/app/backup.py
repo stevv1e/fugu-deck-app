@@ -6,6 +6,9 @@
   GET  /internal/backup        согласованный снимок SQLite (не файл с диска: идёт запись, есть WAL)
   GET  /internal/backup/state  пусто ли пространство (для решения о восстановлении)
   POST /internal/restore       принять снимок; только в пустое пространство — данные человека не затираются
+  GET  /internal/backup/files  опись файлов (вложения, файлы агента, скилы): путь, размер, SHA-256
+  GET  /internal/backup/file   один файл из описи
+  PUT  /internal/restore/file  вернуть файл при восстановлении (до базы; только в пустое пространство)
 
 Вызывающего опознаём по токену из файла, который в под кладёт space-operator (у каждого пространства свой).
 """
@@ -88,6 +91,54 @@ def check_snapshot(path: Path) -> None:
         con.close()
 
 
+# ------------------------------------------------------------------ файлы
+FILE_ROOTS = ("attachments", "skills")  # относительно data_dir; база копируется снимком отдельно
+MAX_FILE = 64 << 20
+_sha_cache: dict[tuple[str, int, int], str] = {}
+
+
+def _sha_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def manifest(data_dir: Path) -> list[dict]:
+    """Опись файлов пространства. Хеш считается заново только у изменившихся файлов (путь, размер, время)."""
+    out = []
+    root = data_dir.resolve()
+    for top in FILE_ROOTS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for p in sorted(base.rglob("*")):
+            if p.is_symlink() or not p.is_file() or p.name.endswith(".part") or p.name.startswith(".state-"):
+                continue
+            st = p.stat()
+            if st.st_size > MAX_FILE:
+                continue
+            rel = p.relative_to(root).as_posix()
+            k = (rel, st.st_size, st.st_mtime_ns)
+            if k not in _sha_cache:
+                _sha_cache[k] = _sha_file(p)
+            out.append({"path": rel, "size": st.st_size, "sha256": _sha_cache[k]})
+    return out
+
+
+def safe_rel(data_dir: Path, rel: str) -> Path:
+    """Путь из описи → файл внутри data_dir/<attachments|skills>. Всё прочее (.., абсолютные пути) — отказ."""
+    parts = Path(rel).parts
+    if not rel or Path(rel).is_absolute() or ".." in parts or len(parts) < 2 or parts[0] not in FILE_ROOTS:
+        raise ValueError("недопустимый путь")
+    root = data_dir.resolve()
+    p = (root / rel).resolve()
+    if root not in p.parents:
+        raise ValueError("недопустимый путь")
+    return p
+
+
 def router(settings, exit_process=lambda: os._exit(0)) -> APIRouter:
     r = APIRouter()
 
@@ -118,6 +169,51 @@ def router(settings, exit_process=lambda: os._exit(0)) -> APIRouter:
     async def state(request: Request):
         authorize(request)
         return {"empty": await asyncio.to_thread(is_empty, settings.db_path)}
+
+    @r.get("/internal/backup/files")
+    async def files(request: Request):
+        authorize(request)
+        return {"files": await asyncio.to_thread(manifest, settings.data_dir)}
+
+    @r.get("/internal/backup/file")
+    async def one_file(path: str, request: Request):
+        authorize(request)
+        try:
+            p = safe_rel(settings.data_dir, path)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if p.is_symlink() or not p.is_file():
+            raise HTTPException(404, "нет такого файла")
+        return FileResponse(p, media_type="application/octet-stream")
+
+    @r.put("/internal/restore/file")
+    async def restore_one(path: str, sha256: str, request: Request):
+        authorize(request)
+        if not await asyncio.to_thread(is_empty, settings.db_path):
+            raise HTTPException(409, "в пространстве уже есть данные — восстановление их затёрло бы")
+        try:
+            p = safe_rel(settings.data_dir, path)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if p.exists():
+            return {"ok": True, "skipped": True}  # уже на месте (повтор после обрыва)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f".restore-{secrets.token_hex(8)}")
+        h, size = hashlib.sha256(), 0
+        try:
+            with open(tmp, "wb") as f:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_FILE:
+                        raise HTTPException(413, "файл слишком большой")
+                    h.update(chunk)
+                    f.write(chunk)
+            if h.hexdigest() != sha256:
+                raise HTTPException(400, "файл пришёл не целиком (хеш не совпал)")
+            os.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return {"ok": True, "bytes": size}
 
     @r.post("/internal/restore")
     async def restore(request: Request):

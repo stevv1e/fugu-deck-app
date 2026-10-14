@@ -68,6 +68,8 @@ export type SpaceState = {
   exists: boolean; id?: string; phase?: string; message?: string; url?: string;
   /** Запрошено удаление; delete_at — оператор принял подпись и удалит в этот момент; delete_error — отклонил. */
   delete_requested?: boolean; delete_at?: string; delete_error?: string;
+  /** Удаляется весь аккаунт (подпись account_delete), а не только пространство. */
+  delete_account?: boolean;
 };
 
 /** Состояние личного пространства (GET) или запрос на его создание (POST) — control-plane, /v1/space. */
@@ -84,6 +86,16 @@ export async function requestSpaceDelete(c: ClusterRecord): Promise<SpaceState> 
   const s = await openClusterSession(c, c.api);
   const signed = await signClusterAction(s.keys, { type: "space_delete" }, { space: `u-${c.user}` });
   return s.request<SpaceState>("POST", "/v1/space/delete", signed);
+}
+
+/**
+ * Удалить аккаунт: действие account_delete (биометрия). Через сутки удалятся пространство с копиями, ключи API,
+ * устройства и учётная запись; до этого — отмена тем же restoreSpace.
+ */
+export async function requestAccountDelete(c: ClusterRecord): Promise<SpaceState> {
+  const s = await openClusterSession(c, c.api);
+  const signed = await signClusterAction(s.keys, { type: "account_delete", user: c.user });
+  return s.request<SpaceState>("POST", "/v1/account/delete", signed);
 }
 
 /** Отменить удаление, пока срок не вышел. */

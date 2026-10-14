@@ -32,7 +32,7 @@ def stand(tmp_path):
     tok = tmp_path / "token"
     tok.write_text("backup-token-1\n")
     exits = []
-    settings = SimpleNamespace(is_space=True, db_path=db, backup_token_file=str(tok))
+    settings = SimpleNamespace(is_space=True, db_path=db, backup_token_file=str(tok), data_dir=tmp_path)
     app = FastAPI()
     app.include_router(backup.router(settings, exit_process=lambda: exits.append(1)))
     return SimpleNamespace(db=db, tok=tok, exits=exits, settings=settings, client=TestClient(app),
@@ -108,3 +108,37 @@ def test_restore_only_into_empty_space(stand):
     con = sqlite3.connect(stand.db)
     assert con.execute("SELECT count(*) FROM conversations").fetchone()[0] == 5
     con.close()
+
+
+def test_files_manifest_download_and_restore(stand, tmp_path):
+    import hashlib
+
+    make_db(stand.db, chats=1)
+    (tmp_path / "attachments" / "c1").mkdir(parents=True)
+    (tmp_path / "attachments" / "c1" / "a1_фото.jpg").write_bytes(b"jpeg-bytes")
+    (tmp_path / "attachments" / "c1" / "u1_big.zip.part").write_bytes(b"half")  # незавершённая загрузка
+    (tmp_path / "skills" / "deploy").mkdir(parents=True)
+    (tmp_path / "skills" / "deploy" / "SKILL.md").write_text("# шаги")
+    (tmp_path / "secret.txt").write_text("не из описи")
+    m = stand.client.get("/internal/backup/files", headers=stand.auth).json()["files"]
+    assert {f["path"] for f in m} == {"attachments/c1/a1_фото.jpg", "skills/deploy/SKILL.md"}
+    jpg = next(f for f in m if f["path"].endswith(".jpg"))
+    assert jpg["sha256"] == hashlib.sha256(b"jpeg-bytes").hexdigest() and jpg["size"] == 10
+    r = stand.client.get("/internal/backup/file", params={"path": jpg["path"]}, headers=stand.auth)
+    assert r.status_code == 200 and r.content == b"jpeg-bytes"
+    for bad in ("../fugu-deck.sqlite3", "secret.txt", "/etc/passwd", "attachments/../secret.txt", "fugu-deck.sqlite3"):
+        assert stand.client.get("/internal/backup/file", params={"path": bad}, headers=stand.auth).status_code in (400, 404), bad
+    assert stand.client.get("/internal/backup/files").status_code == 401
+
+    # восстановление файлов — только в пустое пространство
+    put = lambda path, body, sha: stand.client.put("/internal/restore/file", params={"path": path, "sha256": sha},  # noqa: E731
+                                                   content=body, headers=stand.auth)
+    assert put("attachments/c2/x.bin", b"x", hashlib.sha256(b"x").hexdigest()).status_code == 409
+    stand.db.unlink()
+    make_db(stand.db)
+    assert put("attachments/c2/x.bin", b"x", hashlib.sha256(b"x").hexdigest()).status_code == 200
+    assert (tmp_path / "attachments" / "c2" / "x.bin").read_bytes() == b"x"
+    assert put("attachments/c2/y.bin", b"y", "0" * 64).status_code == 400  # хеш не совпал — файла нет
+    assert not (tmp_path / "attachments" / "c2" / "y.bin").exists()
+    assert put("../evil", b"e", hashlib.sha256(b"e").hexdigest()).status_code == 400
+    assert put("attachments/c2/x.bin", b"x", hashlib.sha256(b"x").hexdigest()).json()["skipped"]
