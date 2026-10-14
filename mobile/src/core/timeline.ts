@@ -20,7 +20,8 @@ export type Item =
       result?: any;
       error?: string;
     }
-  | { kind: "notice"; key: string; level: "info" | "error"; text: string };
+  // retry — задание прервалось (перезапуск агента): можно продолжить кнопкой «Повторить»
+  | { kind: "notice"; key: string; level: "info" | "error"; text: string; retry?: boolean };
 
 let n = 0;
 const k = () => `i${++n}`;
@@ -46,7 +47,7 @@ export function fromStored(messages: StoredMessage[], meId?: string): Item[] {
         items.push(t);
       }
     } else if (m.role === "note") {
-      items.push({ kind: "notice", key: k(), level: "info", text: m.content || "" });
+      items.push({ kind: "notice", key: k(), level: m.meta?.interrupted ? "error" : "info", text: m.content || "", retry: !!m.meta?.interrupted });
     } else if (m.role === "tool" && m.tool_call_id) {
       const t = byCall.get(m.tool_call_id);
       if (!t) continue;

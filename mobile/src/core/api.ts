@@ -104,6 +104,8 @@ export class DeckApi {
   deleteProject = (pid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/projects/${enc(pid)}`);
   /** Сменить модель чата (личное пространство; в общем — через предложение и спонсора). */
   setModel = (cid: string, model: string) => this.s.request<{ applied: boolean }>("POST", `/api/conversations/${enc(cid)}/model`, { model });
+  /** Продолжить прерванное задание (агент перезапускался): та же переписка, без нового сообщения. */
+  retry = (cid: string) => this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/retry`);
   cancel = (rid: string) => this.s.request("POST", `/api/runs/${enc(rid)}/cancel`);
 
   /**

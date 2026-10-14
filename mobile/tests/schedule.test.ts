@@ -37,3 +37,13 @@ test("лимит расходов: ввод и подписываемое дей
   assert.equal(off.lines[0], "Без лимита");
   assert.throws(() => prepareAction({ type: "spend_limit", limit_usd_month: 0.001 }, { deviceId: "d-0123456789abcdef", nonce: "n".repeat(22), nowSec: 1 }));
 });
+
+test("новая версия приложения", async () => {
+  const { isNewer } = await import("../src/core/version");
+  assert.equal(isNewer("0.5.5", "0.5.4"), true);
+  assert.equal(isNewer("0.10.0", "0.9.9"), true);
+  assert.equal(isNewer("0.5.4", "0.5.4"), false);
+  assert.equal(isNewer("0.5.3", "0.5.4"), false);
+  assert.equal(isNewer("", "0.5.4"), false);
+  assert.equal(isNewer("0.5.5", undefined), false);
+});

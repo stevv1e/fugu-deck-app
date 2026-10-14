@@ -353,6 +353,28 @@ class Database:
         await self._exec("DELETE FROM conversations WHERE id=?", (cid,))
         return paths
 
+    # --- прерванные задания ---
+    @staticmethod
+    def _open_turn(last: dict | None) -> bool:
+        """Последнее (не служебное) сообщение — вопрос пользователя или шаг агента с инструментами: ответа нет."""
+        if not last:
+            return False
+        return last["role"] in ("user", "tool") or (last["role"] == "assistant" and bool(last["tool_calls"]))
+
+    async def unanswered(self, cid: str) -> bool:
+        last = await self._one("SELECT role, tool_calls FROM messages WHERE conversation_id=? AND role<>'note' "
+                               "ORDER BY id DESC LIMIT 1", (cid,))
+        return self._open_turn(last)
+
+    async def unanswered_conversations(self, since: float) -> list[str]:
+        """Чаты с открытым ходом, где последнее сообщение новее since и пометки о прерывании после него нет."""
+        rows = await self._all(
+            "SELECT m.conversation_id AS cid, m.role, m.tool_calls FROM messages m WHERE m.id IN ("
+            " SELECT MAX(id) FROM messages WHERE role<>'note' GROUP BY conversation_id) AND m.created_at>=? "
+            "AND NOT EXISTS (SELECT 1 FROM messages n WHERE n.conversation_id=m.conversation_id AND n.role='note' "
+            " AND n.id>m.id)", (since,))
+        return [r["cid"] for r in rows if self._open_turn(r)]
+
     # --- messages ---
     async def add_message(
         self,

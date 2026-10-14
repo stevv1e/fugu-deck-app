@@ -223,7 +223,7 @@ function copyText(text: string, onCopied: () => void) {
   }, () => {});
 }
 
-function Bubble({ item, api, onCopied }: { item: Item; api: DeckApi | null; onCopied: () => void }) {
+function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | null; onCopied: () => void; onRetry?: () => void }) {
   const { p } = useTheme();
   if (item.kind === "user") {
     return (
@@ -245,7 +245,12 @@ function Bubble({ item, api, onCopied }: { item: Item; api: DeckApi | null; onCo
     );
   }
   if (item.kind === "notice") {
-    return <Txt kind="small" color={item.level === "error" ? p.accent2 : p.dim} style={{ textAlign: "center" }}>{item.text}</Txt>;
+    return (
+      <View style={{ gap: 6, alignItems: "center" }}>
+        <Txt kind="small" color={item.level === "error" ? p.accent2 : p.dim} style={{ textAlign: "center" }}>{item.text}</Txt>
+        {item.retry && onRetry ? <Btn small title="Повторить" onPress={onRetry} /> : null}
+      </View>
+    );
   }
   return null;
 }
@@ -423,6 +428,19 @@ export default function Chat() {
     );
   }, [api, cid, meId]);
 
+  // «Повторить» у пометки о прерванном задании: агент продолжает ту же переписку.
+  const retryRun = useCallback(async () => {
+    if (!api || runId) return;
+    setError(null);
+    try {
+      const r = await api.retry(cid);
+      setItems((prev) => prev.map((x) => (x.kind === "notice" && x.retry ? { ...x, retry: false } : x)));
+      follow(r.run_id);
+    } catch (e) {
+      setError(errText(e));
+    }
+  }, [api, cid, runId, follow]);
+
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashCopied = useCallback(() => {
@@ -476,7 +494,8 @@ export default function Chat() {
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
           onLayout={() => list.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) =>
-            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} onCopied={flashCopied} />
+            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} onCopied={flashCopied}
+              onRetry={!runId && canWrite && item.kind === "notice" && item.retry && items[items.length - 1]?.key === item.key ? retryRun : undefined} />
           }
           ListHeaderComponent={
             <View style={{ gap: 12 }}>
