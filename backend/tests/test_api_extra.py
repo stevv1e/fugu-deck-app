@@ -160,3 +160,35 @@ def test_vision_downscales_big_photo(tmp_path):
     bad = tmp_path / "bad.jpg"
     bad.write_bytes(b"not an image")
     assert vision.for_model("bad", bad) is None
+
+
+def test_vision_huge_jpeg_low_memory(tmp_path):
+    """Фото на 100+ Мп уменьшается без раскодирования целиком: памяти — десятки МБ, а не сотни."""
+    import subprocess
+    import sys
+
+    p = tmp_path / "huge.jpg"
+    # 12000×10000 = 120 Мп, как фото с камеры 108–200 Мп; создаём в отдельном процессе
+    subprocess.run([sys.executable, "-c", f"from PIL import Image; Image.new('RGB',(12000,10000),(90,140,200)).save({str(p)!r},'JPEG',quality=90)"], check=True)
+    code = f"""
+import base64, io, re
+from pathlib import Path
+from PIL import Image
+from app import vision
+def hwm():
+    return int(re.search(r"VmHWM:\\s+(\\d+)", open("/proc/self/status").read()).group(1)) // 1024
+open("/proc/self/clear_refs", "w").write("5")  # сбросить пик памяти (унаследованный от pytest при fork)
+base = hwm()
+url = vision.for_model('h', Path({str(p)!r}))
+im = Image.open(io.BytesIO(base64.b64decode(url.split(',',1)[1])))
+print(max(im.size), hwm() - base)
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    side, rss_mb = int(out[0]), int(out[1])
+    assert side == 1600
+    assert rss_mb < 150, f"рост памяти {rss_mb} МБ — картинка раскодирована целиком (целиком было бы ~700)"
+    # огромная картинка не в JPEG — отказ (None), а не сотни МБ в памяти
+    png = tmp_path / "huge.png"
+    subprocess.run([sys.executable, "-c", f"from PIL import Image; Image.new('L',(8000,4000)).save({str(png)!r})"], check=True)
+    from app import vision
+    assert vision.for_model("p", png) is None

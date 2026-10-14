@@ -12,7 +12,11 @@ from collections import OrderedDict
 from pathlib import Path
 
 MAX_SIDE = 1600
-SOURCE_MAX = 40 << 20  # больше — не открываем (картинка-«бомба» распаковалась бы в гигабайты памяти)
+SOURCE_MAX = 40 << 20  # больше — не открываем
+# Сколько пикселей можно раскодировать целиком. У агента 512 МБ памяти: фото телефона на 108–200 Мп целиком —
+# 300–600 МБ, и контейнер убивается посреди задания. JPEG раскодируется сразу уменьшенным (draft, масштаб 1/2–1/8
+# средствами самого формата), поэтому предел касается только остальных форматов.
+FULL_DECODE_MAX = 24_000_000
 VISION_CACHE = 40
 _cache: OrderedDict[str, str] = OrderedDict()
 
@@ -27,8 +31,13 @@ def for_model(key: str, path: Path) -> str | None:
             return None
         from PIL import Image, ImageOps
 
-        Image.MAX_IMAGE_PIXELS = 80_000_000  # ~80 Мп: больше — отказ, а не «бомба» в памяти
+        Image.MAX_IMAGE_PIXELS = None  # размер проверяем сами — ниже, до раскодирования
         with Image.open(path) as im:
+            if im.format == "JPEG":
+                im.draft("RGB", (MAX_SIDE, MAX_SIDE))  # ближайший масштаб не меньше MAX_SIDE
+            w, h = im.size
+            if w * h > FULL_DECODE_MAX:
+                return None
             im = ImageOps.exif_transpose(im)  # фото с телефона хранит поворот в EXIF
             if im.mode not in ("RGB", "L"):
                 bg = Image.new("RGB", im.size, (255, 255, 255))
