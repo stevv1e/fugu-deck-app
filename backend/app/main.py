@@ -982,9 +982,7 @@ async def upload_json(cid: str, body: UploadIn, u: dict = Me):
     dest.write_bytes(raw)
     # Тип файла — по расширению; присланный телефоном учитываем, только если он обычного вида (в подсказку модели
     # и в data:-адрес картинки он попадает как есть).
-    mime = mimetypes.guess_type(name)[0] or (body.mime if re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", body.mime) else "") \
-        or "application/octet-stream"
-    return await db().add_attachment(cid, name, mime, len(raw), str(dest))
+    return await db().add_attachment(cid, name, _mime_for(name, body.mime), len(raw), str(dest))
 
 
 # Предпросмотр на телефоне: тот же защищённый канал отдаёт тело только текстом — содержимое в JSON как base64.
@@ -1003,6 +1001,114 @@ async def download_json(aid: str, u: dict = Me):
             "data": base64.b64encode(p.read_bytes()).decode()}
 
 
+# Большие файлы — частями: каждая часть — обычный короткий запрос (base64 в JSON, как и малая загрузка), поэтому
+# ни лимит прокси на время запроса, ни память телефона не мешают файлу до CHUNKED_MAX. Части идут строго по порядку.
+CHUNK_BYTES = 2 * 1024 * 1024
+CHUNKED_MAX = 50 * 1024 * 1024
+UPLOAD_TTL = 3600
+uploads: dict[str, dict] = {}  # незавершённые загрузки (в памяти: перезапуск агента — начать заново)
+
+
+class UploadStart(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    mime: str = Field("", max_length=120)
+    size: int = Field(..., gt=0)
+
+
+class UploadChunk(BaseModel):
+    offset: int = Field(..., ge=0)
+    data: str = Field(..., min_length=1, max_length=CHUNK_BYTES * 4 // 3 + 16)
+
+
+def _mime_for(name: str, sent: str) -> str:
+    return mimetypes.guess_type(name)[0] or (sent if re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", sent) else "") \
+        or "application/octet-stream"
+
+
+def _drop_stale_uploads(now: float) -> None:
+    for k, up in list(uploads.items()):
+        if now - up["touched"] > UPLOAD_TTL:
+            Path(up["path"]).unlink(missing_ok=True)
+            uploads.pop(k, None)
+
+
+@app.post("/api/conversations/{cid}/uploads")
+async def upload_start(cid: str, body: UploadStart, u: dict = Me):
+    await conv_access(u, cid, "editor")
+    if body.size > CHUNKED_MAX:
+        raise HTTPException(413, f"Файл больше {CHUNKED_MAX // 1024 // 1024} МБ")
+    _drop_stale_uploads(time.time())
+    if sum(1 for x in uploads.values() if x["user"] == u["id"]) >= 6:
+        raise HTTPException(429, "Слишком много незавершённых загрузок — дождитесь окончания")
+    name = SAFE.sub("_", Path(body.filename).name)[:120] or "file"
+    d = settings.data_dir / "attachments" / cid
+    d.mkdir(parents=True, exist_ok=True)
+    uid = new_id()
+    path = d / f"{uid}_{name}.part"
+    path.write_bytes(b"")
+    uploads[uid] = {"cid": cid, "user": u["id"], "name": name, "mime": _mime_for(name, body.mime), "size": body.size,
+                    "got": 0, "path": str(path), "touched": time.time()}
+    return {"upload_id": uid, "chunk_bytes": CHUNK_BYTES}
+
+
+def _upload_of(upid: str, u: dict) -> dict:
+    up = uploads.get(upid)
+    if not up or up["user"] != u["id"]:
+        raise HTTPException(404, "Загрузка не найдена или устарела — начните заново")
+    return up
+
+
+@app.post("/api/uploads/{upid}/chunk")
+async def upload_chunk(upid: str, body: UploadChunk, u: dict = Me):
+    up = _upload_of(upid, u)
+    if body.offset != up["got"]:
+        # повтор уже принятой части (ответ потерялся) — не ошибка: телефон продолжит с got
+        return {"got": up["got"]}
+    try:
+        raw = base64.b64decode(body.data, validate=True)
+    except Exception:
+        raise HTTPException(400, "Часть файла повреждена при передаче")
+    if not raw or len(raw) > CHUNK_BYTES or up["got"] + len(raw) > up["size"]:
+        raise HTTPException(400, "Неверный размер части")
+    with open(up["path"], "ab") as f:
+        f.write(raw)
+    up["got"] += len(raw)
+    up["touched"] = time.time()
+    return {"got": up["got"]}
+
+
+@app.post("/api/uploads/{upid}/finish")
+async def upload_finish(upid: str, u: dict = Me):
+    up = _upload_of(upid, u)
+    if up["got"] != up["size"]:
+        raise HTTPException(409, f"Получено {up['got']} из {up['size']} байт")
+    await conv_access(u, up["cid"], "editor")
+    uploads.pop(upid, None)
+    final = Path(up["path"][:-len(".part")])
+    Path(up["path"]).rename(final)
+    return await db().add_attachment(up["cid"], up["name"], up["mime"], up["size"], str(final))
+
+
+@app.get("/api/attachments/{aid}/chunk")
+async def download_chunk(aid: str, offset: int = 0, length: int = CHUNK_BYTES, u: dict = Me):
+    """Скачивание частями (открыть или сохранить файл на телефоне): base64 в JSON, как и загрузка."""
+    a = await db().get_attachment(aid)
+    if not a:
+        raise HTTPException(404, "Вложение не найдено")
+    await conv_access(u, a["conversation_id"])
+    p = Path(a["path"])
+    if not p.is_file():
+        raise HTTPException(404, "Файл вложения не найден")
+    size = p.stat().st_size
+    if offset < 0 or offset > size:
+        raise HTTPException(400, "offset за пределами файла")
+    with p.open("rb") as f:
+        f.seek(offset)
+        raw = f.read(max(1, min(length, CHUNK_BYTES)))
+    return {"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": size, "offset": offset,
+            "data": base64.b64encode(raw).decode(), "eof": offset + len(raw) >= size}
+
+
 UNSENT_TTL = 24 * 3600
 
 
@@ -1010,6 +1116,7 @@ async def attachment_janitor(every: float = 3600) -> None:
     """Вложения, загруженные, но так и не отправленные (человек передумал), удаляются через сутки."""
     while True:
         try:
+            _drop_stale_uploads(time.time())
             rows = await db().unsent_attachments(time.time() - UNSENT_TTL)
             for r in rows:
                 Path(r["path"]).unlink(missing_ok=True)

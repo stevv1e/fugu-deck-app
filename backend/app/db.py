@@ -250,6 +250,10 @@ SCHEMA = [
     );
     CREATE INDEX IF NOT EXISTS idx_schedules_next ON schedules(enabled, next_at);
     """,
+    # v11: кто создал вложение — пользователь (загрузил с телефона) или агент (create_file)
+    """
+    ALTER TABLE attachments ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -533,13 +537,13 @@ class Database:
         return r["t"] if r else None
 
     # --- attachments ---
-    async def add_attachment(self, cid: str, filename: str, mime: str, size: int, path: str) -> dict:
+    async def add_attachment(self, cid: str, filename: str, mime: str, size: int, path: str, origin: str = "user") -> dict:
         aid = new_id()
         await self._exec(
-            "INSERT INTO attachments (id,conversation_id,filename,mime,size,path,created_at) VALUES (?,?,?,?,?,?,?)",
-            (aid, cid, filename, mime, size, path, time.time()),
+            "INSERT INTO attachments (id,conversation_id,filename,mime,size,path,created_at,origin) VALUES (?,?,?,?,?,?,?,?)",
+            (aid, cid, filename, mime, size, path, time.time(), origin),
         )
-        return {"id": aid, "conversation_id": cid, "filename": filename, "mime": mime, "size": size}
+        return {"id": aid, "conversation_id": cid, "filename": filename, "mime": mime, "size": size, "origin": origin}
 
     async def get_attachment(self, aid: str) -> dict | None:
         return await self._one("SELECT * FROM attachments WHERE id=?", (aid,))
@@ -547,7 +551,7 @@ class Database:
     async def unsent_attachments(self, before: float) -> list[dict]:
         """Вложения, загруженные раньше before и так и не приложенные ни к одному сообщению своего чата."""
         return await self._all(
-            "SELECT a.id, a.path FROM attachments a WHERE a.created_at<? AND NOT EXISTS ("
+            "SELECT a.id, a.path FROM attachments a WHERE a.created_at<? AND a.origin='user' AND NOT EXISTS ("
             "SELECT 1 FROM messages m WHERE m.conversation_id=a.conversation_id AND m.role='user' "
             "AND m.meta LIKE '%\"' || a.id || '\"%')", (before,))
 
@@ -557,7 +561,7 @@ class Database:
 
     async def list_attachments(self, cid: str) -> list[dict]:
         return await self._all(
-            "SELECT id,filename,mime,size,created_at FROM attachments WHERE conversation_id=? ORDER BY created_at",
+            "SELECT id,filename,mime,size,created_at,origin FROM attachments WHERE conversation_id=? ORDER BY created_at",
             (cid,),
         )
 

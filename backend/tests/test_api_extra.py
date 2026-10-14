@@ -58,3 +58,57 @@ def test_schedules_crud(client):
     assert "нет ключа" in client.get(f"/api/projects/{pid}/schedules").json()[0]["last_status"]
     assert client.delete(f"/api/schedules/{s['id']}").status_code == 200
     assert client.get(f"/api/projects/{pid}/schedules").json() == []
+
+
+def test_chunked_upload_and_download(client):
+    import os
+
+    login(client)
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    raw = os.urandom(5 * 1024 * 1024 + 123)
+    r = client.post(f"/api/conversations/{c['id']}/uploads", json={"filename": "big.tar.gz", "mime": "", "size": len(raw)})
+    assert r.status_code == 200, r.text
+    upid, step = r.json()["upload_id"], r.json()["chunk_bytes"]
+    assert client.post(f"/api/uploads/{upid}/finish").status_code == 409  # ещё не всё
+    off = 0
+    while off < len(raw):
+        part = raw[off:off + step]
+        r = client.post(f"/api/uploads/{upid}/chunk", json={"offset": off, "data": base64.b64encode(part).decode()})
+        assert r.status_code == 200 and r.json()["got"] == off + len(part)
+        # повтор той же части (потерянный ответ) не дублирует данные
+        assert client.post(f"/api/uploads/{upid}/chunk", json={"offset": off, "data": base64.b64encode(part).decode()}).json()["got"] == off + len(part)
+        off += len(part)
+    att = client.post(f"/api/uploads/{upid}/finish").json()
+    assert att["size"] == len(raw) and att["filename"] == "big.tar.gz"
+    got, off = b"", 0
+    while True:
+        r = client.get(f"/api/attachments/{att['id']}/chunk?offset={off}").json()
+        got += base64.b64decode(r["data"])
+        off = len(got)
+        if r["eof"]:
+            break
+    assert got == raw
+    big = client.post(f"/api/conversations/{c['id']}/uploads", json={"filename": "x", "size": 51 * 1024 * 1024})
+    assert big.status_code == 413
+
+
+async def test_create_file_tool_and_janitor(client):
+    import time
+
+    from app.tools.registry import ToolContext
+    from app.tools.repo_tools import create_file, read_attachment
+
+    login(client)
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    up = client.post(f"/api/conversations/{c['id']}/attachments/json",
+                     json={"filename": "a.txt", "data": base64.b64encode(b"hello").decode()}).json()
+    ctx = ToolContext(c["id"], main.db(), main.settings, {})
+    rep = await create_file(ctx, {"filename": "../отчёт.md", "content": "# Итог\nвсё хорошо"})
+    assert rep["attachment"]["filename"] == "отчёт.md" and rep["attachment"]["mime"] == "text/markdown"
+    z = await create_file(ctx, {"filename": "pack", "from_attachments": [up["id"], rep["attachment"]["id"]]})
+    assert z["attachment"]["filename"] == "pack.zip"
+    listing = await read_attachment(ctx, {"attachment_id": z["attachment"]["id"]})
+    assert {e["path"] for e in listing["entries"]} == {"a.txt", "отчёт.md"}
+    # уборка «неотправленных» не трогает файлы агента (они ни к одному сообщению пользователя не приложены)
+    gone = {r["id"] for r in await main.db().unsent_attachments(time.time() + 1)}
+    assert up["id"] in gone and rep["attachment"]["id"] not in gone and z["attachment"]["id"] not in gone

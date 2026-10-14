@@ -1,5 +1,5 @@
 /** API сервера Fugu Deck для приложения. Всё идёт через DeviceSession (DPoP + подписи). */
-import { uploadBody, type PickedFile, type Uploaded } from "./attachments";
+import { uploadFile, type FileReader, type PickedFile, type Uploaded } from "./attachments";
 import { argsHash } from "./crypto";
 import type { DeviceSession } from "./session";
 import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } from "./types";
@@ -92,10 +92,12 @@ export class DeckApi {
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
   send = (cid: string, content: string, model?: string, attachmentIds: string[] = []) =>
     this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null, attachment_ids: attachmentIds });
-  /** Загрузить вложение в чат; файл уходит в JSON как base64 (защищённый канал передаёт тело только текстом). */
-  upload = (cid: string, f: PickedFile) =>
-    // файл до 8 МБ по мобильной сети — это не полминуты обычного запроса
-    this.s.request<Uploaded>("POST", `/api/conversations/${enc(cid)}/attachments/json`, uploadBody(f), { timeoutMs: 180000 });
+  /** Загрузить вложение в чат: маленький файл — одним запросом, большой — частями (attachments.ts, uploadFile). */
+  upload = (cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void) =>
+    uploadFile((m, p, b, o) => this.s.request(m, p, b, o), cid, f, read, onProgress);
+  /** Кусок вложения (base64) — для скачивания на телефон. */
+  attachmentChunk = (aid: string, offset: number) =>
+    this.s.request<Uploaded & { data: string; offset: number; eof: boolean }>("GET", `/api/attachments/${enc(aid)}/chunk?offset=${offset}`, undefined, { timeoutMs: 90000 });
   /** Содержимое вложения (предпросмотр картинки): JSON с base64 — как и загрузка. */
   attachment = (aid: string) =>
     this.s.request<Uploaded & { data: string }>("GET", `/api/attachments/${enc(aid)}/json`, undefined, { timeoutMs: 120000 });

@@ -4,20 +4,23 @@ import { readAsStringAsync, StorageAccessFramework, writeAsStringAsync } from "e
 import { Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 
-import { base64Bytes, type PickedFile } from "@/core/attachments";
+import type { PickedFile } from "@/core/attachments";
 
-async function read(uri: string, name: string, mime: string, size?: number): Promise<PickedFile> {
-  const base64 = await readAsStringAsync(uri, { encoding: "base64" });
-  return { name, mime, base64, size: size && size > 0 ? size : base64Bytes(base64) };
-}
+import { sizeOf } from "./files";
 
-/** Фото из галереи (системное окно выбора; разрешение на всю галерею не нужно). null — человек передумал. */
-export async function pickPhoto(): Promise<PickedFile | null> {
-  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, exif: false });
-  const a = r.canceled ? null : r.assets?.[0];
-  if (!a) return null;
-  const ext = (a.mimeType || "image/jpeg").split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-  return read(a.uri, a.fileName || `photo-${Date.now()}.${ext}`, a.mimeType || "image/jpeg", a.fileSize);
+const picked = (uri: string, name: string, mime: string, size?: number | null): PickedFile =>
+  ({ uri, name, mime, size: size && size > 0 ? size : sizeOf(uri) });
+
+/** Фото из галереи, можно несколько (системное окно выбора; разрешение на всю галерею не нужно). */
+export async function pickPhotos(limit: number): Promise<PickedFile[]> {
+  const r = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"], quality: 0.85, exif: false, allowsMultipleSelection: limit > 1, selectionLimit: Math.max(1, limit),
+  });
+  if (r.canceled) return [];
+  return (r.assets ?? []).slice(0, limit).map((a, i) => {
+    const ext = (a.mimeType || "image/jpeg").split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+    return picked(a.uri, a.fileName || `photo-${Date.now()}-${i + 1}.${ext}`, a.mimeType || "image/jpeg", a.fileSize);
+  });
 }
 
 /** Снимок камерой. Разрешение на камеру спрашивается при первом снимке; отказ — понятная ошибка. */
@@ -28,15 +31,14 @@ export async function takePhoto(): Promise<PickedFile | null> {
   const a = r.canceled ? null : r.assets?.[0];
   if (!a) return null;
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return read(a.uri, `camera-${stamp}.jpg`, a.mimeType || "image/jpeg", a.fileSize);
+  return picked(a.uri, `camera-${stamp}.jpg`, a.mimeType || "image/jpeg", a.fileSize);
 }
 
-/** Любой файл через системное окно выбора. */
-export async function pickFile(): Promise<PickedFile | null> {
-  const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
-  const a = r.canceled ? null : r.assets?.[0];
-  if (!a) return null;
-  return read(a.uri, a.name || "file", a.mimeType || "", a.size);
+/** Любые файлы через системное окно выбора (архивы, документы…), можно несколько. */
+export async function pickFiles(limit: number): Promise<PickedFile[]> {
+  const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: limit > 1 });
+  if (r.canceled) return [];
+  return (r.assets ?? []).slice(0, limit).map((a) => picked(a.uri, a.name || "file", a.mimeType || "", a.size));
 }
 
 /** Текстовый файл через системное окно выбора (импорт проекта). null — человек передумал. */
