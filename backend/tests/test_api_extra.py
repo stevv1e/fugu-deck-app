@@ -192,3 +192,50 @@ print(max(im.size), hwm() - base)
     subprocess.run([sys.executable, "-c", f"from PIL import Image; Image.new('L',(8000,4000)).save({str(png)!r})"], check=True)
     from app import vision
     assert vision.for_model("p", png) is None
+
+
+async def test_interrupted_runs_marked_and_retry(client):
+    login(client)
+    db = main.db()
+    pid = client.post("/api/projects", json={"name": "Прерывания"}).json()["id"]
+    mk = lambda: client.post(f"/api/projects/{pid}/conversations", json={}).json()["id"]  # noqa: E731
+    done, asked, tooled = mk(), mk(), mk()
+    await db.add_message(done, "user", "привет")
+    await db.add_message(done, "assistant", "здравствуйте")
+    await db.add_message(asked, "user", "опиши фото")  # агент упал, не ответив
+    await db.add_message(tooled, "user", "сделай")
+    await db.add_message(tooled, "assistant", "", tool_calls=[{"id": "t1", "type": "function", "function": {"name": "x", "arguments": "{}"}}])
+    await db.add_message(tooled, "tool", "{}", tool_call_id="t1", name="x")
+
+    assert await main.mark_interrupted() == 2
+    assert await main.mark_interrupted() == 0  # повторный запуск не множит пометки
+    for cid in (asked, tooled):
+        notes = [m for m in client.get(f"/api/conversations/{cid}").json()["messages"] if m["role"] == "note"]
+        assert notes and notes[-1]["meta"]["interrupted"]
+    assert not [m for m in client.get(f"/api/conversations/{done}").json()["messages"] if m["role"] == "note"]
+
+    # повтор: на отвеченном чате — нечего повторять; на прерванном — ключа модели на тестовом сервере нет
+    assert client.post(f"/api/conversations/{done}/retry").status_code == 409
+    r = client.post(f"/api/conversations/{asked}/retry")
+    assert r.status_code == 400 and "ключ" in r.json()["detail"]
+
+
+def test_vision_target_sizes(tmp_path):
+    from PIL import Image
+
+    from app import vision
+
+    assert vision.target(4000, 3000) == (1600, 1200)        # обычное фото — длинная сторона 1600
+    assert vision.target(7532, 16320) == (1024, 2219)       # длинный скриншот — короткая сторона 1024
+    assert vision.target(1000, 20000) == (154, 3072)        # очень узкая полоса — длинная не больше 3072
+    assert vision.target(800, 600) == (800, 600)            # маленькую не увеличиваем
+    # EXIF-поворот на 90°: в файле 4000×3000, на экране 3000×4000
+    p = tmp_path / "rot.jpg"
+    im = Image.new("RGB", (4000, 3000), (10, 20, 30))
+    ex = im.getexif()
+    ex[0x0112] = 6
+    im.save(p, "JPEG", exif=ex)
+    import base64
+    import io
+    url = vision.for_model("rot", p)
+    assert Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).size == (1200, 1600)

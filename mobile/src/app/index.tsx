@@ -8,6 +8,7 @@ import { listClusters, type ClusterRecord } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Empty, IconBtn, Loading, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
+import { UpdateBanner } from "@/ui/UpdateBanner";
 
 const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave",
@@ -40,6 +41,7 @@ export default function Servers() {
         <IconBtn glyph="⚙" label="Настройки приложения" onPress={() => router.push("/settings")} />
       </Row>
 
+      <UpdateBanner clusters={clusters} />
       {!ready ? (
         <Loading />
       ) : servers.length === 0 && clusters.length === 0 ? (

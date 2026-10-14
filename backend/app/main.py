@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     if not settings.is_space:
         state.update(server_keys=devices.ServerKeys(settings.data_dir, settings.server_name),
                      device_auth=devices.DeviceAuth(auth.jwt_secret(settings) + ":device"))
+    await mark_interrupted()
     scheduler = sched.Scheduler(db, fire_schedule)
     scheduler.start()
     janitor = asyncio.create_task(attachment_janitor())
@@ -1141,22 +1142,26 @@ class MessageIn(BaseModel):
     model: str | None = None
 
 
-@app.post("/api/conversations/{cid}/messages")
-async def send(cid: str, body: MessageIn, u: dict = Me):
-    c = await conv_access(u, cid, "editor")
+async def _llm_access(c: dict, u: dict, want_model: str | None):
+    """Чем платить за модель в этом чате: (модель, ключи автора, ключ модели, проверка бюджета). Отказ — HTTPException."""
     keys = vault().get(u["id"])
-    llm_key, budget = None, None
     if is_team():
         # одна модель на чат; платит спонсор — участник, который её выбрал и разрешил свой ключ
-        model = c["model"]
         llm_key, budget, why = await sponsor_access(c)
         if why:
             raise HTTPException(409, why)
-    else:
-        model = _check_model(body.model or c["model"])
-        if not agent().llm_key(split_model(model)[0], keys):
-            raise HTTPException(400, f"Нет ключа для {split_model(model)[0]}: разблокируйте ключи в приложении"
-                                if settings.is_space else f"На сервере не задан ключ {split_model(model)[0]}")
+        return c["model"], keys, llm_key, budget
+    model = _check_model(want_model or c["model"])
+    if not agent().llm_key(split_model(model)[0], keys):
+        raise HTTPException(400, f"Нет ключа для {split_model(model)[0]}: разблокируйте ключи в приложении"
+                            if settings.is_space else f"На сервере не задан ключ {split_model(model)[0]}")
+    return model, keys, None, None
+
+
+@app.post("/api/conversations/{cid}/messages")
+async def send(cid: str, body: MessageIn, u: dict = Me):
+    c = await conv_access(u, cid, "editor")
+    model, keys, llm_key, budget = await _llm_access(c, u, body.model)
     atts = []
     for aid in body.attachment_ids:
         a = await db().get_attachment(aid)
@@ -1178,6 +1183,37 @@ async def send(cid: str, body: MessageIn, u: dict = Me):
     run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
                               payer_id=c.get("sponsor_id") if is_team() else u["id"])
     return {"run_id": run.id}
+
+
+@app.post("/api/conversations/{cid}/retry")
+async def retry(cid: str, u: dict = Me):
+    """Продолжить прерванное задание (агент перезапускался посреди ответа): та же переписка, без нового сообщения."""
+    c = await conv_access(u, cid, "editor")
+    run = agent().active_run(cid)
+    if run and run.status == "running":
+        raise HTTPException(409, "В этом чате уже идёт выполнение")
+    if not await db().unanswered(cid):
+        raise HTTPException(409, "Повторять нечего: на последнее сообщение агент уже ответил")
+    model, keys, llm_key, budget = await _llm_access(c, u, None)
+    await db().add_message(cid, "note", f"{u['display_name']}: повтор прерванного задания")
+    run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
+                              payer_id=c.get("sponsor_id") if is_team() else u["id"])
+    return {"run_id": run.id}
+
+
+INTERRUPTED_NOTE = "Задание прервалось: агент перезапускался, ответа нет. Нажмите «Повторить», чтобы продолжить."
+
+
+async def mark_interrupted(within: float = 2 * 86400) -> int:
+    """При запуске агента: чаты, где задание оборвалось (последнее — вопрос или вызов инструмента без ответа),
+    получают пометку с кнопкой «Повторить». Задания в памяти, и после перезапуска их не вернуть."""
+    n = 0
+    for cid in await db().unanswered_conversations(time.time() - within):
+        await db().add_message(cid, "note", INTERRUPTED_NOTE, meta={"interrupted": True})
+        n += 1
+    if n:
+        log.warning("прерванных заданий после перезапуска: %d", n)
+    return n
 
 
 async def _run_access(rid: str, u: dict, min_role: str = "viewer"):
