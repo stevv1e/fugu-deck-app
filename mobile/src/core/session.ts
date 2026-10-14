@@ -99,12 +99,12 @@ export class DeviceSession {
     return { Authorization: `DPoP ${at}`, DPoP: proof };
   }
 
-  async request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T = any>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
     const url = this.server.url + path;
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = { accept: "application/json", ...(await this.authHeaders(method, url, attempt > 0)) };
       if (body !== undefined) headers["content-type"] = "application/json";
-      const r = await this.http.request({ method, url, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const r = await this.http.request({ method, url, headers, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs: opts.timeoutMs });
       if (r.status === 401 && attempt === 0) {
         const err = errorFrom(r.status, r.text);
         if (REVOKED.test(err.message)) {
@@ -297,10 +297,10 @@ export class ClusterSession extends DeviceSession {
    * после сна (первый запрос сам его будит) — до минуты. Повторяем сами, чтобы экран не показывал ошибку
    * на ровном месте; потоки переподключаются своим механизмом.
    */
-  override async request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+  override async request<T = any>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await super.request<T>(method, path, body);
+        return await super.request<T>(method, path, body, opts);
       } catch (e) {
         if (!(e instanceof ApiError) || e.status !== 503 || attempt >= ClusterSession.retries) throw e;
         await new Promise((r) => setTimeout(r, ClusterSession.retryMs));

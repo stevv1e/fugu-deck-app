@@ -153,4 +153,38 @@ with TestClient(main.app) as c:
     assert "доступа" in out["error"], out
     loop.close()
 
+# ---- вложения с телефона (JSON + base64) и удаление проекта вместе с файлами ----
+with TestClient(main.app) as c:
+    h = tok()
+    proj = c.post("/api/projects", headers=h, json={"name": "Временный"}).json()
+    chat = c.post(f"/api/projects/{proj['id']}/conversations", headers=h, json={}).json()["id"]
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+    up = lambda **kw: c.post(f"/api/conversations/{chat}/attachments/json", headers=h, json=kw)  # noqa: E731
+    r = up(filename="../../etc/фото (1).png", mime="image/png", data=base64.b64encode(png).decode())
+    assert r.status_code == 200, r.text
+    att = r.json()
+    assert att["filename"] == "фото (1).png" and att["mime"] == "image/png" and att["size"] == len(png), att
+    saved = next((tmp / "data" / "attachments" / chat).iterdir())
+    assert saved.read_bytes() == png and saved.parent.name == chat, "файл лёг в каталог чата, а не по присланному пути"
+    # тип берётся по расширению; странный тип от клиента не принимается как есть
+    r = up(filename="notes.txt", mime='text/html"><script>', data=base64.b64encode("привет".encode()).decode())
+    assert r.status_code == 200 and r.json()["mime"] == "text/plain", r.text
+    assert up(filename="x.bin", mime="a/b", data="не base64!").status_code == 400
+    assert up(filename="x.bin", mime="", data="").status_code == 422
+    big = base64.b64encode(b"x" * (8 * 1024 * 1024 + 1)).decode()
+    assert up(filename="big.bin", mime="", data=big).status_code == 413
+    assert c.post("/api/conversations/nope/attachments/json", headers=h, json={"filename": "a", "data": "QQ=="}).status_code == 404
+    full = c.get(f"/api/conversations/{chat}", headers=h).json()
+    assert len(list((tmp / "data" / "attachments" / chat).iterdir())) == 2
+
+    # удаление проекта: чаты, вложения в базе и файлы на диске исчезают; проект по умолчанию удалить нельзя
+    other = c.post(f"/api/projects/{pid}/conversations", headers=h, json={}).json()["id"]
+    keep = c.post(f"/api/conversations/{other}/attachments/json", headers=h, json={"filename": "keep.txt", "data": "QQ=="}).json()
+    assert c.delete(f"/api/projects/{proj['id']}", headers=h).status_code == 200
+    assert c.get(f"/api/conversations/{chat}", headers=h).status_code == 404
+    assert not any((tmp / "data" / "attachments" / chat).iterdir()), "файлы удалённого проекта остались на диске"
+    assert proj["id"] not in [p["id"] for p in c.get("/api/projects", headers=h).json()]
+    assert len(list((tmp / "data" / "attachments" / other).iterdir())) == 1 and keep["id"], "вложения другого проекта не тронуты"
+    assert c.delete("/api/projects/general", headers=h).status_code == 400
+
 print("ssh-tools: ok")

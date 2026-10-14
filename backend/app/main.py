@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import auth, backup, devices, kb, spaceauth
+from . import auth, backup, devices, kb, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
@@ -55,7 +55,12 @@ async def lifespan(app: FastAPI):
     if not settings.is_space:
         state.update(server_keys=devices.ServerKeys(settings.data_dir, settings.server_name),
                      device_auth=devices.DeviceAuth(auth.jwt_secret(settings) + ":device"))
+    scheduler = sched.Scheduler(db, fire_schedule)
+    scheduler.start()
+    janitor = asyncio.create_task(attachment_janitor())
     yield
+    await scheduler.stop()
+    janitor.cancel()
     for p in providers.values():
         await p.http.aclose()
     await db.close()
@@ -201,7 +206,9 @@ def standalone_only():
 async def health():
     # busy — идёт ли задание агента. В кластере по нему control-plane решает, можно ли усыпить пространство:
     # задание продолжается и после того, как человек закрыл приложение.
-    return {"ok": True, "busy": any(r.status == "running" for r in agent().runs.values())}
+    # next_wake — ближайшее задание по расписанию: перед сном control-plane запоминает его и будит пространство к сроку.
+    return {"ok": True, "busy": any(r.status == "running" for r in agent().runs.values()),
+            "next_wake": await db().next_schedule_at()}
 
 
 class LoginIn(BaseModel):
@@ -607,7 +614,14 @@ async def delete_project(pid: str, u: dict = Me):
     if pid == DEFAULT_PROJECT:
         raise HTTPException(400, "Проект по умолчанию удалить нельзя")
     users = await db().project_user_ids(pid)
+    # Идущие задания в чатах проекта останавливаем; файлы вложений удаляем с диска (строки базы уйдут каскадом).
+    for r in list(agent().runs.values()):
+        if r.status == "running" and r.project_id == pid:
+            await agent().cancel(r)
+    paths = await db().project_attachment_paths(pid)
     await db().delete_project(pid)
+    for p in paths:
+        Path(p).unlink(missing_ok=True)
     await broker().publish("project", pid, users=users, action="deleted")
     return {"ok": True}
 
@@ -806,7 +820,8 @@ async def delete_skill(name: str, u: dict = Me):
 # ================================================================== чаты
 class ConvIn(BaseModel):
     model: str | None = None
-    title: str | None = None
+    title: str | None = Field(None, min_length=1, max_length=120)
+    project_id: str | None = None  # перенести чат в другой проект (нужна роль редактора в обоих)
 
 
 def _check_model(m: str | None) -> str:
@@ -850,8 +865,18 @@ async def update_conv(cid: str, body: ConvIn, u: dict = Me):
     c = await conv_access(u, cid, "editor")
     if body.model and body.model != c["model"] and is_team():
         raise HTTPException(409, "В общем чате модель меняется через предложение участникам")
-    await db().update_conversation(cid, title=body.title, model=_check_model(body.model) if body.model else None)
+    title = body.title.strip() if body.title else None
+    if body.title is not None and not title:
+        raise HTTPException(400, "Название чата не может быть пустым")
+    to = body.project_id if body.project_id and body.project_id != c["project_id"] else None
+    if to:
+        await need(u, to, "editor")
+        if (r := agent().active_run(cid)) and r.status == "running":
+            raise HTTPException(409, "В чате идёт выполнение — перенесите его, когда агент закончит")
+    await db().update_conversation(cid, title=title, model=_check_model(body.model) if body.model else None, project_id=to)
     await broker().publish("conversation", c["project_id"], action="updated", conversation_id=cid)
+    if to:
+        await broker().publish("conversation", to, action="created", conversation_id=cid, by=u["display_name"])
     return await db().get_conversation(cid)
 
 
@@ -925,6 +950,77 @@ async def upload(cid: str, file: UploadFile = File(...), u: dict = Me):
             f.write(chunk)
     mime = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
     return await db().add_attachment(cid, name, mime, size, str(dest))
+
+
+class UploadIn(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    mime: str = Field("", max_length=120)
+    data: str = Field(..., min_length=1)  # содержимое файла в base64
+
+
+# Вложение с телефона. Защищённый канал приложения (mTLS ключом из чипа) передаёт тело запроса только текстом,
+# поэтому файл приходит в JSON как base64, а не multipart. Предел меньше общего: base64 раздувает файл на треть,
+# и всё это проходит через память телефона и прокси.
+JSON_UPLOAD_MAX = 8 * 1024 * 1024
+
+
+@app.post("/api/conversations/{cid}/attachments/json")
+async def upload_json(cid: str, body: UploadIn, u: dict = Me):
+    await conv_access(u, cid, "editor")
+    if len(body.data) > JSON_UPLOAD_MAX * 4 // 3 + 16:
+        raise HTTPException(413, f"Файл больше {JSON_UPLOAD_MAX // 1024 // 1024} МБ")
+    try:
+        raw = base64.b64decode(body.data, validate=True)
+    except Exception:
+        raise HTTPException(400, "Содержимое файла повреждено при передаче")
+    if not raw or len(raw) > JSON_UPLOAD_MAX:
+        raise HTTPException(413 if raw else 400, f"Файл пустой или больше {JSON_UPLOAD_MAX // 1024 // 1024} МБ")
+    name = SAFE.sub("_", Path(body.filename).name)[:120] or "file"
+    aid_dir = settings.data_dir / "attachments" / cid
+    aid_dir.mkdir(parents=True, exist_ok=True)
+    dest = aid_dir / f"{new_id()}_{name}"
+    dest.write_bytes(raw)
+    # Тип файла — по расширению; присланный телефоном учитываем, только если он обычного вида (в подсказку модели
+    # и в data:-адрес картинки он попадает как есть).
+    mime = mimetypes.guess_type(name)[0] or (body.mime if re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", body.mime) else "") \
+        or "application/octet-stream"
+    return await db().add_attachment(cid, name, mime, len(raw), str(dest))
+
+
+# Предпросмотр на телефоне: тот же защищённый канал отдаёт тело только текстом — содержимое в JSON как base64.
+@app.get("/api/attachments/{aid}/json")
+async def download_json(aid: str, u: dict = Me):
+    a = await db().get_attachment(aid)
+    if not a:
+        raise HTTPException(404, "Вложение не найдено")
+    await conv_access(u, a["conversation_id"])
+    p = Path(a["path"])
+    if not p.is_file():
+        raise HTTPException(404, "Файл вложения не найден")
+    if a["size"] > JSON_UPLOAD_MAX:
+        raise HTTPException(413, "Файл слишком большой для предпросмотра")
+    return {"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": a["size"],
+            "data": base64.b64encode(p.read_bytes()).decode()}
+
+
+UNSENT_TTL = 24 * 3600
+
+
+async def attachment_janitor(every: float = 3600) -> None:
+    """Вложения, загруженные, но так и не отправленные (человек передумал), удаляются через сутки."""
+    while True:
+        try:
+            rows = await db().unsent_attachments(time.time() - UNSENT_TTL)
+            for r in rows:
+                Path(r["path"]).unlink(missing_ok=True)
+            if rows:
+                await db().delete_attachments([r["id"] for r in rows])
+                log.info("убрано неотправленных вложений: %d", len(rows))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("уборка вложений")
+        await asyncio.sleep(every)
 
 
 class MessageIn(BaseModel):
@@ -1531,6 +1627,148 @@ async def get_keys(u: dict = Me):
 async def wipe_keys(u: dict = Me):
     vault().wipe(u["id"])
     return {"ok": True}
+
+
+# ================================================================== задания по расписанию
+class ScheduleIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=80)
+    prompt: str = Field(..., min_length=1, max_length=8000)
+    kind: str = Field(..., pattern="^(hourly|daily|weekly|once)$")
+    at_time: str = Field("09:00", max_length=5)
+    weekdays: list[int] = []
+    tz: str = Field("UTC", max_length=64)
+    run_at: float | None = None
+    model: str | None = None
+    enabled: bool = True
+
+
+class SchedulePatch(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=80)
+    prompt: str | None = Field(None, min_length=1, max_length=8000)
+    kind: str | None = Field(None, pattern="^(hourly|daily|weekly|once)$")
+    at_time: str | None = Field(None, max_length=5)
+    weekdays: list[int] | None = None
+    tz: str | None = Field(None, max_length=64)
+    run_at: float | None = None
+    model: str | None = None
+    enabled: bool | None = None
+
+
+def schedules_allowed() -> None:
+    # В общем пространстве модель оплачивает спонсор по своему разрешению: запуски «сами по себе» его ключом
+    # он не подписывал. Поэтому расписания — только в личном пространстве и на своём сервере.
+    if is_team():
+        raise HTTPException(409, "Задания по расписанию — только в личном пространстве")
+
+
+def schedule_out(s: dict) -> dict:
+    return {**s, "description": sched.describe(s)}
+
+
+def _checked_schedule(s: dict) -> dict:
+    try:
+        sched.validate(s["kind"], s["at_time"], s["weekdays"], s["tz"], s.get("run_at"))
+    except sched.ScheduleError as e:
+        raise HTTPException(400, str(e))
+    s["model"] = _check_model(s.get("model"))
+    s["next_at"] = sched.next_run(s, time.time()) if s.get("enabled", True) else None
+    if s["kind"] == "once" and s["next_at"] is None and s.get("enabled", True) and not s.get("last_run_at"):
+        raise HTTPException(400, "Время разового задания уже прошло")
+    return s
+
+
+@app.get("/api/projects/{pid}/schedules")
+async def list_schedules(pid: str, u: dict = Me):
+    await need(u, pid)
+    return [schedule_out(s) for s in await db().list_schedules(pid)]
+
+
+@app.post("/api/projects/{pid}/schedules")
+async def create_schedule(pid: str, body: ScheduleIn, u: dict = Me):
+    schedules_allowed()
+    await need(u, pid, "editor")
+    if await db().count_schedules(pid) >= sched.MAX_PER_PROJECT:
+        raise HTTPException(409, f"В проекте не больше {sched.MAX_PER_PROJECT} заданий")
+    s = _checked_schedule({**body.model_dump(), "title": body.title.strip(), "prompt": body.prompt.strip()})
+    out = await db().create_schedule(project_id=pid, created_by=u["id"], **s)
+    await broker().publish("project", pid, action="updated")
+    return schedule_out(out)
+
+
+async def _schedule_for_edit(sid: str, u: dict) -> dict:
+    s = await db().get_schedule(sid)
+    if not s:
+        raise HTTPException(404, "Задание не найдено")
+    await need(u, s["project_id"], "editor")
+    return s
+
+
+@app.patch("/api/schedules/{sid}")
+async def patch_schedule(sid: str, body: SchedulePatch, u: dict = Me):
+    schedules_allowed()
+    s = await _schedule_for_edit(sid, u)
+    ch = body.model_dump(exclude_unset=True)
+    merged = {**s, **{k: v for k, v in ch.items() if v is not None or k == "run_at"}}
+    if s["kind"] == "once" and ("run_at" in ch or "kind" in ch):
+        merged["last_run_at"] = None  # новое время разового задания — его можно выполнить ещё раз
+    merged = _checked_schedule(merged)
+    keys = ("title", "prompt", "kind", "at_time", "weekdays", "tz", "run_at", "model", "enabled", "next_at", "last_run_at")
+    await db().update_schedule(sid, **{k: merged.get(k) for k in keys})
+    await broker().publish("project", s["project_id"], action="updated")
+    return schedule_out(await db().get_schedule(sid))
+
+
+@app.delete("/api/schedules/{sid}")
+async def delete_schedule(sid: str, u: dict = Me):
+    s = await _schedule_for_edit(sid, u)
+    await db().delete_schedule(sid)
+    await broker().publish("project", s["project_id"], action="updated")
+    return {"ok": True}
+
+
+@app.post("/api/schedules/{sid}/run")
+async def run_schedule_now(sid: str, u: dict = Me):
+    """Выполнить задание сейчас (проверить, что оно делает); срок следующего запуска не меняется."""
+    schedules_allowed()
+    s = await _schedule_for_edit(sid, u)
+    status = await fire_schedule(s)
+    await db().update_schedule(sid, last_status=status[:300])
+    out = await db().get_schedule(sid)
+    if not status.startswith("запущено"):
+        raise HTTPException(409, status)
+    return schedule_out(out)
+
+
+async def fire_schedule(s: dict) -> str:
+    """Запуск задания: сообщение агенту в чат задания от имени автора. Возвращает итог для last_status."""
+    if is_team():
+        return "пропущено: в общем пространстве расписания не выполняются"
+    u = await db().get_user(s["created_by"]) if s.get("created_by") else None
+    if not u or u.get("disabled"):
+        await db().update_schedule(s["id"], enabled=False, next_at=None)
+        return "выключено: автора задания больше нет"
+    if not await db().get_project(s["project_id"]):
+        return "пропущено: проект удалён"
+    u = dict(u)
+    if settings.is_space:
+        u["space_role"] = "owner"  # личное пространство: автор задания — его владелец
+    model = s["model"] if s["model"] in settings.model_list else _check_model(None)
+    keys = vault().get(u["id"])
+    if not agent().llm_key(split_model(model)[0], keys):
+        return f"пропущено: нет ключа для {split_model(model)[0]}"
+    c = await db().get_conversation(s["conversation_id"]) if s.get("conversation_id") else None
+    if not c or c["project_id"] != s["project_id"]:
+        c = await db().create_conversation(model, s["project_id"], u["id"], f"⏰ {s['title']}"[:120])
+        await db().update_schedule(s["id"], conversation_id=c["id"])
+        await broker().publish("conversation", s["project_id"], action="created", conversation_id=c["id"], by=u["display_name"])
+    if (r := agent().active_run(c["id"])) and r.status == "running":
+        return "пропущено: в чате задания ещё идёт прошлый запуск"
+    await db().add_message(c["id"], "user", s["prompt"],
+                           meta={"author": f"⏰ {s['title']}", "author_id": u["id"], "schedule": s["id"]})
+    await db().update_conversation(c["id"], model=model)
+    await agent().start(c["id"], model, u, s["project_id"], keys, payer_id=u["id"])
+    tz = sched.zone(s.get("tz") or "UTC")
+    return "запущено " + datetime.now(tz).strftime("%d.%m %H:%M")
 
 
 # ================================================================== экспорт/импорт проекта (перенос в общий)
