@@ -53,6 +53,8 @@ export async function uploadFile(req: Req, cid: string, f: PickedFile, read: Fil
   let got = 0;
   for (let tries = 0; got < f.size; ) {
     const data = await read.chunk(f.uri, got, Math.min(st.chunk_bytes, f.size - got));
+    // файл на телефоне короче, чем было заявлено (или изменился во время загрузки): повторять бессмысленно
+    if (!data) throw new Error(`Файл «${f.name}» прочитан не целиком (${got} из ${f.size} байт) — выберите его заново`);
     try {
       const r = await req<{ got: number }>("POST", `/api/uploads/${enc(st.upload_id)}/chunk`, { offset: got, data }, { timeoutMs: 90000 });
       if (r.got <= got) throw new Error("Сервер не принял часть файла");

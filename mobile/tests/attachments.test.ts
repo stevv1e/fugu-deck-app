@@ -69,3 +69,18 @@ test("загрузка: маленький файл одним запросом,
   assert.equal(seen.at(-1), file.length);
   assert.equal(b.calls.filter((c) => c.endsWith("/chunk")).length, Math.ceil(file.length / 1000) + 1); // +1 — повтор
 });
+
+test("загрузка: файл короче заявленного — понятная ошибка, без повторов", async () => {
+  const file = Buffer.alloc(SMALL_UPLOAD + 500, 1);
+  const s = fakeServer();
+  const read = {
+    all: async (_u: string) => "",
+    // как на телефоне: за концом файла чтение возвращает пустую строку
+    chunk: async (_u: string, pos: number, len: number) => file.subarray(pos, pos + len).toString("base64"),
+  };
+  await assert.rejects(
+    uploadFile(s.req, "c1", { name: "photo.jpg", mime: "image/jpeg", size: file.length + 5000, uri: "file:///p" }, read),
+    /photo\.jpg.*не целиком/,
+  );
+  assert.equal(s.calls.filter((c) => c.endsWith("/chunk")).length, Math.ceil(file.length / 1000));
+});

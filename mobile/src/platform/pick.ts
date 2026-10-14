@@ -8,8 +8,12 @@ import type { PickedFile } from "@/core/attachments";
 
 import { sizeOf } from "./files";
 
-const picked = (uri: string, name: string, mime: string, size?: number | null): PickedFile =>
-  ({ uri, name, mime, size: size && size > 0 ? size : sizeOf(uri) });
+// Размер — у самого файла на диске: галерея сообщает размер исходного фото, а выбранное фото уже пережато
+// (quality) и меньше. Поверив галерее, загрузка читала бы за концом файла.
+const picked = (uri: string, name: string, mime: string, size?: number | null): PickedFile => {
+  const real = sizeOf(uri);
+  return { uri, name, mime, size: real > 0 ? real : size && size > 0 ? size : 0 };
+};
 
 /** Фото из галереи, можно несколько (системное окно выбора; разрешение на всю галерею не нужно). */
 export async function pickPhotos(limit: number): Promise<PickedFile[]> {

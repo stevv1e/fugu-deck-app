@@ -225,6 +225,7 @@ def read(path: Path, filename: str, mime: str, member: str | None = None, offset
     """То, что видит агент через read_attachment."""
     k = kind_of(filename, mime)
     base = {"filename": filename}
+    member = (member or "").strip() or None  # пустой path (модели так делают) — это «покажи список»
     try:
         if k in ("zip", "tar") and member is None:
             return {**base, **list_archive(path, k, start),
