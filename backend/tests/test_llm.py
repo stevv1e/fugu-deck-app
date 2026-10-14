@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from app.llm import split_model
@@ -38,3 +39,40 @@ def test_convert_history_with_tools_and_thinking():
 def test_convert_tools():
     t = [{"type": "function", "function": {"name": "a", "description": "d", "parameters": {"type": "object"}}}]
     assert convert_tools(t) == [{"name": "a", "description": "d", "input_schema": {"type": "object"}}]
+
+
+async def test_openai_compat_retries_only_when_safe(monkeypatch):
+    import httpx
+    from openai import APIConnectionError, APITimeoutError
+
+    from app.llm import LLMError
+    from app.llm import openai_compat as oc
+
+    async def no_wait(_s):
+        return None
+
+    monkeypatch.setattr(oc.asyncio, "sleep", no_wait)
+    req = httpx.Request("POST", "https://x/v1/chat/completions")
+
+    class Fake:
+        def __init__(self, errs):
+            self.errs, self.calls = list(errs), 0
+            self.chat = self
+            self.completions = self
+
+        async def create(self, **kw):
+            self.calls += 1
+            if self.errs:
+                raise self.errs.pop(0)
+            return "ok"
+
+    f = Fake([APITimeoutError(req)])
+    with pytest.raises(LLMError, match="не повторён"):
+        await oc.OpenAICompatProvider._create(f, {})
+    assert f.calls == 1  # тайм-аут долгого запроса не повторяется: можно оплатить дважды
+    f = Fake([APIConnectionError(request=req)])
+    assert await oc.OpenAICompatProvider._create(f, {}) == "ok" and f.calls == 2
+    f = Fake([APIConnectionError(request=req), APIConnectionError(request=req)])
+    with pytest.raises(APIConnectionError):
+        await oc.OpenAICompatProvider._create(f, {})
+    assert f.calls == 2

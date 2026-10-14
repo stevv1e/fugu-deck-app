@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import time
 import traceback
@@ -15,10 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .db import Database, new_id
+from .db import TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
-from . import filetools
+from . import filetools, vision
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
 
@@ -58,9 +57,18 @@ SYSTEM_PROMPT = """Ты — Fugu Deck, ИИ-ассистент разработ�
 Скилы: если задача относится к одному из скилов ниже — сначала загрузи его через load_skill и следуй ему.
 """
 
+TALK_PROMPT = """Ты — Fugu, собеседник и помощник. Пользователь пишет с телефона: отвечай по делу, живо и на его языке.
+Помогай думать, объяснять, писать и переводить тексты, разбирать фото и документы.
+
+- Файлы и фото из чата: картинки ты видишь в сообщении; остальное читай через list_attachments / read_attachment
+  (текст, PDF, DOCX, XLSX, архивы zip/tar — сначала список, затем файл по path).
+- Если результат удобнее отдать файлом (текст, таблица, набор файлов), создай его через create_file — пользователь
+  откроет или сохранит его на телефоне.
+- Сообщения начинаются с [Имя] — в общем пространстве разговор могут вести несколько людей.
+"""
+
 MEMORY_PROMPT_CHARS = 6000
 
-VISION_MAX_BYTES = 5 * 1024 * 1024
 INLINE_TEXT_MAX = 30_000
 OLD_TOOL_RESULT_MAX = 1500
 
@@ -79,6 +87,9 @@ class Run:
     llm_key: str | None = field(default=None, repr=False)
     payer_id: str | None = None  # чей ключ оплачивает модель (спонсор или сам автор)
     budget: Any = field(default=None, repr=False)
+    # Git-провайдеры этого запуска: логин владельца ключа или None. Проверяется один раз за запуск, а не на каждом
+    # шаге: иначе каждый шаг — лишние запросы к GitHub/GitLab.
+    git_status: dict | None = None
     events: list[dict] = field(default_factory=list)
     status: str = "running"
     started_at: float = field(default_factory=time.time)
@@ -128,6 +139,16 @@ class Agent:
         if not self.settings.is_space:  # одиночный режим: ключи из .env
             return {"sakana": self.settings.sakana_api_key, "anthropic": self.settings.anthropic_api_key}.get(provider) or None
         return None
+
+    async def git_status(self, providers: dict) -> dict[str, str | None]:
+        """Чей ключ у каждого Git-провайдера (логин) или None — ключа нет или он не работает."""
+        out: dict[str, str | None] = {}
+        for name, p in providers.items():
+            try:
+                out[name] = (await p.whoami())["login"]
+            except Exception:
+                out[name] = None
+        return out
 
     def _git_for(self, keys: dict, chat_id: str = "", member: str = "") -> dict:
         git: dict = {}
@@ -182,7 +203,8 @@ class Agent:
         git = run.git if run else self._git_for({})
         return ToolContext(cid, self.db, self.settings, git, project=project,
                            readable_projects=readable, user=user or {}, skills=self.skills, broker=self.broker,
-                           run_id=run.id if run else "")
+                           run_id=run.id if run else "", talk=project.get("id") == TALK_PROJECT,
+                           git_status=run.git_status if run else None)
 
     async def cancel(self, run: Run) -> None:
         if run.task and not run.task.done():
@@ -208,7 +230,7 @@ class Agent:
                     self.active.pop(r.conversation_id, None)
 
     # ------------------------------------------------------------ история → формат OpenAI
-    async def _user_content(self, m: dict) -> Any:
+    async def _user_content(self, m: dict, with_images: bool = True) -> Any:
         text = m["content"] or ""
         author = (m.get("meta") or {}).get("author")
         if author:
@@ -223,9 +245,14 @@ class Agent:
                 continue
             p = Path(att["path"])
             line = f"- {att['filename']} ({att['mime']}, {att['size']} байт), attachment_id={att['id']}"
-            if att["mime"].startswith("image/") and att["size"] <= VISION_MAX_BYTES and p.exists():
-                b64 = base64.b64encode(p.read_bytes()).decode()
-                images.append({"type": "image_url", "image_url": {"url": f"data:{att['mime']};base64,{b64}"}})
+            if att["mime"].startswith("image/") and not with_images:
+                line += " — картинка была показана раньше; если нужна снова, попроси пользователя прислать её"
+            elif att["mime"].startswith("image/") and p.exists():
+                url = await asyncio.to_thread(vision.for_model, att["id"], p)
+                if url:
+                    images.append({"type": "image_url", "image_url": {"url": url}})
+                else:
+                    line += " — картинку не удалось открыть, модель её не видит"
             elif filetools.kind_of(att["filename"], att["mime"]) in ("zip", "tar", "gz", "pdf", "docx", "xlsx"):
                 line += " — содержимое через read_attachment"
             elif att["size"] <= INLINE_TEXT_MAX and p.exists():
@@ -241,13 +268,11 @@ class Agent:
         return full
 
     async def _system_prompt(self, ctx: ToolContext) -> str:
-        who = []
-        for name, p in ctx.providers.items():
-            try:
-                me = await p.whoami()
-                who.append(f"{name} (пользователь {me['login']})")
-            except Exception:
-                who.append(f"{name} (токен не работает)")
+        if ctx.talk:
+            return TALK_PROMPT
+        status = ctx.git_status if ctx.git_status is not None else await self.git_status(ctx.providers)
+        who = [f"{name} (пользователь {login})" if login else f"{name} (ключ не задан или не работает)"
+               for name, login in status.items()]
         parts = [SYSTEM_PROMPT.format(providers=", ".join(who) or "ничего")]
         p = ctx.project
         if p:
@@ -285,7 +310,8 @@ class Agent:
         cutoff = user_idx[-3] if len(user_idx) >= 3 else -1
         for i, r in enumerate(rows):
             if r["role"] == "user":
-                msgs.append({"role": "user", "content": await self._user_content(r)})
+                # картинки — только в последних трёх сообщениях: каждая уходит в каждом шаге и оплачивается заново
+                msgs.append({"role": "user", "content": await self._user_content(r, with_images=i >= cutoff)})
             elif r["role"] == "assistant":
                 m: dict = {"role": "assistant", "content": r["content"] or ""}
                 if r["tool_calls"]:
@@ -316,11 +342,20 @@ class Agent:
             await run.emit("tool_call_building", index=i, name=name)
 
         hdrs = kgc.headers(run.conversation_id, run.user.get("username", "")) if kgc.enabled() else None
-        res = await provider.stream(key, model, messages, [t.schema() for t in REGISTRY.values() if t.group != "ssh" or ssh_tools.enabled()], on_text, on_tool,
+        res = await provider.stream(key, model, messages, [t.schema() for t in self.tools_for(run)], on_text, on_tool,
                                     headers=hdrs)
         for c in res.tool_calls:
             c["id"] = c["id"] or f"call_{new_id()}"
         return res
+
+    def tools_for(self, run: Run) -> list:
+        """Инструменты, которые видит модель. Каждое описание уходит в каждом шаге и оплачивается: лишних не шлём.
+        «Общение» — только файлы; Git — только если ключ хотя бы одного провайдера работает; серверы — если включены."""
+        if run.project_id == TALK_PROJECT:
+            return [t for t in REGISTRY.values() if t.group == "files"]
+        git_ok = any(run.git_status.values()) if run.git_status is not None else True
+        return [t for t in REGISTRY.values()
+                if (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)]
 
     def price(self, model: str) -> list[float] | None:
         pr = self.settings.pricing
@@ -352,8 +387,9 @@ class Agent:
         except json.JSONDecodeError as e:
             await run.emit("tool_end", call_id=call["id"], name=name, ok=False, error=f"bad json: {e}")
             return json.dumps({"error": f"Аргументы не являются корректным JSON: {e}"}, ensure_ascii=False)
-        if not tool:
-            return json.dumps({"error": f"Неизвестный инструмент {name}"}, ensure_ascii=False)
+        if not tool or tool not in self.tools_for(run):
+            # модель могла вызвать инструмент, которого ей в этом режиме не давали (например, Git в «Общении»)
+            return json.dumps({"error": f"Инструмент {name} здесь недоступен"}, ensure_ascii=False)
 
         ctx.ssh_need, ctx.approval_jws = "", ""
         risk = await tool.risk(ctx, args)
@@ -405,6 +441,7 @@ class Agent:
         partial = ""
         try:
             await run.emit("start", model=run.model)
+            run.git_status = {} if run.project_id == TALK_PROJECT else await self.git_status(run.git)
             for step in range(self.settings.max_agent_steps):
                 if run.budget and (why := await run.budget()):
                     await run.emit("notice", text=why)

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 
-from openai import APIError, AsyncOpenAI
+import asyncio
+
+from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, InternalServerError, RateLimitError
 
 from . import LLMError, LLMResult, OnText, OnTool, Usage
 
@@ -17,7 +19,9 @@ def _client(base_url: str, key: str, timeout: int) -> AsyncOpenAI:
     if k not in _clients:
         if len(_clients) > 50:
             _clients.clear()
-        _clients[k] = AsyncOpenAI(api_key=key, base_url=base_url, timeout=timeout, max_retries=2)
+        # Сами SDK не повторяем: повтор после тайм-аута долгого запроса (Ultra думает минутами) мог бы оплатить один и
+        # тот же шаг дважды — провайдер успел обработать запрос, а ответ потерялся. Повторы — в stream(), только безопасные.
+        _clients[k] = AsyncOpenAI(api_key=key, base_url=base_url, timeout=timeout, max_retries=0)
     return _clients[k]
 
 
@@ -32,6 +36,24 @@ class OpenAICompatProvider:
         self.max_tokens = settings.sakana_max_tokens
         self.timeout = settings.llm_timeout_seconds
 
+    @staticmethod
+    async def _create(client: AsyncOpenAI, kwargs: dict):
+        """Один повтор — только когда провайдер запрос точно не обработал: не удалось подключиться, «слишком часто»
+        (429) или «перегружен» (503). Тайм-аут и обрыв посреди ответа не повторяются — показываем ошибку."""
+        for attempt in (0, 1):
+            try:
+                return await client.chat.completions.create(**kwargs)
+            except APITimeoutError as e:
+                raise LLMError("модель не ответила вовремя; запрос не повторён, чтобы не оплачивать его дважды") from e
+            except (APIConnectionError, RateLimitError) as e:
+                if attempt:
+                    raise
+                await asyncio.sleep(3)
+            except InternalServerError as e:
+                if attempt or getattr(e, "status_code", 0) != 503:
+                    raise
+                await asyncio.sleep(3)
+
     async def stream(self, key: str, model: str, messages: list[dict], tools: list[dict],
                      on_text: OnText, on_tool: OnTool, headers: dict | None = None) -> LLMResult:
         client = _client(self.base_url, key, self.timeout)
@@ -42,7 +64,7 @@ class OpenAICompatProvider:
         if self.base_url not in _no_stream_usage:
             kwargs["stream_options"] = {"include_usage": True}
         try:
-            stream = await client.chat.completions.create(**kwargs)
+            stream = await self._create(client, kwargs)
         except APIError as e:
             if "stream_options" in str(e) and self.base_url not in _no_stream_usage:
                 _no_stream_usage.add(self.base_url)

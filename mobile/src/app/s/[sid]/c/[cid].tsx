@@ -3,6 +3,7 @@
  * Запрос на подтверждение — отдельная карточка: «Разрешить» подписывается ключом подтверждения
  * (биометрия), подпись покрывает хэш именно тех аргументов, что на экране.
  */
+import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -213,24 +214,34 @@ function ToolCard({ t, api }: { t: Tool; api: DeckApi | null }) {
   );
 }
 
-function Bubble({ item, api }: { item: Item; api: DeckApi | null }) {
+/** Удержание сообщения — текст в буфер обмена. */
+function copyText(text: string, onCopied: () => void) {
+  if (!text.trim()) return;
+  Clipboard.setStringAsync(text).then(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onCopied();
+  }, () => {});
+}
+
+function Bubble({ item, api, onCopied }: { item: Item; api: DeckApi | null; onCopied: () => void }) {
   const { p } = useTheme();
   if (item.kind === "user") {
     return (
-      <View style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 4 }}>
+      <Pressable onLongPress={() => copyText(item.content, onCopied)} delayLongPress={350}
+        style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 4 }}>
         {!item.mine && item.author ? <Txt kind="small" style={{ textAlign: "right" }}>{item.author}</Txt> : null}
         <View style={{ backgroundColor: alpha(p.accent, 0.12), borderColor: alpha(p.accent, 0.45), borderWidth: 1, padding: 11, borderRadius: p.radius }}>
           {item.content ? <Txt selectable>{item.content}</Txt> : null}
           {item.attachments?.length ? <AttachmentList items={item.attachments} api={api} /> : null}
         </View>
-      </View>
+      </Pressable>
     );
   }
   if (item.kind === "assistant") {
     return (
-      <View style={{ gap: 4 }}>
+      <Pressable onLongPress={() => !item.streaming && copyText(item.content, onCopied)} delayLongPress={350} style={{ gap: 4 }}>
         <RichText text={item.content + (item.streaming ? " ▍" : "")} color={p.text} />
-      </View>
+      </Pressable>
     );
   }
   if (item.kind === "notice") {
@@ -412,6 +423,14 @@ export default function Chat() {
     );
   }, [api, cid, meId]);
 
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashCopied = useCallback(() => {
+    setCopied(true);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+  }, []);
+
   const pending = items.filter((i): i is Tool => i.kind === "tool" && i.status === "pending" && !!i.approval);
   const canWrite = conv?.my_role !== "viewer";
 
@@ -424,7 +443,7 @@ export default function Chat() {
             <Txt kind="mono" color={p.accent} numberOfLines={1} style={{ fontSize: 11.5, flex: 1 }}>
               {conv.model}{conv.team || !canWrite ? "" : "  ▾"}
             </Txt>
-            {runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
+            {copied ? <Chip text="текст скопирован" color={p.ok} /> : runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
           </Row>
         </Pressable>
       ) : null}
@@ -457,7 +476,7 @@ export default function Chat() {
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
           onLayout={() => list.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) =>
-            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} />
+            item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} onCopied={flashCopied} />
           }
           ListHeaderComponent={
             <View style={{ gap: 12 }}>

@@ -26,6 +26,8 @@ class ToolContext:
     run_id: str = ""  # запуск агента: по нему ведётся журнал использования заметок базы знаний
     ssh_need: str = ""       # какая подпись нужна шлюзу для текущей команды на сервере (ssh_write | ssh_danger)
     approval_jws: str = ""   # подпись человека на текущее действие — инструмент передаёт её исполнителю
+    talk: bool = False       # режим «Общение»: собеседник без Git, серверов и памяти
+    git_status: dict | None = None  # проверенные Git-провайдеры запуска (agent.git_status)
 
     @property
     def project_id(self) -> str:

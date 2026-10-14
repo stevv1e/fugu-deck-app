@@ -112,3 +112,51 @@ async def test_create_file_tool_and_janitor(client):
     # уборка «неотправленных» не трогает файлы агента (они ни к одному сообщению пользователя не приложены)
     gone = {r["id"] for r in await main.db().unsent_attachments(time.time() + 1)}
     assert up["id"] in gone and rep["attachment"]["id"] not in gone and z["attachment"]["id"] not in gone
+
+
+def test_talk_mode_project(client):
+    login(client)
+    assert "talk" not in [p["id"] for p in client.get("/api/projects").json()]  # не среди проектов инжиниринга
+    c = client.post("/api/projects/talk/conversations", json={}).json()
+    assert c["project_id"] == "talk"
+    assert [x["id"] for x in client.get("/api/projects/talk/conversations").json()] == [c["id"]]
+    assert client.delete("/api/projects/talk").status_code == 400
+    assert client.patch("/api/projects/talk", json={"name": "x"}).status_code == 400
+    r = client.post("/api/projects/talk/schedules", json={"title": "t", "prompt": "p", "kind": "daily", "at_time": "09:00"})
+    assert r.status_code == 400
+
+
+async def test_talk_agent_tools_and_prompt(client):
+    from app.agent import TALK_PROMPT, Run
+
+    login(client)
+    ag = main.agent()
+    talk = Run(id="r1", conversation_id="c", model="sakana:x", project_id="talk")
+    assert {t.name for t in ag.tools_for(talk)} == {"list_attachments", "read_attachment", "create_file"}
+    eng = Run(id="r2", conversation_id="c", model="sakana:x", project_id="general", git_status={"github": None})
+    names = {t.name for t in ag.tools_for(eng)}
+    assert "memory_save" in names and "commit_files" not in names  # ключа Git нет — инструменты Git не отправляются
+    eng.git_status = {"github": "octo"}
+    assert "commit_files" in {t.name for t in ag.tools_for(eng)}
+    c = client.post("/api/projects/talk/conversations", json={}).json()
+    msgs = await ag._build_messages(c["id"], await ag.context(c["id"], run=talk))
+    assert msgs[0]["content"] == TALK_PROMPT
+
+
+def test_vision_downscales_big_photo(tmp_path):
+    import io
+
+    from PIL import Image
+
+    from app import vision
+
+    p = tmp_path / "big.jpg"
+    Image.effect_noise((4000, 3000), 80).convert("RGB").save(p, "JPEG", quality=98)
+    assert p.stat().st_size > 5 << 20  # как фото из галереи: больше прежнего предела 5 МБ
+    url = vision.for_model("big", p)
+    raw = base64.b64decode(url.split(",", 1)[1])
+    im = Image.open(io.BytesIO(raw))
+    assert max(im.size) == 1600 and len(raw) < (2 << 20)
+    bad = tmp_path / "bad.jpg"
+    bad.write_bytes(b"not an image")
+    assert vision.for_model("bad", bad) is None
