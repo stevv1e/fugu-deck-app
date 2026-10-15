@@ -263,3 +263,21 @@ async def test_project_repos(client):
     msgs = await main.agent()._build_messages("нет", ctx)
     assert "anna/new" in msgs[0]["content"] and "Репозитории проекта" in msgs[0]["content"]
     assert client.get("/api/repos").status_code == 200  # без ключей Git — пустой ответ, а не ошибка
+
+
+async def test_sponsor_thresholds_and_by_member(client):
+    login(client)
+    db = main.db()
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    await db.set_sponsor(c["id"], "sakana:fugu-max-v1.0", "sp1", limit_usd=10)
+    hits = []
+    for cost in (3, 2.5, 0.1, 3, 2):  # 30 %, 55 %, 56 %, 86 %, 106 %
+        await db.add_usage(c["id"], "m", 1, 1, 0, cost, "member1", "sp1")
+        if hit := await db.sponsor_threshold(c["id"]):
+            hits.append(hit)
+    assert hits == [("sp1", 50), ("sp1", 80), ("sp1", 100)]  # каждый порог — один раз
+    await db.set_sponsor_limits(c["id"], sponsor_limit_usd=100)  # лимит подняли — пороги заново
+    await db.add_usage(c["id"], "m", 1, 1, 0, 45, "member2", "sp1")
+    assert await db.sponsor_threshold(c["id"]) == ("sp1", 50)
+    by = await db.chat_usage_by_member(c["id"], 0)
+    assert [(x["user_id"], x["usd"]) for x in by] == [("member2", 45), ("member1", 10.6)]

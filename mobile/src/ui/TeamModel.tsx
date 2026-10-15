@@ -93,6 +93,9 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
             {sponsor.until ? ` · до ${new Date(sponsor.until * 1000).toLocaleDateString()}` : ""}
           </Txt>
           {sponsor.blocked ? <Notice kind="warn" text={sponsor.blocked} /> : null}
+          {state.by_member?.length ? (
+            <Txt kind="small">Расход по участникам: {state.by_member.map((m) => `${m.name} ${money(m.usd)}`).join(" · ")}</Txt>
+          ) : null}
         </>
       ) : (
         <Txt>У этого чата пока нет модели. Выберите модель и оплатите её своим ключом — тогда агент сможет отвечать.</Txt>

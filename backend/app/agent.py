@@ -383,6 +383,9 @@ class Agent:
                                 run.user.get("id"), run.payer_id)
         await run.emit("usage", prompt_tokens=p, completion_tokens=c, cached_tokens=cached, cost_usd=cost,
                        by=run.user.get("display_name"))
+        if run.payer_id and run.payer_id != run.user.get("id"):  # платит спонсор — сообщить о порогах расхода
+            if hit := await self.db.sponsor_threshold(run.conversation_id):
+                outbox.add(hit[0], "sponsor", run.conversation_id, run.project_id, percent=hit[1])
 
     # ------------------------------------------------------------ инструменты
     async def _exec_tool(self, run: Run, call: dict) -> str:

@@ -1420,6 +1420,7 @@ async def chat_model_state(c: dict, u: dict) -> dict:
     pname = split_model(c["model"])[0]
     if sp:
         used = await db().sponsor_usage(c["id"], c.get("sponsor_since"))
+        out["by_member"] = await db().chat_usage_by_member(c["id"], c.get("sponsor_since"))
         out["sponsor"] = {"id": sp["id"], "name": sp["display_name"],
                           "online": True if kg_team() else bool(vault().get(sp["id"]).get(pname)),
                           "grant_id": c.get("grant_id"),

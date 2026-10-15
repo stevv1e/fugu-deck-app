@@ -258,6 +258,10 @@ SCHEMA = [
     """
     ALTER TABLE projects ADD COLUMN repos TEXT NOT NULL DEFAULT '[]';
     """,
+    # v13: до какого порога расхода (50/80/100 %) спонсору уже сообщили
+    """
+    ALTER TABLE conversations ADD COLUMN sponsor_alert INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -417,7 +421,7 @@ class Database:
             until = None
         await self._exec(
             "UPDATE conversations SET model=?, sponsor_id=?, sponsor_limit_usd=?, sponsor_limit_tokens=?, sponsor_until=?, "
-            "sponsor_since=?, updated_at=? WHERE id=?",
+            "sponsor_since=?, sponsor_alert=0, updated_at=? WHERE id=?",
             (model, sponsor_id, limit_usd if sponsor_id else None, limit_tokens if sponsor_id else None, until,
              now if sponsor_id else None, now, cid))
 
@@ -425,8 +429,29 @@ class Database:
         """Меняет только переданные поля: sponsor_limit_usd, sponsor_limit_tokens, sponsor_until (None = снять)."""
         if not fields:
             return
+        if "sponsor_limit_usd" in fields:
+            fields = {**fields, "sponsor_alert": 0}  # новый лимит — пороги заново
         sets = ",".join(f"{k}=?" for k in fields)
         await self._exec(f"UPDATE conversations SET {sets} WHERE id=?", (*fields.values(), cid))
+
+    async def sponsor_threshold(self, cid: str) -> tuple[str, int] | None:
+        """Новый порог расхода спонсора (50/80/100 %), о котором ещё не сообщали: (спонсор, процент) или None."""
+        c = await self.get_conversation(cid)
+        if not c or not c.get("sponsor_id") or not c.get("sponsor_limit_usd"):
+            return None
+        pct = 100 * await self.sponsor_spent(cid, c.get("sponsor_since")) / c["sponsor_limit_usd"]
+        level = max([x for x in (50, 80, 100) if pct >= x], default=0)
+        if level <= (c.get("sponsor_alert") or 0):
+            return None
+        await self._exec("UPDATE conversations SET sponsor_alert=? WHERE id=?", (level, cid))
+        return c["sponsor_id"], level
+
+    async def chat_usage_by_member(self, cid: str, since: float | None) -> list[dict]:
+        rows = await self._all(
+            "SELECT u.user_id, COALESCE(us.display_name, u.user_id) AS name, SUM(u.cost_usd) AS usd FROM usage u "
+            "LEFT JOIN users us ON us.id=u.user_id WHERE u.conversation_id=? AND u.created_at>=? AND u.user_id IS NOT NULL "
+            "GROUP BY u.user_id ORDER BY usd DESC", (cid, since or 0))
+        return [{"user_id": r["user_id"], "name": r["name"], "usd": round(r["usd"] or 0, 4)} for r in rows]
 
     async def sponsor_usage(self, cid: str, since: float | None) -> dict:
         if not since:

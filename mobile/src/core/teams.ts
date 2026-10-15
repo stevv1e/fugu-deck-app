@@ -43,8 +43,8 @@ export function titleProblem(title: string): string | null {
   return t.length >= 1 && [...t].length <= 60 ? null : "Название: от 1 до 60 знаков";
 }
 
-/** Добавить участника, сменить роль или исключить (role = "none"). Подписывает владелец. */
-export async function setMember(s: ApiSession, keys: DeviceKeys, team: string, nick: string, role: "editor" | "reader" | "none") {
+/** Добавить участника, сменить роль, исключить (role = "none") или передать владение (role = "owner"). Подписывает владелец. */
+export async function setMember(s: ApiSession, keys: DeviceKeys, team: string, nick: string, role: "editor" | "reader" | "none" | "owner") {
   const signed = await signClusterAction(keys, { type: "role_change", member: nick, role }, { space: team });
   return s.request<TeamState>("POST", `/v1/spaces/${team}/members`, signed);
 }
@@ -82,6 +82,8 @@ export type ProposalInfo = {
 };
 export type TeamChatState = {
   team?: boolean;
+  /** Расход в этом чате по участникам с начала спонсорства. */
+  by_member?: { user_id: string; name: string; usd: number }[];
   sponsor?: SponsorInfo | null;
   proposal?: ProposalInfo | null;
   model_policy?: "vote" | "open";

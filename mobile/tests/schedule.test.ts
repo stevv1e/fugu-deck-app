@@ -57,5 +57,6 @@ test("уведомление → экран", async () => {
   assert.equal(pushRoute({ api: "https://api.test", kind: "device" }, cl, sid), "/devices/id.test");
   assert.equal(pushRoute({ api: "https://evil", kind: "done", cid: "c1" }, cl, sid), null);
   assert.equal(pushRoute({ api: "https://api.test", kind: "done", cid: "../../x" }, cl, sid), "/s/cluster.id.test");
+  assert.equal(pushRoute({ api: "https://api.test", kind: "inactive" }, cl, sid), "/cluster/id.test");
   assert.equal(pushRoute(undefined, cl, sid), null);
 });

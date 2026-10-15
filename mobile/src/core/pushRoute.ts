@@ -7,6 +7,7 @@ export function pushRoute(data: PushData | undefined, clusters: ClusterRef[], si
   const c = clusters.find((x) => x.api === data.api); // уведомление от кластера, которого на телефоне нет, — никуда
   if (!c) return null;
   if (data.kind === "device") return `/devices/${c.id}`;
+  if (data.kind === "inactive") return `/cluster/${c.id}`; // «откройте приложение, чтобы сохранить аккаунт»
   const space = typeof data.space === "string" ? data.space : "";
   const sid = sidOf(c.id, /^t-[a-z0-9]{6,20}$/.test(space) ? space : null);
   const cid = typeof data.cid === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(data.cid) ? data.cid : "";
