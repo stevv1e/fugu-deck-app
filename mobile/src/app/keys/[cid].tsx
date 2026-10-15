@@ -5,7 +5,7 @@
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 
-import { KEY_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
+import { GIT_PROVIDERS, LLM_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
 import { deleteKey, keyStatus, parseLimit, putKey, setSpendLimit, type KeyStatus } from "@/core/personal";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, type ClusterRecord } from "@/state/cluster";
@@ -13,17 +13,27 @@ import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
-const KEY_TITLES: Record<KeyProvider, string> = { anthropic: "Claude", sakana: "Sakana", github: "GitHub", gitlab: "GitLab" };
+const KEY_TITLES: Record<KeyProvider, string> = { anthropic: "Claude (Anthropic)", sakana: "Sakana", deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab" };
+const HINTS: Partial<Record<KeyProvider, string>> = {
+  sakana: "console.sakana.ai → API Keys",
+  anthropic: "console.anthropic.com → API Keys",
+  deepseek: "platform.deepseek.com → API Keys",
+  github: "github.com → Settings → Developer settings → токен с доступом к нужным репозиториям",
+  gitlab: "gitlab.com → Preferences → Access tokens (api, read_repository, write_repository)",
+};
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
 
 export default function Keys() {
-  const { cid } = useLocalSearchParams<{ cid: string }>();
+  const { cid, kind } = useLocalSearchParams<{ cid: string; kind?: string }>();
+  const git = kind === "git";
+  const list: readonly KeyProvider[] = git ? GIT_PROVIDERS : LLM_PROVIDERS;
+  const title = git ? "Git-токены" : "Токены моделей";
   const { p } = useTheme();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [st, setSt] = useState<KeyStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
-  const [provider, setProvider] = useState<KeyProvider>("sakana");
+  const [provider, setProvider] = useState<KeyProvider>(kind === "git" ? "github" : "sakana");
   const [apiKey, setApiKey] = useState("");
   const [armed, setArmed] = useState<KeyProvider | null>(null);
   const [limit, setLimit] = useState("");
@@ -88,25 +98,25 @@ export default function Keys() {
     });
   };
 
-  if (!rec || (!st && !msg)) return <Screen title="Ключи и расходы"><Loading /></Screen>;
+  if (!rec || (!st && !msg)) return <Screen title={title}><Loading /></Screen>;
   const limitChanged = !("error" in parsed) && st && parsed.value !== st.limit_usd_month;
 
   return (
-    <Screen title="Ключи и расходы">
+    <Screen title={title}>
       {msg ? <Notice kind={msg.kind} text={msg.text} /> : null}
       {st ? (
         <>
-          <Card accent={st.limit_usd_month !== null && st.spent_usd_month >= st.limit_usd_month ? p.warn : p.accent}>
+          {!git ? <Card accent={st.limit_usd_month !== null && st.spent_usd_month >= st.limit_usd_month ? p.warn : p.accent}>
             <Txt kind="label">расход на модели своим ключом · {st.month}</Txt>
             <Txt kind="h2">{usd(st.spent_usd_month)}{st.limit_usd_month !== null ? ` из ${usd(st.limit_usd_month)}` : ""}</Txt>
             <Txt kind="small">Всего с начала учёта: {usd(st.spent_usd_total)}. Считает keyguard по ответам провайдера.</Txt>
             <Field label="Лимит в месяц, $" value={limit} onChangeText={setLimit} keyboardType="decimal-pad" placeholder="без лимита"
               hint="Когда лимит исчерпан, агент не сможет вызывать модели до следующего месяца. Пустое поле — без лимита." />
             {limitChanged ? <Btn title={parsed.value === null ? "Снять лимит ⌁" : "Сохранить лимит ⌁"} onPress={saveLimit} busy={busy === "limit"} /> : null}
-          </Card>
+          </Card> : null}
 
-          <Txt kind="label">ключи</Txt>
-          {KEY_PROVIDERS.map((pv) => {
+          <Txt kind="label">{git ? "токены" : "ключи"}</Txt>
+          {list.map((pv) => {
             const has = st.providers.includes(pv);
             return (
               <Card key={pv} accent={has ? p.ok : p.line2}>
@@ -133,11 +143,12 @@ export default function Keys() {
         </>
       ) : null}
 
-      <Txt kind="label">ввести или заменить ключ</Txt>
-      <Row gap={6} style={{ flexWrap: "wrap" }}>{KEY_PROVIDERS.map((pv) => (
+      <Txt kind="label">{git ? "добавить или заменить токен" : "от какой ИИ ключ"}</Txt>
+      <Row gap={6} style={{ flexWrap: "wrap" }}>{list.map((pv) => (
         <Btn key={pv} small title={KEY_TITLES[pv]} kind={pv === provider ? "primary" : "ghost"} onPress={() => setProvider(pv)} />
       ))}</Row>
-      <Field label={`Ключ ${KEY_TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false} />
+      <Field label={`${git ? "Токен" : "Ключ"} ${KEY_TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false}
+        hint={HINTS[provider] ? `Где взять: ${HINTS[provider]}` : undefined} />
       <Btn title="Сохранить ключ ⌁" onPress={save} busy={busy === "put"} disabled={!apiKey} />
       <Txt kind="small">Ключ шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят. ⌁ — понадобится биометрия.</Txt>
     </Screen>

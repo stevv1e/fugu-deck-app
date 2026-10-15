@@ -254,6 +254,10 @@ SCHEMA = [
     """
     ALTER TABLE attachments ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
     """,
+    # v12: репозитории, с которыми работает проект ([{"provider": "github", "repo": "owner/name"}])
+    """
+    ALTER TABLE projects ADD COLUMN repos TEXT NOT NULL DEFAULT '[]';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -712,6 +716,7 @@ class Database:
             (role, *HIDDEN_PROJECTS))
         for r in rows:
             r["skills"] = json.loads(r["skills"])
+            r["repos"] = json.loads(r.get("repos") or "[]")
         return rows
 
     async def create_user(self, username: str, display_name: str, password_hash: str) -> dict:
@@ -743,12 +748,14 @@ class Database:
                 role="pm.role", join="JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=?"), (user["id"],))
         for r in rows:
             r["skills"] = json.loads(r["skills"])
+            r["repos"] = json.loads(r.get("repos") or "[]")
         return rows
 
     async def get_project(self, pid: str) -> dict | None:
         p = await self._one("SELECT * FROM projects WHERE id=?", (pid,))
         if p:
             p["skills"] = json.loads(p["skills"])
+            p["repos"] = json.loads(p.get("repos") or "[]")
         return p
 
     async def create_project(self, name: str, description: str, creator: dict) -> dict:
@@ -761,12 +768,23 @@ class Database:
         return await self.get_project(pid)  # type: ignore[return-value]
 
     async def update_project(self, pid: str, **fields: Any) -> None:
-        fields = {k: (json.dumps(v) if k == "skills" else v) for k, v in fields.items() if v is not None}
+        fields = {k: (json.dumps(v) if k in ("skills", "repos") else v) for k, v in fields.items() if v is not None}
         if not fields:
             return
         fields["updated_at"] = time.time()
         sets = ",".join(f"{k}=?" for k in fields)
         await self._exec(f"UPDATE projects SET {sets} WHERE id=?", (*fields.values(), pid))
+
+    async def set_project_repo(self, pid: str, provider: str, repo: str, on: bool) -> list[dict]:
+        """Добавить репозиторий в работу проекта или убрать; возвращает новый список."""
+        p = await self.get_project(pid)
+        if not p:
+            return []
+        repos = [r for r in p["repos"] if not (r["provider"] == provider and r["repo"].lower() == repo.lower())]
+        if on:
+            repos.append({"provider": provider, "repo": repo})
+        await self.update_project(pid, repos=repos)
+        return repos
 
     async def project_attachment_paths(self, pid: str) -> list[str]:
         return [r["path"] for r in await self._all(

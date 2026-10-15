@@ -76,3 +76,22 @@ async def test_openai_compat_retries_only_when_safe(monkeypatch):
     with pytest.raises(APIConnectionError):
         await oc.OpenAICompatProvider._create(f, {})
     assert f.calls == 2
+
+
+def test_deepseek_reasoning_roundtrip():
+    from app.config import get_settings
+    from app.llm import PROVIDER_TITLES, get_provider, split_model
+    from app.llm.openai_compat import _strip_meta
+
+    assert split_model("deepseek:deepseek-v4-pro") == ("deepseek", "deepseek-v4-pro") and PROVIDER_TITLES["deepseek"] == "DeepSeek"
+    p = get_provider("deepseek", get_settings())
+    assert p.base_url == "https://api.deepseek.com"
+    msgs = _strip_meta([
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": [], "_provider_blocks": [{"reasoning_content": "думаю…"}]},
+        {"role": "assistant", "content": "ok", "_provider_blocks": [{"type": "thinking", "thinking": "x"}]},  # блоки Claude не трогаем
+    ])
+    assert msgs[1]["reasoning_content"] == "думаю…" and "_provider_blocks" not in msgs[1]
+    assert "reasoning_content" not in msgs[2]
+    s = get_settings()
+    assert "deepseek:deepseek-flash" in s.model_list and s.pricing["deepseek:deepseek-v4-pro"][1] == 3.96

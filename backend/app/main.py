@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import auth, backup, devices, kb, schedules as sched, spaceauth
 from . import keyguard_client as kgc
@@ -560,10 +560,41 @@ async def delete_user(uid: str, u: dict = Me):
     return {"ok": True}
 
 
+# ================================================================== репозитории
+@app.get("/api/repos")
+async def list_my_repos(q: str = "", u: dict = Me):
+    """Репозитории пользователя на GitHub и GitLab (по его ключам; в кластере — через keyguard)."""
+    git = agent()._git_for(vault().get(u["id"]))
+    out: dict = {}
+    try:
+        for name, p in git.items():
+            try:
+                out[name] = {"ok": True, "repos": await p.list_repos(q.strip() or None, 100)}
+            except Exception as e:
+                out[name] = {"ok": False, "error": str(e)[:200]}
+    finally:
+        for p in git.values():
+            if p not in state["providers"].values():
+                await p.http.aclose()
+    return out
+
+
 # ================================================================== проекты
 class ProjectIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str = ""
+
+
+class RepoRef(BaseModel):
+    provider: str = Field(..., pattern="^(github|gitlab)$")
+    repo: str = Field(..., pattern=r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+){1,4}$", max_length=200)
+
+    @field_validator("repo")
+    @classmethod
+    def _no_dots(cls, v: str) -> str:
+        if any(seg in (".", "..") for seg in v.split("/")):
+            raise ValueError("имя репозитория: owner/name")
+        return v
 
 
 class ProjectPatch(BaseModel):
@@ -572,6 +603,7 @@ class ProjectPatch(BaseModel):
     instructions: str | None = Field(None, max_length=20000)
     skills: list[str] | None = None
     color: str | None = None
+    repos: list[RepoRef] | None = Field(None, max_length=100)
 
 
 @app.get("/api/projects")
@@ -608,7 +640,16 @@ async def patch_project(pid: str, body: ProjectPatch, u: dict = Me):
         raise HTTPException(400, "«Общение» — не проект: его не переименовать и не настроить")
     if role != "owner" and (body.name is not None or body.description is not None):
         raise HTTPException(403, "Название и описание меняет владелец проекта")
-    await db().update_project(pid, **body.model_dump(exclude_none=True))
+    fields = body.model_dump(exclude_none=True)
+    if "repos" in fields:  # без повторов, порядок — как прислали
+        seen, repos = set(), []
+        for r in fields["repos"]:
+            k = (r["provider"], r["repo"].lower())
+            if k not in seen:
+                seen.add(k)
+                repos.append(r)
+        fields["repos"] = repos
+    await db().update_project(pid, **fields)
     await broker().publish("project", pid, action="updated")
     return await get_project(pid, u)
 

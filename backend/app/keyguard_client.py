@@ -38,6 +38,8 @@ def llm_base(provider: str) -> str:
         return f"{base}/llm/anthropic"          # SDK добавит /v1/messages
     if provider == "sakana":
         return f"{base}/llm/sakana/v1"          # SDK добавит /chat/completions
+    if provider == "deepseek":
+        return f"{base}/llm/deepseek"           # SDK добавит /chat/completions (у DeepSeek путь без /v1)
     raise ValueError(f"провайдер {provider} через keyguard не поддерживается")
 
 

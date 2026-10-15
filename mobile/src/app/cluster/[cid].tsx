@@ -246,7 +246,10 @@ export default function ClusterDevice() {
               {push !== "on" ? <Btn small title="Включить уведомления" onPress={turnOnPush} style={{ alignSelf: "flex-start" }} /> : null}
             </Card>
           ) : null}
-          <Btn title="Ключи API и лимит расходов" kind="ghost" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id } })} />
+          <Row gap={8}>
+            <Btn title="Токены моделей" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id, kind: "llm" } })} style={{ flex: 1 }} />
+            <Btn title="Git-токены" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id, kind: "git" } })} style={{ flex: 1 }} />
+          </Row>
           {!space?.delete_requested ? (
             armAccount ? (
               <Card accent={p.accent2}>

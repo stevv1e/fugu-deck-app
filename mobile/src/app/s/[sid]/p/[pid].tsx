@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { Conversation } from "@/core/types";
 import { useApi, useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { ProjectRepos } from "@/ui/ProjectRepos";
 import { ProjectTransfer } from "@/ui/ProjectTransfer";
 import { useTheme } from "@/ui/theme";
 
@@ -133,6 +134,7 @@ export default function ProjectChats() {
           <Btn title="База знаний" kind="ghost" onPress={() => router.push(`/s/${sid}/kb/${pid}`)} style={{ flex: 1 }} />
           <Btn title="Расписание" kind="ghost" onPress={() => router.push(`/s/${sid}/sched/${pid}`)} style={{ flex: 1 }} />
         </Row>
+        {api && proj ? <ProjectRepos pid={pid} repos={proj.repos ?? []} api={api} canWrite={canWrite} onChanged={projects.reload} /> : null}
         {canWrite && data ? <Btn title="＋ Новый чат" onPress={create} busy={busy} /> : null}
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Чатов нет" text="Начните новый чат с агентом." /> : null}

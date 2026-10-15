@@ -192,7 +192,37 @@ async def _commit_risk(ctx, a):
            "private": {"type": "boolean", "default": True}}, ["provider", "name"]),
       risk="dangerous", group="git", title="Создание репозитория")
 async def create_repo(ctx, a):
-    return await _provider(ctx, a["provider"]).create_repo(a["name"], a.get("description", ""), a.get("private", True))
+    out = await _provider(ctx, a["provider"]).create_repo(a["name"], a.get("description", ""), a.get("private", True))
+    # созданный в проекте репозиторий сразу в работе проекта
+    if ctx.project_id and isinstance(out, dict) and out.get("full_name"):
+        await ctx.db.set_project_repo(ctx.project_id, a["provider"], out["full_name"], True)
+        out["note"] = "Репозиторий добавлен в работу проекта"
+    return out
+
+
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+){1,4}$")
+
+
+@tool("project_repos", "Репозитории, с которыми работает этот проект.", obj({}), group="git", title="Репозитории проекта")
+async def project_repos(ctx, a):
+    p = await ctx.db.get_project(ctx.project_id) if ctx.project_id else None
+    return (p or {}).get("repos", [])
+
+
+@tool("project_repo_set",
+      "Добавить репозиторий в работу проекта (on=true) или убрать из неё (on=false). Добавляй, когда начинаешь "
+      "работать с репозиторием в этом проекте; убирай, когда пользователь просит или проект с ним больше не связан.",
+      obj({"provider": PROVIDER, "repo": REPO, "on": {"type": "boolean"}}, ["provider", "repo", "on"]),
+      group="git", title="Репозиторий в проекте")
+async def project_repo_set(ctx, a):
+    if not ctx.project_id:
+        raise ProviderError("чат не в проекте")
+    if not REPO_RE.match(a["repo"]) or any(seg in (".", "..") for seg in a["repo"].split("/")):
+        raise ProviderError("имя репозитория: owner/name")
+    repos = await ctx.db.set_project_repo(ctx.project_id, a["provider"], a["repo"], bool(a["on"]))
+    if ctx.broker:
+        await ctx.broker.publish("project", ctx.project_id, action="updated")
+    return {"repos": repos}
 
 
 @tool("create_branch", "Создать ветку от другой ветки/коммита.",

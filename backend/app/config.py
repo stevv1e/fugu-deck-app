@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     models: str = ("sakana:fugu-max-v1.0,sakana:fugu-ultra-v2.0,sakana:sakana-namazu-v1.0,sakana:fugu,"
                    "sakana:fugu-ultra-v1.1,sakana:fugu-ultra-v1.0,sakana:fugu-cyber-v1.0,"
                    "sakana:fugu-max,sakana:fugu-ultra,sakana:sakana-namazu,sakana:fugu-cyber,"
-                   "anthropic:claude-sonnet-5,anthropic:claude-opus-5-5,anthropic:claude-haiku-4-5")
+                   "anthropic:claude-sonnet-5,anthropic:claude-opus-5-5,anthropic:claude-haiku-4-5,"
+                   "deepseek:deepseek-flash,deepseek:deepseek-v4-pro")
     # Цена за 1M токенов: {"модель": [input, output, cached_input]}
     pricing_json: str = (
         '{"sakana:fugu-max-v1.0": [2, 6, 0.25], "sakana:fugu-ultra-v2.0": [5, 30, 0.5], "sakana:sakana-namazu-v1.0": [0.95, 4, 0.15],'
@@ -31,8 +32,12 @@ class Settings(BaseSettings):
         ' "sakana:fugu": [10, 45, 1], "sakana:fugu-ultra-v1.0": [10, 45, 1], "sakana:fugu-ultra-v1.1": [10, 45, 1],'
         ' "sakana:fugu-cyber": [10, 45, 1], "sakana:fugu-cyber-v1.0": [10, 45, 1],'
         ' "anthropic:claude-sonnet-5": [2, 10, 0.2, 2.5], "anthropic:claude-opus-5-5": [4, 20, 0.2, 5],'
-        ' "anthropic:claude-haiku-4-5": [1, 5, 0.1, 1.25], "anthropic:claude-fable-5-1": [10, 50, 0.25, 12.5]}'
+        ' "anthropic:claude-haiku-4-5": [1, 5, 0.1, 1.25], "anthropic:claude-fable-5-1": [10, 50, 0.25, 12.5],'
+        # DeepSeek: днём вдвое дороже, чем ночью, — показываем по дневной цене (оценка сверху)
+        ' "deepseek:deepseek-flash": [0.3, 1.2, 0.006], "deepseek:deepseek-v4-pro": [1.32, 3.96, 0.044]}'
     )
+    deepseek_api_key: str = ""   # только для одиночного режима
+    deepseek_base_url: str = "https://api.deepseek.com"
     anthropic_api_key: str = ""  # только для одиночного режима; в кластере ключи приходят с телефона
     anthropic_base_url: str = ""
     anthropic_max_tokens: int = 32000

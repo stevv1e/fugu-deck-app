@@ -32,7 +32,7 @@ class OpenAICompatProvider:
         if kgc.enabled():
             self.base_url = kgc.llm_base(name)   # только sakana; openai/xai keyguard не проксирует
         else:
-            self.base_url = settings.sakana_base_url if name == "sakana" else BASE_URLS[name]
+            self.base_url = {"sakana": settings.sakana_base_url, "deepseek": settings.deepseek_base_url}.get(name) or BASE_URLS[name]
         self.max_tokens = settings.sakana_max_tokens
         self.timeout = settings.llm_timeout_seconds
 
@@ -71,7 +71,7 @@ class OpenAICompatProvider:
                 return await self.stream(key, model, messages, tools, on_text, on_tool, headers)
             raise LLMError(f"{self.name}: {getattr(e, 'message', str(e))}") from e
 
-        text, calls, usage = [], {}, None
+        text, reasoning, calls, usage = [], [], {}, None
         try:
             async for chunk in stream:
                 if getattr(chunk, "usage", None):
@@ -82,6 +82,11 @@ class OpenAICompatProvider:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
+                # DeepSeek в режиме размышлений присылает их отдельно; при работе с инструментами их нужно вернуть
+                # модели в следующих запросах (api-docs.deepseek.com/guides/thinking_mode) — сохраняем, не показываем.
+                rc = getattr(delta, "reasoning_content", None) or (getattr(delta, "model_extra", None) or {}).get("reasoning_content")
+                if rc:
+                    reasoning.append(rc)
                 if delta.content:
                     text.append(delta.content)
                     await on_text(delta.content)
@@ -97,8 +102,16 @@ class OpenAICompatProvider:
                         c["function"]["arguments"] += tc.function.arguments
         except APIError as e:
             raise LLMError(f"{self.name}: {getattr(e, 'message', str(e))}") from e
-        return LLMResult("".join(text), [calls[k] for k in sorted(calls)], usage, provider=self.name)
+        blocks = [{"reasoning_content": "".join(reasoning)}] if reasoning else None
+        return LLMResult("".join(text), [calls[k] for k in sorted(calls)], usage, provider=self.name, provider_blocks=blocks)
 
 
 def _strip_meta(messages: list[dict]) -> list[dict]:
-    return [{k: v for k, v in m.items() if not k.startswith("_")} for m in messages]
+    out = []
+    for m in messages:
+        c = {k: v for k, v in m.items() if not k.startswith("_")}
+        for b in m.get("_provider_blocks") or []:  # размышления DeepSeek возвращаются в том же сообщении
+            if isinstance(b, dict) and b.get("reasoning_content"):
+                c["reasoning_content"] = b["reasoning_content"]
+        out.append(c)
+    return out
