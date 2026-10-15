@@ -18,6 +18,7 @@ from .db import TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
 from . import filetools, vision
+from .outbox import outbox
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
 
@@ -406,6 +407,7 @@ class Agent:
             await run.emit("approval_request", approval_id=aid, call_id=call["id"], name=name,
                            title=tool.title, args=args, risk=risk, args_sha256=args_hash(args), sign=sign)
             await self._publish("run.approval", run, title=tool.title, risk=risk)
+            outbox.add(run.user.get("id"), "approval", run.conversation_id, run.project_id, tool=tool.title)
             try:
                 approved, comment = await asyncio.wait_for(fut, self.settings.approval_timeout_seconds)
             except asyncio.TimeoutError:
@@ -486,6 +488,8 @@ class Agent:
             await run.emit("error", message=f"{e.__class__.__name__}: {e}")
         finally:
             run.finished_at = time.time()
+            if run.status in ("done", "error"):  # отменённое человеком уведомлять незачем
+                outbox.add(run.user.get("id"), "done" if run.status == "done" else "error", cid, run.project_id)
             # стираем копию ключей и закрываем git-клиенты этого запуска
             run.keys.clear()
             run.llm_key = None

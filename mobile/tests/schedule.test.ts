@@ -47,3 +47,15 @@ test("новая версия приложения", async () => {
   assert.equal(isNewer("", "0.5.4"), false);
   assert.equal(isNewer("0.5.5", undefined), false);
 });
+
+test("уведомление → экран", async () => {
+  const { pushRoute } = await import("../src/core/pushRoute");
+  const cl = [{ id: "id.test", api: "https://api.test" }];
+  const sid = (c: string, t: string | null) => `cluster.${c}${t ? "~" + t : ""}`;
+  assert.equal(pushRoute({ api: "https://api.test", kind: "approval", space: "ghostixel", cid: "c1" }, cl, sid), "/s/cluster.id.test/c/c1");
+  assert.equal(pushRoute({ api: "https://api.test", kind: "done", space: "t-abc123", cid: "c2" }, cl, sid), "/s/cluster.id.test~t-abc123/c/c2");
+  assert.equal(pushRoute({ api: "https://api.test", kind: "device" }, cl, sid), "/devices/id.test");
+  assert.equal(pushRoute({ api: "https://evil", kind: "done", cid: "c1" }, cl, sid), null);
+  assert.equal(pushRoute({ api: "https://api.test", kind: "done", cid: "../../x" }, cl, sid), "/s/cluster.id.test");
+  assert.equal(pushRoute(undefined, cl, sid), null);
+});

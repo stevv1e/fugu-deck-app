@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "317999288288",
+    "project_id": "fugu-deck",
+    "storage_bucket": "fugu-deck.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:317999288288:android:89cdb22505c94e98d42585",
+        "android_client_info": {
+          "package_name": "kz.fugudeck.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB34kRtsN5cyiPZEtzEoyejaiSIiFf7TeE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

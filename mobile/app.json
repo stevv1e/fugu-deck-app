@@ -25,7 +25,8 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "kz.fugudeck.app",
-      "allowBackup": false
+      "allowBackup": false,
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -56,7 +57,15 @@
           "barcodeScannerEnabled": true
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ff3ec9",
+          "defaultChannel": "agent"
+        }
+      ]
     ],
     "scheme": "fugudeck",
     "backgroundColor": "#07080c",

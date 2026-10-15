@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchStatus, type ClusterInvite } from "@/core/cluster";
 import { nativeMtlsAvailable, plainHttp } from "@/platform/http";
+import { enablePush, pushStatus, type PushStatus } from "@/platform/push";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, saveCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
 import { requestAccountDelete, requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
@@ -25,6 +26,18 @@ export default function ClusterDevice() {
   const [spaceBusy, setSpaceBusy] = useState(false);
   const [armDelete, setArmDelete] = useState(false); // удаление — в два нажатия, затем биометрия
   const [armAccount, setArmAccount] = useState(false);
+  const [push, setPush] = useState<PushStatus | null>(null);
+  useEffect(() => { pushStatus().then(setPush, () => setPush("unavailable")); }, []);
+  const turnOnPush = async () => {
+    setMsg(null);
+    try {
+      const st = await enablePush(true);
+      setPush(st);
+      if (st === "denied") setMsg({ kind: "error", text: "Уведомления запрещены в настройках телефона: Настройки → Приложения → Fugu Deck → Уведомления" });
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    }
+  };
   const { reloadClusters } = useServers();
 
   useEffect(() => { getCluster(cid).then(setRec); }, [cid]);
@@ -223,6 +236,16 @@ export default function ClusterDevice() {
           <Btn title="Серверы для агента" kind="ghost" onPress={() => router.push({ pathname: "/servers/[cid]", params: { cid: rec.id } })} />
           <Btn title="Общие пространства" kind="ghost" onPress={() => router.push({ pathname: "/teams/[cid]", params: { cid: rec.id } })} />
           <Btn title="Устройства и приглашения" kind="ghost" onPress={() => router.push(`/devices/${rec.id}`)} />
+          {push && push !== "unavailable" ? (
+            <Card>
+              <Row style={{ justifyContent: "space-between" }}>
+                <Txt style={{ fontWeight: "600" }}>Уведомления</Txt>
+                <Chip text={push === "on" ? "включены" : push === "denied" ? "запрещены" : "выключены"} color={push === "on" ? p.ok : undefined} />
+              </Row>
+              <Txt kind="small">Агент ждёт подтверждения, агент ответил, новое устройство. В уведомлении нет текста переписки — только куда открыть.</Txt>
+              {push !== "on" ? <Btn small title="Включить уведомления" onPress={turnOnPush} style={{ alignSelf: "flex-start" }} /> : null}
+            </Card>
+          ) : null}
           <Btn title="Ключи API и лимит расходов" kind="ghost" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id } })} />
           {!space?.delete_requested ? (
             armAccount ? (
