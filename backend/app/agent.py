@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .db import TALK_PROJECT, Database, new_id
+from .db import AGENT_TOOLS, DEFAULT_AGENT, TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
 from . import filetools, vision
@@ -91,6 +91,7 @@ class Run:
     # Git-провайдеры этого запуска: логин владельца ключа или None. Проверяется один раз за запуск, а не на каждом
     # шаге: иначе каждый шаг — лишние запросы к GitHub/GitLab.
     git_status: dict | None = None
+    agent: dict | None = None  # агент пространства, который ведёт этот чат (модель, инструкции, доступы, скилы)
     events: list[dict] = field(default_factory=list)
     status: str = "running"
     started_at: float = field(default_factory=time.time)
@@ -203,10 +204,12 @@ class Agent:
             for src in await self.db.memory_sources(project["id"]):
                 readable[src["id"]] = src["name"]
         git = run.git if run else self._git_for({})
+        agent = (run.agent if run and run.agent else None) or await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT) \
+            or await self.db.get_agent(DEFAULT_AGENT) or {"id": DEFAULT_AGENT, "name": "Fugu", "tools": list(AGENT_TOOLS), "skills": ["*"]}
         return ToolContext(cid, self.db, self.settings, git, project=project,
                            readable_projects=readable, user=user or {}, skills=self.skills, broker=self.broker,
                            run_id=run.id if run else "", talk=project.get("id") == TALK_PROJECT,
-                           git_status=run.git_status if run else None)
+                           git_status=run.git_status if run else None, agent=agent)
 
     async def cancel(self, run: Run) -> None:
         if run.task and not run.task.done():
@@ -276,6 +279,11 @@ class Agent:
         who = [f"{name} (пользователь {login})" if login else f"{name} (ключ не задан или не работает)"
                for name, login in status.items()]
         parts = [SYSTEM_PROMPT.format(providers=", ".join(who) or "ничего")]
+        ag = ctx.agent or {}
+        if ag.get("id") and ag.get("id") != DEFAULT_AGENT or ag.get("instructions"):
+            no = [x for x in AGENT_TOOLS if x not in (ag.get("tools") or AGENT_TOOLS)]
+            parts.append(f"\n## Ты — агент «{ag.get('name') or ag.get('id')}»\n{ag.get('instructions') or ''}"
+                         + (f"\nУ тебя нет доступа к: {', '.join({'git': 'репозиториям', 'ssh': 'серверам', 'memory': 'памяти', 'files': 'файлам', 'skills': 'скилам'}[x] for x in no)}." if no else ""))
         p = ctx.project
         if p:
             parts.append(f"\n## Проект: {p['name']}\n{p.get('description') or ''}")
@@ -292,8 +300,8 @@ class Agent:
                 sk = [s for s in self.skills.list() if enabled(ctx, s["name"])]
                 if sk:
                     parts.append("\n### Доступные скилы\n" + "\n".join(f"- {s['name']}: {s['description']}" for s in sk))
-            # память
-            mem = await self.db.list_memories(p["id"], 200)
+            # память (агенту без доступа к памяти — не показываем)
+            mem = await self.db.list_memories(p["id"], 200) if "memory" in ((ctx.agent or {}).get("tools") or AGENT_TOOLS) else []
             lines, used = [], 0
             for m in mem:
                 line = f"- [#{m['id']}{' 📌' if m['pinned'] else ''}] {m['content']}"
@@ -390,8 +398,11 @@ class Agent:
         if run.project_id == TALK_PROJECT:
             return [t for t in REGISTRY.values() if t.group == "files"]
         git_ok = any(run.git_status.values()) if run.git_status is not None else True
+        # доступы агента: какие группы инструментов ему даны (по умолчанию — все)
+        allowed = set((run.agent or {}).get("tools") or AGENT_TOOLS)
         return [t for t in REGISTRY.values()
-                if (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)]
+                if (t.group not in AGENT_TOOLS or t.group in allowed)
+                and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)]
 
     def price(self, model: str) -> list[float] | None:
         pr = self.settings.pricing
@@ -483,7 +494,10 @@ class Agent:
         partial = ""
         try:
             await run.emit("start", model=run.model)
-            run.git_status = {} if run.project_id == TALK_PROJECT else await self.git_status(run.git)
+            conv = await self.db.get_conversation(cid) or {}
+            run.agent = await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT) or await self.db.get_agent(DEFAULT_AGENT)
+            git_allowed = run.project_id != TALK_PROJECT and "git" in ((run.agent or {}).get("tools") or AGENT_TOOLS)
+            run.git_status = await self.git_status(run.git) if git_allowed else {}
             for step in range(self.settings.max_agent_steps):
                 if run.budget and (why := await run.budget()):
                     await run.emit("notice", text=why)

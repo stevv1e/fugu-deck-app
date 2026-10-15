@@ -55,18 +55,19 @@ export const removeServer = (s: ApiSession, id: string, team?: string | null) =>
   s.request("POST", "/v1/ssh/servers/remove", { server: id, ...(team ? { space: team } : {}) });
 
 /** Права агента: полный список серверов и разрешение читать без подтверждения. Подписывается целиком. */
-export async function setRights(s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean, team?: string | null): Promise<SshRights> {
-  const signed = await signClusterAction(keys, { type: "agent_rights", agent: AGENT, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null }, { space: spaceKey(user, team) });
+export async function setRights(s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean, team?: string | null, agent = AGENT): Promise<SshRights> {
+  const signed = await signClusterAction(keys, { type: "agent_rights", agent, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null }, { space: spaceKey(user, team) });
   return s.request<SshRights>("POST", "/v1/ssh/rights", signed);
 }
 
 /** Что выполнить на сервере, чтобы он принимал агента: ключ CA, имя входа, отпечаток для формы. */
-export function setupScript(st: Pick<SshState, "ca_public_key" | "principal_prefix">, user = "deck-agent"): string {
+export function setupScript(st: Pick<SshState, "ca_public_key" | "principal_prefix">, user = "deck-agent", agents: string[] = [AGENT]): string {
   return [
     `sudo useradd -m ${user}`,
     `echo '${st.ca_public_key}' | sudo tee /etc/ssh/deck_ca.pub`,
     `sudo mkdir -p /etc/ssh/principals`,
-    `echo '${st.principal_prefix}${AGENT}' | sudo tee /etc/ssh/principals/${user}`,
+    // каждый агент входит под своим именем: в файле — все, кого вы пускаете на этот сервер
+    `printf '%s\\n' ${agents.map((a) => `'${st.principal_prefix}${a}'`).join(" ")} | sudo tee /etc/ssh/principals/${user}`,
     `printf 'TrustedUserCAKeys /etc/ssh/deck_ca.pub\\nAuthorizedPrincipalsFile /etc/ssh/principals/%%u\\n' | sudo tee /etc/ssh/sshd_config.d/deck.conf`,
     `sudo systemctl reload ssh`,
     `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub   # отпечаток SHA256:… — для формы ниже`,

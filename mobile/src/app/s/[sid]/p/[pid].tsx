@@ -51,11 +51,15 @@ export default function ProjectChats() {
     }
   };
 
-  const create = async () => {
+  const agents = useLoad(useCallback(() => api?.agents() ?? null, [api]));
+  const [pickAgent, setPickAgent] = useState(false);
+  const create = async (agentId?: string) => {
     if (!api) return;
+    if (!agentId && (agents.data?.length ?? 0) > 1) return setPickAgent(true); // несколько агентов — кто ведёт чат
     setBusy(true);
+    setPickAgent(false);
     try {
-      const c = await api.createConversation(pid);
+      const c = await api.createConversation(pid, undefined, agentId);
       router.push(`/s/${sid}/c/${c.id}`);
     } catch (e) {
       setErr(errText(e));
@@ -135,7 +139,16 @@ export default function ProjectChats() {
           <Btn title="Расписание" kind="ghost" onPress={() => router.push(`/s/${sid}/sched/${pid}`)} style={{ flex: 1 }} />
         </Row>
         {api && proj ? <ProjectRepos pid={pid} repos={proj.repos ?? []} api={api} canWrite={canWrite} onChanged={projects.reload} /> : null}
-        {canWrite && data ? <Btn title="＋ Новый чат" onPress={create} busy={busy} /> : null}
+        {canWrite && data ? <Btn title="＋ Новый чат" onPress={() => create()} busy={busy} /> : null}
+        {pickAgent ? (
+          <Card accent={p.accent}>
+            <Txt kind="label">кто ведёт чат</Txt>
+            <Row gap={6} style={{ flexWrap: "wrap" }}>
+              {agents.data?.map((a) => <Btn key={a.id} small title={a.name} onPress={() => create(a.id)} disabled={busy} />)}
+              <Btn small kind="ghost" title="Отмена" onPress={() => setPickAgent(false)} />
+            </Row>
+          </Card>
+        ) : null}
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Чатов нет" text="Начните новый чат с агентом." /> : null}
         {data?.map((c) => (

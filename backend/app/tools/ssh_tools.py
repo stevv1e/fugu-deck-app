@@ -12,7 +12,7 @@ from ..config import get_settings
 from .providers import ProviderError
 from .registry import ToolContext, obj, tool
 
-AGENT = "fugu"  # агент пространства; под этим именем владелец подписывает его права на серверы
+AGENT = "fugu"  # агент по умолчанию; у каждого агента пространства свои права на серверы (по его id)
 
 
 def enabled() -> bool:
@@ -43,17 +43,17 @@ async def _call(path: str, body: dict, timeout: float = 30) -> tuple[int, dict]:
     return r.status_code, data if isinstance(data, dict) else {"error": str(data)[:300]}
 
 
-async def check(server: str, command: str) -> dict:
+async def check(server: str, command: str, agent: str = AGENT) -> dict:
     """Что понадобится для команды: уровень (read | write | danger) и вид подписи (пусто — не нужна)."""
-    code, data = await _call("/v1/agent/check", {"agent": AGENT, "server": server, "command": command})
+    code, data = await _call("/v1/agent/check", {"agent": agent, "server": server, "command": command})
     if code != 200:
         raise ProviderError(str(data.get("error") or f"шлюз ответил {code}"))
     return data
 
 
-async def run_preview(server: str, command: str) -> dict:
+async def run_preview(server: str, command: str, agent: str = AGENT) -> dict:
     """Пробный прогон перед подтверждением: шлюз выполнит его, только если это чтение без подписи."""
-    code, data = await _call("/v1/agent/exec", {"agent": AGENT, "server": server, "command": command, "preview": True}, timeout=330)
+    code, data = await _call("/v1/agent/exec", {"agent": agent, "server": server, "command": command, "preview": True}, timeout=330)
     if code != 200:
         return {"command": command, "error": str(data.get("error") or f"шлюз ответил {code}")}
     res = data.get("result") or {}
@@ -65,14 +65,14 @@ async def run_preview(server: str, command: str) -> dict:
 async def _risk(ctx: ToolContext, a: dict):
     """Уровень конкретной команды определяет шлюз; он же потом его и соблюдает — здесь только выбор карточки."""
     try:
-        c = await check(str(a.get("server", "")), str(a.get("command", "")))
+        c = await check(str(a.get("server", "")), str(a.get("command", "")), ctx.agent_id)
     except Exception:
         return "read"  # шлюз сам откажет при выполнении; подтверждать нечего
     ctx.ssh_need = c.get("need") or ""
     ctx.ssh_preview = None
     if ctx.ssh_need and a.get("preview"):
         # Вывод пробного прогона даёт шлюз, а не агент: человек видит, что на самом деле изменится.
-        ctx.ssh_preview = await run_preview(str(a["server"]), str(a["preview"]))
+        ctx.ssh_preview = await run_preview(str(a["server"]), str(a["preview"]), ctx.agent_id)
     return {"ssh_danger": "dangerous", "ssh_write": "write"}.get(ctx.ssh_need, "read")
 
 
@@ -81,13 +81,13 @@ def sign_request(ctx: ToolContext, a: dict) -> dict | None:
     need = getattr(ctx, "ssh_need", "")
     if not need:
         return None
-    return {"type": need, "agent": AGENT, "server": a["server"], "command": a["command"]}
+    return {"type": need, "agent": ctx.agent_id, "server": a["server"], "command": a["command"]}
 
 
 @tool("ssh_servers", "Серверы пользователя, к которым у тебя есть подписанный владельцем доступ.",
       obj({}), group="ssh", title="Мои серверы")
 async def ssh_servers(ctx, a):
-    code, data = await _call("/v1/agent/servers", {"agent": AGENT})
+    code, data = await _call("/v1/agent/servers", {"agent": ctx.agent_id})
     if code != 200:
         raise ProviderError(str(data.get("error") or f"шлюз ответил {code}"))
     return data
@@ -108,7 +108,7 @@ async def ssh_servers(ctx, a):
           ["server", "command"]),
       risk=_risk, group="ssh", title="Команда на сервере")
 async def ssh_exec(ctx, a):
-    body = {"agent": AGENT, "server": a["server"], "command": a["command"]}
+    body = {"agent": ctx.agent_id, "server": a["server"], "command": a["command"]}
     jws = getattr(ctx, "approval_jws", "")
     if jws:
         body["jws"] = jws

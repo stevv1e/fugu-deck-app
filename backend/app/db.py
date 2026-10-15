@@ -262,9 +262,25 @@ SCHEMA = [
     """
     ALTER TABLE conversations ADD COLUMN sponsor_alert INTEGER NOT NULL DEFAULT 0;
     """,
+    # v14: агенты пространства — у каждого своё имя, модель, инструкции, доступы и скилы; чат ведёт один агент
+    """
+    CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        instructions TEXT NOT NULL DEFAULT '',
+        tools TEXT NOT NULL DEFAULT '["git","ssh","memory","files","skills"]',
+        skills TEXT NOT NULL DEFAULT '["*"]',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'fugu';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
+DEFAULT_AGENT = "fugu"
+AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills")
 # Режим «Общение»: его чаты живут в скрытом проекте — не видны среди проектов инжиниринга, а агент в них — собеседник
 # без инструментов Git, серверов и памяти (agent.py).
 TALK_PROJECT = "talk"
@@ -300,6 +316,10 @@ class Database:
             await self._exec(
                 "INSERT INTO projects (id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (DEFAULT_PROJECT, "Общий", "Проект по умолчанию", now, now))
+        if not await self._one("SELECT id FROM agents WHERE id=?", (DEFAULT_AGENT,)):
+            now = time.time()
+            await self._exec("INSERT INTO agents (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+                             (DEFAULT_AGENT, "Fugu", now, now))
         if not await self._one("SELECT id FROM projects WHERE id=?", (TALK_PROJECT,)):
             now = time.time()
             await self._exec(
@@ -548,6 +568,36 @@ class Database:
             r["tool_calls"] = json.loads(r["tool_calls"]) if r["tool_calls"] else None
             r["meta"] = json.loads(r["meta"]) if r["meta"] else None
         return rows
+
+    # --- agents ---
+    @staticmethod
+    def _agent(r: dict | None) -> dict | None:
+        if r:
+            r["tools"] = json.loads(r["tools"] or "[]")
+            r["skills"] = json.loads(r["skills"] or "[]")
+        return r
+
+    async def list_agents(self) -> list[dict]:
+        return [self._agent(r) for r in await self._all("SELECT * FROM agents ORDER BY id='fugu' DESC, created_at")]
+
+    async def get_agent(self, aid: str) -> dict | None:
+        return self._agent(await self._one("SELECT * FROM agents WHERE id=?", (aid,)))
+
+    async def put_agent(self, aid: str, **f: Any) -> dict:
+        now = time.time()
+        f = {k: (json.dumps(v) if k in ("tools", "skills") else v) for k, v in f.items() if v is not None}
+        if await self.get_agent(aid):
+            if f:
+                sets = ",".join(f"{k}=?" for k in f)
+                await self._exec(f"UPDATE agents SET {sets}, updated_at=? WHERE id=?", (*f.values(), now, aid))
+        else:
+            f = {"id": aid, **f, "created_at": now, "updated_at": now}
+            await self._exec(f"INSERT INTO agents ({','.join(f)}) VALUES ({','.join('?' * len(f))})", tuple(f.values()))
+        return await self.get_agent(aid)  # type: ignore[return-value]
+
+    async def delete_agent(self, aid: str) -> None:
+        await self._exec("UPDATE conversations SET agent_id=? WHERE agent_id=?", (DEFAULT_AGENT, aid))
+        await self._exec("DELETE FROM agents WHERE id=?", (aid,))
 
     # --- schedules ---
     @staticmethod

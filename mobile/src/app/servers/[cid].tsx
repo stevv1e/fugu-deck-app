@@ -10,7 +10,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { addServer, AGENT, removeServer, serverProblem, setPaused, setRights, setupScript, sshJournal, sshState, type JournalEntry, type SshState } from "@/core/ssh";
 import { keyProvider } from "@/platform/keys";
-import { getCluster, type ClusterRecord } from "@/state/cluster";
+import { getCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
+import { useServers } from "@/state/servers";
 import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
@@ -18,6 +19,13 @@ import { useTheme } from "@/ui/theme";
 export default function Servers() {
   const { cid, team: teamParam } = useLocalSearchParams<{ cid: string; team?: string }>();
   const team = teamParam || null;
+  const { api: apiFor } = useServers();
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([{ id: AGENT, name: "Fugu" }]);
+  const [agent, setAgent] = useState(AGENT);
+  useEffect(() => {
+    // агенты пространства — у каждого свои права на серверах
+    apiFor(spaceSid(cid, team)).then((a) => a.agents()).then((l) => l.length && setAgents(l.map((x) => ({ id: x.id, name: x.name }))), () => {});
+  }, [apiFor, cid, team]);
   const { p } = useTheme();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [st, setSt] = useState<SshState | null>(null);
@@ -66,7 +74,7 @@ export default function Servers() {
     return k;
   };
 
-  const rights = st?.rights.find((x) => x.agent === AGENT) ?? { agent: AGENT, servers: [], read_without_confirm: false };
+  const rights = st?.rights.find((x) => x.agent === agent) ?? { agent, servers: [], read_without_confirm: false };
   const input = { id: f.id.trim(), host: f.host.trim(), port: Number(f.port), user: f.user.trim(), hostKey: f.hostKey.trim() };
   const bad = f.id || f.host || f.hostKey ? serverProblem(input) : null;
 
@@ -75,7 +83,7 @@ export default function Servers() {
     setF({ id: "", host: "", port: "22", user: "deck-agent", hostKey: "" });
   });
   const grant = (servers: string[], read: boolean, done: string) => run("rights", done, async (r) => {
-    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read, team);
+    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read, team, agent);
   });
   const drop = (id: string) => run(`rm:${id}`, `Сервер ${id} убран`, async (r) => {
     await removeServer(await openClusterSession(r, r.api), id, team);
@@ -121,6 +129,15 @@ export default function Servers() {
         Агент вашего пространства может выполнять команды на ваших серверах. Смотреть (журналы, состояние) — без
         подтверждения, если вы это разрешите; любое изменение — только после вашей подписи именно этой команды.
       </Txt>
+      {st && agents.length > 1 ? (
+        <Card>
+          <Txt kind="label">права агента</Txt>
+          <Row gap={6} style={{ flexWrap: "wrap" }}>
+            {agents.map((a) => <Btn key={a.id} small title={a.name} kind={a.id === agent ? "primary" : "ghost"} onPress={() => setAgent(a.id)} />)}
+          </Row>
+          <Txt kind="small">Допуск к серверам и чтение без подтверждения — у каждого агента свои.</Txt>
+        </Card>
+      ) : null}
       {st ? (
         <>
           {st.servers.length === 0 ? <Empty title="Серверов нет" text="Подготовьте сервер по инструкции ниже и добавьте его." /> : null}
@@ -204,8 +221,8 @@ export default function Servers() {
             </Txt>
             {showSetup ? (
               <>
-                <Txt kind="mono" selectable>{st.ca_public_key ? setupScript(st, f.user.trim() || "deck-agent") : "Ключ кластера сейчас недоступен — откройте экран позже."}</Txt>
-                {st.ca_public_key ? <Btn title="Скопировать команды" small kind="ghost" onPress={() => Clipboard.setStringAsync(setupScript(st, f.user.trim() || "deck-agent"))} /> : null}
+                <Txt kind="mono" selectable>{st.ca_public_key ? setupScript(st, f.user.trim() || "deck-agent", agents.map((a) => a.id)) : "Ключ кластера сейчас недоступен — откройте экран позже."}</Txt>
+                {st.ca_public_key ? <Btn title="Скопировать команды" small kind="ghost" onPress={() => Clipboard.setStringAsync(setupScript(st, f.user.trim() || "deck-agent", agents.map((a) => a.id)))} /> : null}
               </>
             ) : (
               <Btn title="Показать команды" small kind="ghost" onPress={() => setShowSetup(true)} />
