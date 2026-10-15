@@ -25,6 +25,7 @@ from .config import get_settings
 from .db import DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
+from .outbox import outbox
 from .llm import split_model
 from .skills import SkillError, SkillStore
 from .tools.providers import GitHubProvider, GitLabProvider
@@ -1996,6 +1997,22 @@ async def internal_roster(body: RosterIn):
     await db().set_roster([{"id": m["id"], "name": m["name"], "role": m["role"]} for m in cl["members"]
                            if m.get("role") in ("viewer", "editor", "owner")])
     return {"ok": True, "members": len(cl["members"])}
+
+
+class OutboxIn(BaseModel):
+    token: str
+
+
+@app.post("/internal/outbox")
+async def internal_outbox(body: OutboxIn):
+    """Control-plane забирает очередь уведомлений (подписано ключом control-plane): события после after этого boot."""
+    if not settings.is_space:
+        raise HTTPException(404)
+    cl = spaceauth.verify(body.token, settings, audience=f"space-internal:{settings.space_id}")
+    if cl.get("action") != "outbox":
+        raise HTTPException(400, "bad action")
+    after = cl.get("after") if cl.get("boot") == outbox.boot and isinstance(cl.get("after"), int) else 0
+    return {"boot": outbox.boot, "events": outbox.since(after)}
 
 
 @app.post("/internal/revoke")
