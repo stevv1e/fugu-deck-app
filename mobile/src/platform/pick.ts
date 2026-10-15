@@ -66,3 +66,22 @@ export async function saveText(name: string, mime: string, text: string): Promis
   await writeAsStringAsync(uri, text);
   return true;
 }
+
+/** Файл через системное окно выбора — содержимым base64 (архив для импорта). null — человек передумал. */
+export async function pickBase64(maxBytes: number, types: string[] = ["*/*"]): Promise<{ name: string; data: string } | null> {
+  const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: types });
+  const a = r.canceled ? null : r.assets?.[0];
+  if (!a) return null;
+  if (a.size && a.size > maxBytes) throw new Error(`Файл больше ${Math.round(maxBytes / 1048576)} МБ`);
+  return { name: a.name || "file", data: await readAsStringAsync(a.uri, { encoding: "base64" }) };
+}
+
+/** Сохранить двоичный файл (base64) в папку, которую выберет человек. false — папку не выбрали. */
+export async function saveBase64(name: string, mime: string, data: string): Promise<boolean> {
+  if (Platform.OS !== "android") throw new Error("Сохранение в файл пока есть только на Android");
+  const perm = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+  if (!perm.granted) return false;
+  const uri = await StorageAccessFramework.createFileAsync(perm.directoryUri, name, mime);
+  await writeAsStringAsync(uri, data, { encoding: "base64" });
+  return true;
+}

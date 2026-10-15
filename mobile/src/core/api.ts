@@ -47,6 +47,9 @@ export type ProjectExport = { format: string; name: string; description: string;
 export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills";
 export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[] };
 
+/** Найденная заметка; linked_to — найдена не по словам, а как связанная с заметкой linked_to. */
+export type FoundNote = { id: number; project_id: string; project_name?: string; title?: string | null; content: string; area?: string; tags: string; linked_to?: number; link_type?: string };
+
 export type RepoRef = { provider: "github" | "gitlab"; repo: string };
 export type RepoInfo = { full_name: string; private?: boolean; description?: string | null; url?: string; updated_at?: string };
 export type ReposByProvider = Record<string, { ok: boolean; repos?: RepoInfo[]; error?: string }>;
@@ -75,7 +78,11 @@ export class DeckApi {
   updateNote = (mid: number, n: Partial<NoteInput> & { stale?: boolean }) => this.s.request("PATCH", `/api/memory/${mid}`, n);
   deleteNote = (mid: number) => this.s.request("DELETE", `/api/memory/${mid}`);
   linkNotes = (from: number, to: number, type: string) => this.s.request("POST", `/api/memory/${from}/links`, { to, type });
-  unlinkNotes = (a: number, b: number) => this.s.request("DELETE", `/api/memory/${a}/links/${b}`);
+  searchNotes = (pid: string, q: string) =>
+    this.s.request<FoundNote[]>("GET", `/api/projects/${enc(pid)}/memory?linked=true&q=${encodeURIComponent(q)}`);
+  exportObsidian = (pid: string) => this.s.request<{ filename: string; size: number; data: string }>("GET", `/api/projects/${enc(pid)}/kb/obsidian`);
+  importObsidian = (pid: string, data: string) => this.s.request<{ created: number; links: number }>("POST", `/api/projects/${enc(pid)}/kb/obsidian`, { data });
+  unlinkNotes = (a: number, b: number, type?: string) => this.s.request("DELETE", `/api/memory/${a}/links/${b}${type ? `?type=${enc(type)}` : ""}`);
 
   renameConversation = (cid: string, title: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { title });
   /** Перенести чат в другой проект (нужна роль редактора в обоих). */

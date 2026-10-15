@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, backup, devices, kb, schedules as sched, spaceauth
+from . import auth, backup, devices, kb, obsidian, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
@@ -741,7 +741,13 @@ async def list_memory(pid: str, q: str = "", linked: bool = False, u: dict = Me)
     if linked:
         ids += [s["id"] for s in await db().memory_sources(pid)]
     if q.strip():
-        return await db().search_memories(ids, q, 100)
+        rows = await db().search_memories(ids, q, 100)
+        # соседи найденного по связям: по слову не найти, а по смыслу относятся (бэкап → порядок восстановления)
+        for m in await db().note_neighbors([r["id"] for r in rows[:20]], 10):
+            if m["project_id"] in ids:
+                m["linked_to"] = m["link_from"]
+                rows.append(m)
+        return rows
     out = []
     for i in ids:
         rows = await db().list_memories(i)
@@ -768,6 +774,51 @@ async def knowledge_base(pid: str, u: dict = Me):
     await need(u, pid)
     p = await db().get_project(pid)
     return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid))
+
+
+@app.get("/api/projects/{pid}/kb/obsidian")
+async def kb_obsidian_export(pid: str, u: dict = Me):
+    """База знаний проекта — zip с папкой Obsidian (base64 в JSON: защищённый канал передаёт тело только текстом)."""
+    await need(u, pid)
+    p = await db().get_project(pid)
+    data = obsidian.export_zip(p["name"], await db().list_memories(pid, 5000), await db().note_links(pid))
+    return {"filename": f"{obsidian._safe(p['name'])}-obsidian.zip", "size": len(data), "data": base64.b64encode(data).decode()}
+
+
+class ObsidianIn(BaseModel):
+    data: str = Field(..., min_length=1, max_length=(8 << 20) * 4 // 3 + 16)  # zip до 8 МБ
+
+
+@app.post("/api/projects/{pid}/kb/obsidian")
+async def kb_obsidian_import(pid: str, body: ObsidianIn, u: dict = Me):
+    """Импорт папки Obsidian (zip): заметки, связи по разделу «Связи» и ссылкам [[…]]."""
+    await need(u, pid, "editor")
+    try:
+        notes = obsidian.import_zip(base64.b64decode(body.data, validate=True))
+    except obsidian.ObsidianError as e:
+        raise HTTPException(400, str(e))
+    except ValueError:
+        raise HTTPException(400, "Файл повреждён при передаче")
+    by_title: dict[str, int] = {}
+    created = 0
+    for n in notes:
+        m = await db().add_memory(pid, n["content"][:8000], n["tags"], "import", u["display_name"], title=n["title"],
+                                  area=n["area"] or kb.classify(n["content"], n["tags"]), grp=n["grp"] or kb.group_of(n["tags"]),
+                                  source_ref=n["source_ref"], origin="docs")
+        if n["stale"]:
+            await db().update_memory(m["id"], stale=True)
+        by_title[n["title"].lower()] = m["id"]
+        created += 1
+    links = 0
+    for n in notes:
+        a = by_title.get(n["title"].lower())
+        for typ, target in n["links"]:
+            b = by_title.get(target.lower())
+            if a and b and a != b:
+                await db().add_note_link(a, b, typ)
+                links += 1
+    await broker().publish("memory", pid, action="imported", by=u["display_name"])
+    return {"created": created, "links": links}
 
 
 @app.post("/api/memory/{mid}/links")

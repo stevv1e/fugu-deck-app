@@ -309,3 +309,46 @@ async def test_agents(client):
     assert client.delete("/api/agents/fugu").status_code == 400
     assert client.delete("/api/agents/duty").status_code == 200
     assert client.get(f"/api/conversations/{c['id']}").json()["agent"]["id"] == "fugu"
+
+
+async def test_obsidian_roundtrip(client):
+    import base64, io, zipfile
+
+    login(client)
+    a = client.post("/api/projects/general/memory", json={"content": "Бэкап базы каждую ночь в 3:00", "title": "Бэкап"}).json()
+    b = client.post("/api/projects/general/memory", json={"content": "Порядок восстановления. См. [[Бэкап]]", "title": "Восстановление"}).json()
+    assert client.post(f"/api/memory/{b['id']}/links", json={"to": a["id"], "type": "dep"}).status_code == 200
+    ex = client.get("/api/projects/general/kb/obsidian").json()
+    z = zipfile.ZipFile(io.BytesIO(base64.b64decode(ex["data"])))
+    files = {n.split("/")[-1]: z.read(n).decode() for n in z.namelist()}
+    assert "Восстановление.md" in files and "- зависит от: [[Бэкап]]" in files["Восстановление.md"]
+    assert files["Бэкап.md"].startswith("---\ntitle: \"Бэкап\"")
+    # обратно — в другой проект: заметки, связь «зависит от» и ссылка из текста
+    pid = client.post("/api/projects", json={"name": "Копия"}).json()["id"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as w:
+        for n in z.namelist():
+            w.writestr(n, z.read(n))
+        w.writestr("vault/.obsidian/app.json", "{}")
+        w.writestr("vault/Свободная.md", "# Без заголовочной части\nтекст")
+    r = client.post(f"/api/projects/{pid}/kb/obsidian", json={"data": base64.b64encode(buf.getvalue()).decode()})
+    assert r.status_code == 200 and r.json() == {"created": 3, "links": 1}, r.text
+    kbd = client.get(f"/api/projects/{pid}/kb").json()
+    types = sorted(e[2] for e in kbd["edges"])
+    assert types == ["dep", "ref"], kbd["edges"]
+    assert client.post(f"/api/projects/{pid}/kb/obsidian", json={"data": base64.b64encode(b"nope").decode()}).status_code == 400
+
+
+async def test_memory_search_forms_and_links(client):
+    login(client)
+    pid = client.post("/api/projects", json={"name": "Поиск"}).json()["id"]
+    a = client.post(f"/api/projects/{pid}/memory", json={"content": "Резервные копии базы данных делаются каждую ночь"}).json()
+    b = client.post(f"/api/projects/{pid}/memory", json={"content": "Порядок восстановления: остановить приложение, затем pg_restore"}).json()
+    client.post(f"/api/projects/{pid}/memory", json={"content": "Сервер базы — db-1"})
+    client.post(f"/api/memory/{b['id']}/links", json={"to": a["id"], "type": "dep"})
+    rows = client.get(f"/api/projects/{pid}/memory", params={"q": "резервная копия базы"}).json()
+    assert rows[0]["id"] == a["id"]  # больше слов запроса — выше
+    near = [r for r in rows if r.get("linked_to")]
+    assert [r["id"] for r in near] == [b["id"]]
+    from app.kb import stems
+    assert stems("бэкапы на серверах") == ["бэкап", "сервер"]
