@@ -198,9 +198,10 @@ export default function Projects() {
           </Row>
         ) : null}
         {data ? (
-          <Row gap={8}>
-            <Btn title="Скилы агента" kind="ghost" small onPress={() => router.push(`/s/${sid}/skills`)} style={{ flex: 1 }} />
-            <Btn title="Расходы" kind="ghost" small onPress={() => router.push(`/s/${sid}/usage`)} style={{ flex: 1 }} />
+          <Row gap={8} style={{ flexWrap: "wrap" }}>
+            <Btn title="Модели и репозитории" kind="ghost" small onPress={() => router.push(`/s/${sid}/prefs`)} style={{ flexGrow: 1 }} />
+            <Btn title="Скилы агента" kind="ghost" small onPress={() => router.push(`/s/${sid}/skills`)} style={{ flexGrow: 1 }} />
+            <Btn title="Расходы" kind="ghost" small onPress={() => router.push(`/s/${sid}/usage`)} style={{ flexGrow: 1 }} />
           </Row>
         ) : null}
       </ScrollView>

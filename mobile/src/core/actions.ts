@@ -15,8 +15,8 @@
  * ct_sha256 = SHA-256(enc||ct), key_hint — последние 4 символа ключа (keyguard сверяет их с расшифрованным).
  */
 
-export type Provider = 'anthropic' | 'sakana' | 'github' | 'gitlab';
-export type LlmProvider = 'anthropic' | 'sakana';
+export type Provider = 'anthropic' | 'sakana' | 'deepseek' | 'github' | 'gitlab';
+export type LlmProvider = 'anthropic' | 'sakana' | 'deepseek';
 /** none — исключить участника из пространства. */
 export type Role = 'reader' | 'editor' | 'owner' | 'none';
 
@@ -142,7 +142,7 @@ const list =
     if (new Set(v).size !== v.length) throw bad(n, 'повторяющиеся элементы');
   };
 
-const PROVIDERS = ['anthropic', 'sakana', 'github', 'gitlab'];
+const PROVIDERS = ['anthropic', 'sakana', 'deepseek', 'github', 'gitlab'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
 const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { type: T }>, 'type'>, Check> } = {
@@ -226,6 +226,7 @@ export function validateAction(input: unknown): ActionBody {
 const PROVIDER_NAMES: Record<Provider, string> = {
   anthropic: 'Claude (Anthropic)',
   sakana: 'Sakana Fugu',
+  deepseek: 'DeepSeek',
   github: 'GitHub',
   gitlab: 'GitLab',
 };

@@ -43,6 +43,10 @@ export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" |
 /** Проект целиком для переноса: инструкции, скилы и заметки (формат fugu-deck-project/1). */
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 
+export type RepoRef = { provider: "github" | "gitlab"; repo: string };
+export type RepoInfo = { full_name: string; private?: boolean; description?: string | null; url?: string; updated_at?: string };
+export type ReposByProvider = Record<string, { ok: boolean; repos?: RepoInfo[]; error?: string }>;
+
 export type ApprovalRequest = Extract<RunEvent, { type: "approval_request" }>;
 
 const enc = encodeURIComponent;
@@ -68,6 +72,9 @@ export class DeckApi {
   renameConversation = (cid: string, title: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { title });
   /** Перенести чат в другой проект (нужна роль редактора в обоих). */
   moveConversation = (cid: string, projectId: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { project_id: projectId });
+  /** Репозитории пользователя на GitHub/GitLab (по его токенам). */
+  repos = (q = "") => this.s.request<ReposByProvider>("GET", `/api/repos${q ? `?q=${enc(q)}` : ""}`, undefined, { timeoutMs: 60000 });
+  setProjectRepos = (pid: string, repos: RepoRef[]) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, { repos });
   updateProject = (pid: string, f: { name?: string; description?: string; instructions?: string }) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, f);
   exportProject = (pid: string) => this.s.request<ProjectExport>("GET", `/api/projects/${enc(pid)}/export`);
   importProject = (data: ProjectExport) => this.s.request<Project>("POST", "/api/projects/import", data, { timeoutMs: 120000 });

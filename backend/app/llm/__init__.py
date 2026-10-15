@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-PROVIDER_TITLES = {"sakana": "Sakana", "anthropic": "Claude", "openai": "OpenAI", "xai": "Grok"}
+PROVIDER_TITLES = {"sakana": "Sakana", "anthropic": "Claude", "deepseek": "DeepSeek", "openai": "OpenAI", "xai": "Grok"}
 
 
 class LLMError(Exception):
@@ -51,7 +51,7 @@ def get_provider(name: str, settings):
     if name == "anthropic":
         from .anthropic_provider import AnthropicProvider
         return AnthropicProvider(settings)
-    if name in ("sakana", "openai", "xai"):
+    if name in ("sakana", "deepseek", "openai", "xai"):
         from .openai_compat import OpenAICompatProvider
         return OpenAICompatProvider(name, settings)
     raise LLMError(f"Неизвестный провайдер {name}")

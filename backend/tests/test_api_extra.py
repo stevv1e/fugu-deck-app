@@ -239,3 +239,45 @@ def test_vision_target_sizes(tmp_path):
     import io
     url = vision.for_model("rot", p)
     assert Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).size == (1200, 1600)
+
+
+async def test_project_repos(client):
+    from app.tools.registry import ToolContext
+    from app.tools.repo_tools import project_repo_set, project_repos
+
+    login(client)
+    pid = client.post("/api/projects", json={"name": "Репы"}).json()["id"]
+    r = client.patch(f"/api/projects/{pid}", json={"repos": [{"provider": "github", "repo": "anna/site"},
+                                                              {"provider": "github", "repo": "Anna/Site"},
+                                                              {"provider": "gitlab", "repo": "grp/sub/app"}]})
+    assert r.status_code == 200 and r.json()["repos"] == [{"provider": "github", "repo": "anna/site"},
+                                                          {"provider": "gitlab", "repo": "grp/sub/app"}]
+    assert client.patch(f"/api/projects/{pid}", json={"repos": [{"provider": "bitbucket", "repo": "a/b"}]}).status_code == 422
+    assert client.patch(f"/api/projects/{pid}", json={"repos": [{"provider": "github", "repo": "../x"}]}).status_code == 422
+    proj = await main.db().get_project(pid)
+    ctx = ToolContext("c", main.db(), main.settings, {}, project=proj)
+    await project_repo_set(ctx, {"provider": "github", "repo": "anna/new", "on": True})
+    await project_repo_set(ctx, {"provider": "github", "repo": "ANNA/SITE", "on": False})
+    assert await project_repos(ctx, {}) == [{"provider": "gitlab", "repo": "grp/sub/app"}, {"provider": "github", "repo": "anna/new"}]
+    ctx.project = await main.db().get_project(pid)  # агент перечитывает проект на каждом шаге
+    msgs = await main.agent()._build_messages("нет", ctx)
+    assert "anna/new" in msgs[0]["content"] and "Репозитории проекта" in msgs[0]["content"]
+    assert client.get("/api/repos").status_code == 200  # без ключей Git — пустой ответ, а не ошибка
+
+
+async def test_sponsor_thresholds_and_by_member(client):
+    login(client)
+    db = main.db()
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    await db.set_sponsor(c["id"], "sakana:fugu-max-v1.0", "sp1", limit_usd=10)
+    hits = []
+    for cost in (3, 2.5, 0.1, 3, 2):  # 30 %, 55 %, 56 %, 86 %, 106 %
+        await db.add_usage(c["id"], "m", 1, 1, 0, cost, "member1", "sp1")
+        if hit := await db.sponsor_threshold(c["id"]):
+            hits.append(hit)
+    assert hits == [("sp1", 50), ("sp1", 80), ("sp1", 100)]  # каждый порог — один раз
+    await db.set_sponsor_limits(c["id"], sponsor_limit_usd=100)  # лимит подняли — пороги заново
+    await db.add_usage(c["id"], "m", 1, 1, 0, 45, "member2", "sp1")
+    assert await db.sponsor_threshold(c["id"]) == ("sp1", 50)
+    by = await db.chat_usage_by_member(c["id"], 0)
+    assert [(x["user_id"], x["usd"]) for x in by] == [("member2", 45), ("member1", 10.6)]

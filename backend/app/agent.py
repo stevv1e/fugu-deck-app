@@ -138,7 +138,8 @@ class Agent:
         if keys.get(provider):
             return keys[provider]
         if not self.settings.is_space:  # одиночный режим: ключи из .env
-            return {"sakana": self.settings.sakana_api_key, "anthropic": self.settings.anthropic_api_key}.get(provider) or None
+            return {"sakana": self.settings.sakana_api_key, "anthropic": self.settings.anthropic_api_key,
+                    "deepseek": self.settings.deepseek_api_key}.get(provider) or None
         return None
 
     async def git_status(self, providers: dict) -> dict[str, str | None]:
@@ -280,6 +281,11 @@ class Agent:
             parts.append(f"\n## Проект: {p['name']}\n{p.get('description') or ''}")
             if p.get("instructions"):
                 parts.append(f"\n### Инструкции проекта (обязательны к выполнению)\n{p['instructions']}")
+            repos = p.get("repos") or []
+            parts.append("\n### Репозитории проекта\n" + ("\n".join(f"- {r['provider']}: {r['repo']}" for r in repos)
+                         if repos else "(пока нет)") + "\nРаботай прежде всего с ними. Начинаешь работу с другим "
+                         "репозиторием в этом проекте — добавь его (project_repo_set on=true); созданный тобой "
+                         "репозиторий добавляется сам.")
             # скилы
             if self.skills:
                 from .tools.skill_tools import enabled
@@ -377,6 +383,9 @@ class Agent:
                                 run.user.get("id"), run.payer_id)
         await run.emit("usage", prompt_tokens=p, completion_tokens=c, cached_tokens=cached, cost_usd=cost,
                        by=run.user.get("display_name"))
+        if run.payer_id and run.payer_id != run.user.get("id"):  # платит спонсор — сообщить о порогах расхода
+            if hit := await self.db.sponsor_threshold(run.conversation_id):
+                outbox.add(hit[0], "sponsor", run.conversation_id, run.project_id, percent=hit[1])
 
     # ------------------------------------------------------------ инструменты
     async def _exec_tool(self, run: Run, call: dict) -> str:

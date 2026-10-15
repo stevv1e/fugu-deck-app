@@ -53,7 +53,11 @@ export type DeviceRow = {
   current: boolean;
 };
 
-export type Project = { id: string; name: string; description?: string; my_role?: string; [k: string]: unknown };
+export type Project = {
+  id: string; name: string; description?: string; my_role?: string;
+  repos?: { provider: "github" | "gitlab"; repo: string }[];
+  [k: string]: unknown;
+};
 
 export type Conversation = {
   id: string;

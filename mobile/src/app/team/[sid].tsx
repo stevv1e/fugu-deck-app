@@ -85,11 +85,13 @@ export default function Team() {
     router.push(`/s/${sid}`);
   });
 
-  const change = (who: string, r: "editor" | "reader" | "none") => run(`m:${who}`, async (c) => {
+  const change = (who: string, r: "editor" | "reader" | "none" | "owner") => run(`m:${who}`, async (c) => {
     setSt(await setMember(await openClusterSession(c, c.api), await keysOf(c), team, who, r));
     if (r !== "none" && who === nick) setNick("");
-    return r === "none" ? `${who} исключён(а)` : `${who}: ${ROLE[r]}`;
+    setTransfer(null);
+    return r === "none" ? `${who} исключён(а)` : r === "owner" ? `${who} теперь владелец; вы — редактор` : `${who}: ${ROLE[r]}`;
   });
+  const [transfer, setTransfer] = useState<string | null>(null);
 
   const remove = () => run("delete", async (c) => {
     const s = await openClusterSession(c, c.api);
@@ -142,7 +144,15 @@ export default function Team() {
                 <Txt style={{ flex: 1 }}>{m.nick}{m.nick === rec.user ? " · это вы" : ""}</Txt>
                 <Chip text={ROLE[m.role] ?? m.role} color={m.role === "owner" ? p.accent : p.dim} />
               </Row>
-              {owner && m.role !== "owner" ? (
+              {owner && m.role !== "owner" && transfer === m.nick ? (
+                <>
+                  <Txt kind="dim">Передать владение {m.nick}? Владелец меняет состав и может удалить пространство; вы станете редактором. Вернуть владение сможет только {m.nick}.</Txt>
+                  <Row>
+                    <Btn title="Передать ⌁" small kind="danger" onPress={() => change(m.nick, "owner")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
+                    <Btn title="Отмена" small kind="ghost" onPress={() => setTransfer(null)} />
+                  </Row>
+                </>
+              ) : owner && m.role !== "owner" ? (
                 armed === m.nick ? (
                   <Row>
                     <Btn title="Да, исключить" small kind="danger" onPress={() => change(m.nick, "none")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
@@ -153,6 +163,7 @@ export default function Team() {
                     <Btn title={m.role === "editor" ? "Сделать читателем" : "Сделать редактором"} small kind="ghost"
                       onPress={() => change(m.nick, m.role === "editor" ? "reader" : "editor")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
                     <Btn title="Исключить" small kind="ghost" onPress={() => setArmed(m.nick)} disabled={!!busy} />
+                    <Btn title="Сделать владельцем" small kind="ghost" onPress={() => setTransfer(m.nick)} disabled={!!busy} />
                   </Row>
                 )
               ) : null}
