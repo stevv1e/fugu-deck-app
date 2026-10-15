@@ -110,6 +110,10 @@ export type RunEvent =
       args_sha256?: string;
       /** Команда на сервере: подписывается не разрешение инструмента, а сама команда — это действие проверит ssh-gateway. */
       sign?: { type: "ssh_write" | "ssh_danger"; agent: string; server: string; command: string } | null;
+      /** Пробный прогон команды (выполнил шлюз до подтверждения). */
+      preview?: { command: string; exit_code?: number; output?: string; error?: string; truncated?: boolean } | null;
+      /** Независимая проверка команды другим запросом к модели: что сделает и чем рискованна. */
+      review?: string | null;
     }
   | { seq: number; type: "approval_resolved"; approval_id: string; call_id: string; approved: boolean }
   | { seq: number; type: "tool_start"; call_id: string; name: string; title?: string; args: any; risk?: string }

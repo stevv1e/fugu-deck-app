@@ -120,8 +120,9 @@ class AnthropicProvider:
                      on_text: OnText, on_tool: OnTool, headers: dict | None = None) -> LLMResult:
         client = _client(key, self.base_url, self.timeout)
         system, msgs = convert_messages(messages)
-        kwargs: dict = dict(model=model, max_tokens=self.max_tokens, messages=msgs,
-                            tools=convert_tools(tools), cache_control={"type": "ephemeral"})
+        kwargs: dict = dict(model=model, max_tokens=self.max_tokens, messages=msgs, cache_control={"type": "ephemeral"})
+        if tools:
+            kwargs["tools"] = convert_tools(tools)
         if system:
             kwargs["system"] = system
         if headers:

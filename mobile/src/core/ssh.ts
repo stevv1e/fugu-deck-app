@@ -13,9 +13,23 @@ export const AGENT = "fugu";
 
 export type SshServer = { id: string; host: string; port: number; user: string; host_key: string; added_by?: string; added?: string };
 export type SshRights = { agent: string; servers: string[]; read_without_confirm: boolean };
-export type SshState = { servers: SshServer[]; rights: SshRights[]; ca_public_key: string; principal_prefix: string };
+export type SshState = { servers: SshServer[]; rights: SshRights[]; ca_public_key: string; principal_prefix: string; paused?: boolean };
+/** Запись журнала команд (шлюз хранит 30 дней). */
+export type JournalEntry = {
+  time: string; agent: string; server: string; command: string; level: "read" | "write" | "danger"; signer?: string;
+  exit_code: number; duration_ms: number; stdout?: string; stderr?: string; error?: string; stopped?: boolean; preview?: boolean; timed_out?: boolean;
+};
 
-export const sshState = (s: ApiSession) => s.request<SshState>("GET", "/v1/ssh");
+// team — общее пространство (t-…): его серверы настраивает владелец; без team — личное пространство.
+const q = (team?: string | null) => (team ? `?space=${encodeURIComponent(team)}` : "");
+const spaceKey = (user: string, team?: string | null) => team || `u-${user}`;
+
+export const sshState = (s: ApiSession, team?: string | null) => s.request<SshState>("GET", `/v1/ssh${q(team)}`);
+export const sshJournal = (s: ApiSession, team?: string | null) =>
+  s.request<{ entries: JournalEntry[]; keep_days?: number }>("GET", `/v1/ssh/journal${q(team)}`);
+/** Остановить агента на серверах (идущие команды обрываются) или возобновить. Подписи не требует: уменьшение прав. */
+export const setPaused = (s: ApiSession, paused: boolean, team?: string | null) =>
+  s.request<{ paused: boolean; stopped: number }>("POST", "/v1/ssh/pause", { paused, ...(team ? { space: team } : {}) });
 
 export type ServerInput = { id: string; host: string; port: number; user: string; hostKey: string };
 
@@ -30,18 +44,19 @@ export function serverProblem(v: ServerInput): string | null {
   return null;
 }
 
-export async function addServer(s: ApiSession, keys: DeviceKeys, user: string, v: ServerInput): Promise<SshServer> {
+export async function addServer(s: ApiSession, keys: DeviceKeys, user: string, v: ServerInput, team?: string | null): Promise<SshServer> {
   const bad = serverProblem(v);
   if (bad) throw new Error(bad);
-  const signed = await signClusterAction(keys, { type: "server_add", server: v.id, host: v.host.toLowerCase(), port: v.port, user: v.user, host_key: v.hostKey }, { space: `u-${user}` });
+  const signed = await signClusterAction(keys, { type: "server_add", server: v.id, host: v.host.toLowerCase(), port: v.port, user: v.user, host_key: v.hostKey }, { space: spaceKey(user, team) });
   return s.request<SshServer>("POST", "/v1/ssh/servers", signed);
 }
 
-export const removeServer = (s: ApiSession, id: string) => s.request("POST", "/v1/ssh/servers/remove", { server: id });
+export const removeServer = (s: ApiSession, id: string, team?: string | null) =>
+  s.request("POST", "/v1/ssh/servers/remove", { server: id, ...(team ? { space: team } : {}) });
 
 /** Права агента: полный список серверов и разрешение читать без подтверждения. Подписывается целиком. */
-export async function setRights(s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean): Promise<SshRights> {
-  const signed = await signClusterAction(keys, { type: "agent_rights", agent: AGENT, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null }, { space: `u-${user}` });
+export async function setRights(s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean, team?: string | null): Promise<SshRights> {
+  const signed = await signClusterAction(keys, { type: "agent_rights", agent: AGENT, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null }, { space: spaceKey(user, team) });
   return s.request<SshRights>("POST", "/v1/ssh/rights", signed);
 }
 

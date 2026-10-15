@@ -27,6 +27,7 @@ class ToolContext:
     ssh_need: str = ""       # какая подпись нужна шлюзу для текущей команды на сервере (ssh_write | ssh_danger)
     approval_jws: str = ""   # подпись человека на текущее действие — инструмент передаёт её исполнителю
     talk: bool = False       # режим «Общение»: собеседник без Git, серверов и памяти
+    ssh_preview: dict | None = None  # вывод пробного прогона команды (от шлюза) — показать при подтверждении
     git_status: dict | None = None  # проверенные Git-провайдеры запуска (agent.git_status)
 
     @property

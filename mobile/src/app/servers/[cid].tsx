@@ -8,7 +8,7 @@ import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 
-import { addServer, AGENT, removeServer, serverProblem, setRights, setupScript, sshState, type SshState } from "@/core/ssh";
+import { addServer, AGENT, removeServer, serverProblem, setPaused, setRights, setupScript, sshJournal, sshState, type JournalEntry, type SshState } from "@/core/ssh";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, type ClusterRecord } from "@/state/cluster";
 import { openClusterSession } from "@/state/clusterSession";
@@ -16,7 +16,8 @@ import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Screen, T
 import { useTheme } from "@/ui/theme";
 
 export default function Servers() {
-  const { cid } = useLocalSearchParams<{ cid: string }>();
+  const { cid, team: teamParam } = useLocalSearchParams<{ cid: string; team?: string }>();
+  const team = teamParam || null;
   const { p } = useTheme();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [st, setSt] = useState<SshState | null>(null);
@@ -24,15 +25,18 @@ export default function Servers() {
   const [msg, setMsg] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [journal, setJournal] = useState<JournalEntry[] | null>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [openEntry, setOpenEntry] = useState<number | null>(null);
   const [f, setF] = useState({ id: "", host: "", port: "22", user: "deck-agent", hostKey: "" });
 
   const load = useCallback(async (r: ClusterRecord) => {
     try {
-      setSt(await sshState(await openClusterSession(r, r.api)));
+      setSt(await sshState(await openClusterSession(r, r.api), team));
     } catch (e) {
       setMsg({ kind: "error", text: errText(e) });
     }
-  }, []);
+  }, [team]);
 
   useEffect(() => {
     getCluster(cid).then((r) => {
@@ -67,20 +71,52 @@ export default function Servers() {
   const bad = f.id || f.host || f.hostKey ? serverProblem(input) : null;
 
   const add = () => run("add", `Сервер ${input.id} добавлен. Теперь разрешите агенту ходить на него.`, async (r) => {
-    await addServer(await openClusterSession(r, r.api), await keysOf(r), r.user, input);
+    await addServer(await openClusterSession(r, r.api), await keysOf(r), r.user, input, team);
     setF({ id: "", host: "", port: "22", user: "deck-agent", hostKey: "" });
   });
   const grant = (servers: string[], read: boolean, done: string) => run("rights", done, async (r) => {
-    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read);
+    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read, team);
   });
   const drop = (id: string) => run(`rm:${id}`, `Сервер ${id} убран`, async (r) => {
-    await removeServer(await openClusterSession(r, r.api), id);
+    await removeServer(await openClusterSession(r, r.api), id, team);
   });
+
+  const pause = (on: boolean) => run("pause", on ? "Агент на серверах остановлен: идущие команды оборваны, новые не выполняются" : "Агент снова может работать на серверах", async (r) => {
+    await setPaused(await openClusterSession(r, r.api), on, team);
+  });
+  const loadJournal = async () => {
+    if (!rec) return;
+    setJournalOpen(true);
+    try {
+      setJournal((await sshJournal(await openClusterSession(rec, rec.api), team)).entries);
+    } catch (e) {
+      setMsg({ kind: "error", text: errText(e) });
+    }
+  };
 
   if (!rec || (!st && !msg)) return <Screen title="Серверы"><Loading /></Screen>;
   return (
-    <Screen title="Серверы">
+    <Screen title={team ? "Серверы общего пространства" : "Серверы"}>
       {msg ? <Notice kind={msg.kind} text={msg.text} /> : null}
+      {st?.paused ? (
+        <Card accent={p.warn}>
+          <Txt kind="h2">Агент на серверах остановлен</Txt>
+          <Txt kind="dim">Команды не выполняются, пока вы не возобновите. Серверы и права сохранены.</Txt>
+          <Btn title="Возобновить" onPress={() => pause(false)} busy={busy === "pause"} />
+        </Card>
+      ) : st && st.servers.length ? (
+        armed === "__pause" ? (
+          <Card accent={p.accent2}>
+            <Txt kind="dim">Остановить агента на всех серверах? Идущие команды оборвутся, новые не будут выполняться, пока вы не возобновите.</Txt>
+            <Row>
+              <Btn title="Остановить" small kind="danger" onPress={() => pause(true)} busy={busy === "pause"} />
+              <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
+            </Row>
+          </Card>
+        ) : (
+          <Btn title="■ Остановить агента на серверах" kind="danger" small onPress={() => setArmed("__pause")} style={{ alignSelf: "flex-start" }} />
+        )
+      ) : null}
       <Txt kind="dim">
         Агент вашего пространства может выполнять команды на ваших серверах. Смотреть (журналы, состояние) — без
         подтверждения, если вы это разрешите; любое изменение — только после вашей подписи именно этой команды.
@@ -134,6 +170,30 @@ export default function Servers() {
               </Row>
             </Card>
           ) : null}
+
+          <Card>
+            <Row style={{ justifyContent: "space-between" }}>
+              <Txt kind="h2">Журнал команд</Txt>
+              <Btn small kind="ghost" title={journalOpen ? "Обновить" : "Показать"} onPress={loadJournal} />
+            </Row>
+            <Txt kind="small">Что агент выполнял на серверах, кто подтвердил и что вывелось. Хранится 30 дней.</Txt>
+            {journalOpen && !journal ? <Loading /> : null}
+            {journal && journal.length === 0 ? <Txt kind="small">Команд ещё не было.</Txt> : null}
+            {journal?.slice(0, 100).map((e, i) => (
+              <Card key={i} onPress={() => setOpenEntry(openEntry === i ? null : i)}
+                accent={e.error || e.stopped ? p.accent2 : e.level === "danger" ? p.accent2 : e.level === "write" ? p.warn : p.line2}>
+                <Row style={{ justifyContent: "space-between" }}>
+                  <Txt kind="small">{new Date(e.time).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })} · {e.server}</Txt>
+                  <Chip text={e.stopped ? "оборвана" : e.error ? "не выполнена" : e.preview ? "пробный прогон" : `код ${e.exit_code}`} />
+                </Row>
+                <Txt kind="mono" numberOfLines={openEntry === i ? undefined : 2} selectable style={{ fontSize: 12.5 }}>{e.command}</Txt>
+                <Txt kind="small">{e.signer ? `подтвердил ${e.signer}` : "чтение без подтверждения"}{e.duration_ms ? ` · ${(e.duration_ms / 1000).toFixed(1)} с` : ""}</Txt>
+                {openEntry === i ? (
+                  <Txt kind="mono" selectable style={{ fontSize: 11.5 }}>{e.error || [e.stdout, e.stderr].filter(Boolean).join("\n") || "(вывода нет)"}</Txt>
+                ) : null}
+              </Card>
+            ))}
+          </Card>
 
           <Card>
             <Txt kind="h2">Подготовить сервер</Txt>

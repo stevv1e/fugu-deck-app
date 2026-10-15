@@ -147,6 +147,22 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
           <View style={{ backgroundColor: p.bg2, borderWidth: 1, borderColor: c, padding: 10, borderRadius: p.radius }}>
             <Text selectable style={{ fontFamily: MONO, fontSize: 13, color: p.text }}>{cmd.command}</Text>
           </View>
+          {req.review ? (
+            <View style={{ borderLeftWidth: 2, borderLeftColor: p.accent, paddingLeft: 10, gap: 2 }}>
+              <Txt kind="label">независимая проверка</Txt>
+              <Txt kind="dim">{req.review}</Txt>
+            </View>
+          ) : null}
+          {req.preview ? (
+            <View style={{ gap: 4 }}>
+              <Txt kind="label">пробный прогон: {req.preview.command}</Txt>
+              <View style={{ backgroundColor: p.bg2, borderWidth: 1, borderColor: p.line, padding: 10, borderRadius: p.radius }}>
+                <Text selectable style={{ fontFamily: MONO, fontSize: 12, color: req.preview.error ? p.accent2 : p.text }}>
+                  {req.preview.error ? `не выполнен: ${req.preview.error}` : (req.preview.output || "(вывода нет)") + (req.preview.truncated ? "\n…" : "")}
+                </Text>
+              </View>
+            </View>
+          ) : null}
           <Txt kind="small">Подпись покроет эту команду целиком, сервер и агента. Сервер выполнит только её.</Txt>
           {needName ? (
             <>
