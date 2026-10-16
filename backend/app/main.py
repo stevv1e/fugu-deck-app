@@ -69,6 +69,12 @@ async def lifespan(app: FastAPI):
 
 
 log = logging.getLogger("fugu.deck")
+if not log.handlers:  # без обработчика info терялись, а warning шли без времени
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 app = FastAPI(title="Fugu Deck", lifespan=lifespan, docs_url=None, redoc_url=None)
 if settings.cors_origins:
