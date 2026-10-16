@@ -49,7 +49,8 @@ def git_base(provider: str) -> str:
 
 
 def headers(chat_id: str, member: str) -> dict[str, str]:
-    """Для общих пространств keyguard ищет разрешение спонсора на этот чат и проверяет участника."""
+    """Для общих пространств keyguard ищет разрешение спонсора на этот чат и проверяет участника.
+    member — id участника (ник из control-plane, как в составе разрешения), не username: тот здесь «ник#id»."""
     return {"X-Deck-Chat": chat_id, "X-Deck-Member": member}
 
 
