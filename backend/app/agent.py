@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from . import filetools, vision
 from .outbox import outbox
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
+
+log = logging.getLogger("fugu.deck")
 
 SYSTEM_PROMPT = """Ты — Fugu Deck, ИИ-ассистент разработчика, работающий с его репозиториями на GitHub и GitLab.
 Пользователь пишет с телефона, поэтому отвечай кратко и по делу, на языке пользователя.
@@ -535,10 +538,12 @@ class Agent:
             await run.emit("cancelled")
         except LLMError as e:
             run.status = "error"
+            # текст ошибки виден только в приложении, пока под жив; в журнал — чтобы разбирать потом
+            log.warning("event=run.error chat=%s model=%s user=%s error=%s", cid, run.model, run.user.get("username"), e)
             await run.emit("error", message=str(e))
         except Exception as e:
             run.status = "error"
-            traceback.print_exc()
+            log.exception("event=run.crash chat=%s model=%s user=%s", cid, run.model, run.user.get("username"))
             await run.emit("error", message=f"{e.__class__.__name__}: {e}")
         finally:
             run.finished_at = time.time()
