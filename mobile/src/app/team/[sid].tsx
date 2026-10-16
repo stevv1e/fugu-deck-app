@@ -26,6 +26,7 @@ export default function Team() {
   const [msg, setMsg] = useState<{ kind: "error" | "ok" | "info"; text: string } | null>(null);
   const [nick, setNick] = useState("");
   const [role, setRole] = useState<"editor" | "reader">("editor");
+  const [transfer, setTransfer] = useState<string | null>(null); // кому передать владение (ждёт подтверждения)
   const [armed, setArmed] = useState<string | null>(null);
   const team = sp?.team ?? "";
 
@@ -91,7 +92,6 @@ export default function Team() {
     setTransfer(null);
     return r === "none" ? `${who} исключён(а)` : r === "owner" ? `${who} теперь владелец; вы — редактор` : `${who}: ${ROLE[r]}`;
   });
-  const [transfer, setTransfer] = useState<string | null>(null);
 
   const remove = () => run("delete", async (c) => {
     const s = await openClusterSession(c, c.api);
@@ -170,6 +170,10 @@ export default function Team() {
             </Card>
           ))}
 
+          {owner ? (
+            <Btn title="Серверы общего пространства" kind="ghost"
+              onPress={() => router.push({ pathname: "/servers/[cid]", params: { cid: rec.id, team } })} />
+          ) : null}
           {owner ? (
             <Card>
               <Txt kind="h2">Добавить участника</Txt>

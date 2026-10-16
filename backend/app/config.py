@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""  # только для одиночного режима; в кластере ключи приходят с телефона
     anthropic_base_url: str = ""
     anthropic_max_tokens: int = 32000
+    # модель для независимой проверки команд на серверах ("" — та же, что у агента в этом чате)
+    review_model: str = ""
     sakana_max_tokens: int = 16000          # keyguard требует max_tokens: без него расход не ограничить
     # Кластер v2: модели и Git только через keyguard; ключей в пространстве нет.
     keyguard_url: str = ""                  # http://keyguard.deck-keys.svc.cluster.local:8080

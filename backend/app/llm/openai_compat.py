@@ -57,8 +57,9 @@ class OpenAICompatProvider:
     async def stream(self, key: str, model: str, messages: list[dict], tools: list[dict],
                      on_text: OnText, on_tool: OnTool, headers: dict | None = None) -> LLMResult:
         client = _client(self.base_url, key, self.timeout)
-        kwargs: dict = dict(model=model, messages=_strip_meta(messages), stream=True, tools=tools,
-                            max_tokens=self.max_tokens)
+        kwargs: dict = dict(model=model, messages=_strip_meta(messages), stream=True, max_tokens=self.max_tokens)
+        if tools:  # пустой список инструментов не все API принимают (проверка команды идёт без инструментов)
+            kwargs["tools"] = tools
         if headers:
             kwargs["extra_headers"] = headers
         if self.base_url not in _no_stream_usage:
