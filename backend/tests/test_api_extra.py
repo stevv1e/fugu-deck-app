@@ -352,3 +352,20 @@ async def test_memory_search_forms_and_links(client):
     assert [r["id"] for r in near] == [b["id"]]
     from app.kb import stems
     assert stems("бэкапы на серверах") == ["бэкап", "сервер"]
+
+
+async def test_llm_ready_from_keyguard(client, monkeypatch):
+    """В кластере ключи — в keyguard: «ключ есть» только у провайдеров, для которых владелец его ввёл."""
+    from app import keyguard_client as kgc
+
+    login(client)
+    monkeypatch.setattr(kgc, "enabled", lambda: True)
+    monkeypatch.setattr(kgc, "token", lambda: "tok")
+
+    async def mine():
+        return {"deepseek"}
+    monkeypatch.setattr(kgc, "my_llm_providers", mine)
+    assert client.get("/api/config").json()["llm_ready"] == ["deepseek"]
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    r = client.post(f"/api/conversations/{c['id']}/messages", json={"content": "hi", "model": "sakana:fugu-max-v1.0"})
+    assert r.status_code == 400 and "Токены моделей" in r.json()["detail"], r.text
