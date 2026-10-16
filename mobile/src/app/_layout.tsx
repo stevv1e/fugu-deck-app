@@ -6,6 +6,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { isDesktop, onDeepLink } from "@/platform/desktop";
 import { routeFor, startPush } from "@/platform/push";
 import { ServersProvider } from "@/state/servers";
 import { ThemeProvider, useTheme } from "@/ui/theme";
@@ -41,13 +42,22 @@ function PushRouter() {
   return null;
 }
 
+/** Windows: приглашение fugudeck://join?… (из браузера или по ссылке) открывает вход в кластер. */
+function DesktopLinks() {
+  useEffect(() => onDeepLink((url) => {
+    const m = /^fugudeck:\/\/join\?(.*)$/.exec(url);
+    if (m) router.push(`/join?${m[1]}` as never);
+  }), []);
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
         <ServersProvider>
           <Themed />
-          <PushRouter />
+          {isDesktop ? <DesktopLinks /> : <PushRouter />}
         </ServersProvider>
       </ThemeProvider>
     </SafeAreaProvider>

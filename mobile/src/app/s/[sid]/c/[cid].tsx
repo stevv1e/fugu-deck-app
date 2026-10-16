@@ -15,6 +15,7 @@ import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, PREVIEW_
 import { argsHash } from "@/core/crypto";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
+import { isDesktop } from "@/platform/desktop";
 import { readAll, readChunk } from "@/platform/files";
 import { pickFiles, pickPhotos, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
@@ -588,7 +589,7 @@ export default function Chat() {
           <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
             {attachMenu ? (
               <Row gap={6}>
-                <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />
+                {isDesktop ? null : <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />}
                 <Btn small title="Фото" kind="ghost" onPress={() => attach("photo")} />
                 <Btn small title="Файл" kind="ghost" onPress={() => attach("file")} />
                 <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки, читает текст, PDF, DOCX, XLSX и архивы</Txt>

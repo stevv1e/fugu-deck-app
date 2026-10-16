@@ -13,7 +13,7 @@ export type ServerInfo = {
 };
 
 export type MtlsMode = "off" | "optional" | "required";
-export type KeyStorage = "secure_enclave" | "strongbox" | "tee" | "software";
+export type KeyStorage = "secure_enclave" | "strongbox" | "tee" | "tpm" | "software";
 
 export type User = { id: string; username: string; display_name: string; role: string };
 

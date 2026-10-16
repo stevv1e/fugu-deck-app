@@ -6,7 +6,12 @@ import * as ImagePicker from "expo-image-picker";
 
 import type { PickedFile } from "@/core/attachments";
 
+import { desk, isDesktop } from "./desktop";
 import { sizeOf } from "./files";
+
+type DeskPicked = { uri: string; name: string; mime: string; size: number };
+const deskPick = async (images: boolean, limit: number): Promise<PickedFile[]> =>
+  (await desk<DeskPicked[]>("pick_files", { images, multiple: limit > 1 })).slice(0, limit);
 
 // Размер — у самого файла на диске: галерея сообщает размер исходного фото, а выбранное фото уже пережато
 // (quality) и меньше. Поверив галерее, загрузка читала бы за концом файла.
@@ -17,6 +22,7 @@ const picked = (uri: string, name: string, mime: string, size?: number | null): 
 
 /** Фото из галереи, можно несколько (системное окно выбора; разрешение на всю галерею не нужно). */
 export async function pickPhotos(limit: number): Promise<PickedFile[]> {
+  if (isDesktop) return deskPick(true, limit);
   const r = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"], quality: 0.85, exif: false, allowsMultipleSelection: limit > 1, selectionLimit: Math.max(1, limit),
   });
@@ -29,6 +35,7 @@ export async function pickPhotos(limit: number): Promise<PickedFile[]> {
 
 /** Снимок камерой. Разрешение на камеру спрашивается при первом снимке; отказ — понятная ошибка. */
 export async function takePhoto(): Promise<PickedFile | null> {
+  if (isDesktop) throw new Error("Снимок камерой есть в приложении для телефона; здесь — «Фото» с диска");
   const perm = await ImagePicker.requestCameraPermissionsAsync();
   if (!perm.granted) throw new Error("Нет доступа к камере: разрешите его приложению в настройках телефона");
   const r = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7, exif: false });
@@ -40,6 +47,7 @@ export async function takePhoto(): Promise<PickedFile | null> {
 
 /** Любые файлы через системное окно выбора (архивы, документы…), можно несколько. */
 export async function pickFiles(limit: number): Promise<PickedFile[]> {
+  if (isDesktop) return deskPick(false, limit);
   const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: limit > 1 });
   if (r.canceled) return [];
   return (r.assets ?? []).slice(0, limit).map((a) => picked(a.uri, a.name || "file", a.mimeType || "", a.size));
@@ -47,6 +55,13 @@ export async function pickFiles(limit: number): Promise<PickedFile[]> {
 
 /** Текстовый файл через системное окно выбора (импорт проекта). null — человек передумал. */
 export async function pickText(maxBytes = 20 * 1024 * 1024): Promise<{ name: string; text: string } | null> {
+  if (isDesktop) {
+    const f = (await deskPick(false, 1))[0];
+    if (!f) return null;
+    if (f.size > maxBytes) throw new Error("Файл слишком большой");
+    const b64 = await desk<string>("read_chunk", { path: f.uri, position: 0, length: f.size });
+    return { name: f.name, text: new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))) };
+  }
   const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: ["application/json", "text/*", "*/*"] });
   const a = r.canceled ? null : r.assets?.[0];
   if (!a) return null;
@@ -59,6 +74,12 @@ export async function pickText(maxBytes = 20 * 1024 * 1024): Promise<{ name: str
  * false — человек не выбрал папку.
  */
 export async function saveText(name: string, mime: string, text: string): Promise<boolean> {
+  if (isDesktop) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return saveBase64(name, mime, btoa(bin));
+  }
   if (Platform.OS !== "android") throw new Error("Сохранение в файл пока есть только на Android");
   const perm = await StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!perm.granted) return false;
@@ -69,6 +90,12 @@ export async function saveText(name: string, mime: string, text: string): Promis
 
 /** Файл через системное окно выбора — содержимым base64 (архив для импорта). null — человек передумал. */
 export async function pickBase64(maxBytes: number, types: string[] = ["*/*"]): Promise<{ name: string; data: string } | null> {
+  if (isDesktop) {
+    const f = (await deskPick(false, 1))[0];
+    if (!f) return null;
+    if (f.size > maxBytes) throw new Error(`Файл больше ${Math.round(maxBytes / 1048576)} МБ`);
+    return { name: f.name, data: await desk<string>("read_chunk", { path: f.uri, position: 0, length: f.size }) };
+  }
   const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: types });
   const a = r.canceled ? null : r.assets?.[0];
   if (!a) return null;
@@ -78,6 +105,12 @@ export async function pickBase64(maxBytes: number, types: string[] = ["*/*"]): P
 
 /** Сохранить двоичный файл (base64) в папку, которую выберет человек. false — папку не выбрали. */
 export async function saveBase64(name: string, mime: string, data: string): Promise<boolean> {
+  if (isDesktop) {
+    const path = await desk<string | null>("save_dialog", { name });
+    if (!path) return false;
+    await desk("write_file", { path, data, append: false });
+    return true;
+  }
   if (Platform.OS !== "android") throw new Error("Сохранение в файл пока есть только на Android");
   const perm = await StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!perm.granted) return false;

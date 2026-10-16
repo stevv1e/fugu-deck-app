@@ -1,4 +1,4 @@
-export type NativeStorage = "secure_enclave" | "strongbox" | "tee" | "software";
+export type NativeStorage = "secure_enclave" | "strongbox" | "tee" | "tpm" | "software";
 
 export type NativeKeyInfo = {
   /** Несжатая точка P-256 (0x04‖X‖Y), base64url. */
@@ -9,7 +9,7 @@ export type NativeKeyInfo = {
 };
 
 export type Capabilities = {
-  platform: "ios" | "android";
+  platform: "ios" | "android" | "windows";
   hardware: boolean;
   strongbox: boolean;
   biometry: boolean;
