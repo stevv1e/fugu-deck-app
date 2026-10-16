@@ -1022,20 +1022,28 @@ class Database:
         await self._exec("DELETE FROM memories WHERE id=?", (mid,))
 
     async def search_memories(self, project_ids: list[str], query: str, limit: int = 20) -> list[dict]:
+        """Поиск заметок: по основам слов (словоформы не мешают), выше — где совпало больше разных слов запроса,
+        особенно в заголовке и метках. Подстрока целиком — запасной путь (например, для кусков адресов)."""
+        from .kb import relevance, stems, title_of
         if not project_ids:
             return []
         marks = ",".join("?" * len(project_ids))
-        words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 1][:12]
-        if words:
-            fts = " OR ".join(f'"{w}"*' for w in words)
+        st = stems(query)
+        rows: list[dict] = []
+        if st:
+            fts = " OR ".join(f'"{w}"*' for w in st)
             try:
-                return await self._all(
+                rows = await self._all(
                     f"SELECT m.*, p.name AS project_name FROM memories_fts f JOIN memories m ON m.id=f.rowid "
                     f"JOIN projects p ON p.id=m.project_id WHERE memories_fts MATCH ? AND m.project_id IN ({marks}) "
-                    f"ORDER BY bm25(memories_fts) LIMIT ?", (fts, *project_ids, limit))
+                    f"ORDER BY bm25(memories_fts) LIMIT ?", (fts, *project_ids, max(limit * 5, 100)))
             except Exception:
-                pass
-        return await self._all(
-            f"SELECT m.*, p.name AS project_name FROM memories m JOIN projects p ON p.id=m.project_id "
-            f"WHERE m.project_id IN ({marks}) AND (m.content LIKE ? OR m.tags LIKE ?) ORDER BY m.updated_at DESC LIMIT ?",
-            (*project_ids, f"%{query}%", f"%{query}%", limit))
+                rows = []
+        if not rows:
+            return await self._all(
+                f"SELECT m.*, p.name AS project_name FROM memories m JOIN projects p ON p.id=m.project_id "
+                f"WHERE m.project_id IN ({marks}) AND (m.content LIKE ? OR m.tags LIKE ? OR m.title LIKE ?) "
+                f"ORDER BY m.updated_at DESC LIMIT ?", (*project_ids, f"%{query}%", f"%{query}%", f"%{query}%", limit))
+        # bm25 уже упорядочил; поверх — сколько слов запроса покрыто (устойчивая сортировка сохраняет порядок bm25)
+        rows.sort(key=lambda m: -relevance(st, title_of(m["content"], m.get("title")), m["content"], m.get("tags") or ""))
+        return rows[:limit]

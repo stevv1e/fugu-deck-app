@@ -35,6 +35,33 @@ _HINTS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
+_RU_END = re.compile(r"(иями|ями|ами|ого|его|ому|ему|ыми|ими|ией|ия|ий|ой|ей|ая|яя|ое|ее|ые|ие|ах|ях|ам|ям|ом|ем|ов|ев|ую|юю|ть|ся|ом|а|я|о|е|ы|и|у|ю|ь|й)$")
+_EN_END = re.compile(r"(ations|ation|ings|ing|ers|er|ed|es|s)$")
+_STOP = {"и", "в", "на", "с", "по", "к", "о", "об", "от", "до", "за", "из", "у", "не", "как", "что", "это", "для", "the", "a", "an",
+         "of", "to", "in", "on", "for", "and", "or", "is", "где", "когда", "какой", "какая", "какие", "мы", "у", "нас", "наш"}
+
+
+def stems(query: str, limit: int = 12) -> list[str]:
+    """Основы слов запроса для поиска по началу: «бэкапы базы» находит «бэкап базы данных», «резервной» — «резервная».
+    Грубо (отрезаем окончания), но без словарей и без модели: русский и английский."""
+    out: list[str] = []
+    for w in re.findall(r"\w+", query.lower()):
+        if w in _STOP or len(w) < 2:
+            continue
+        cyr = bool(re.search(r"[а-яё]", w))
+        base = _RU_END.sub("", w) if cyr and len(w) > 4 else _EN_END.sub("", w) if len(w) > 4 else w
+        base = base if len(base) >= 3 else w
+        if base not in out:
+            out.append(base)
+    return out[:limit]
+
+
+def relevance(stems_: list[str], title: str, content: str, tags: str = "") -> float:
+    """Сколько разных основ запроса встретилось: в заголовке и метках — вдвое весомее, чем в тексте."""
+    t, c = f"{title} {tags}".lower(), content.lower()
+    return sum(2.0 if s in t else 1.0 if s in c else 0.0 for s in stems_)
+
+
 def classify(content: str, tags: str = "") -> str:
     """Область заметки по словам. Грубая, но предсказуемая замена кластеризации; человек может задать область сам."""
     text = f"{tags} {content}".lower()

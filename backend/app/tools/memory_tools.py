@@ -36,7 +36,8 @@ async def _changed(ctx: ToolContext, action: str, memory: dict | None = None, mi
 
 @tool("memory_search",
       "Поиск по памяти проекта (факты, решения, договорённости). Ищет также в памяти связанных проектов "
-      "(только чтение). project — имя проекта, чтобы искать только в нём.",
+      "(только чтение). project — имя проекта, чтобы искать только в нём. Словоформы не важны; ищет по словам, "
+      "а не по смыслу — если не нашлось, спроси иначе: синонимы, по-английски, имя сервиса или файла.",
       obj({"query": {"type": "string"}, "project": {"type": "string"},
            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 15}}, ["query"]),
       group="memory", title="Поиск в памяти")
