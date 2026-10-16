@@ -9,6 +9,7 @@ keyguard проверяет его (TokenReview), вырезает и подст
 from __future__ import annotations
 
 import functools
+import time
 
 import httpx
 
@@ -50,6 +51,33 @@ def git_base(provider: str) -> str:
 def headers(chat_id: str, member: str) -> dict[str, str]:
     """Для общих пространств keyguard ищет разрешение спонсора на этот чат и проверяет участника."""
     return {"X-Deck-Chat": chat_id, "X-Deck-Member": member}
+
+
+_mine: tuple[float, set[str]] | None = None
+
+
+async def my_llm_providers() -> set[str] | None:
+    """У каких провайдеров моделей у владельца личного пространства есть ключ (keyguard /v1/keys/mine).
+    None — не узнать (общее пространство или keyguard недоступен). Кэш 20 с: экран моделей и чат спрашивают часто."""
+    global _mine
+    if _mine and time.monotonic() - _mine[0] < 20:
+        return _mine[1]
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{_s().keyguard_url.rstrip('/')}/v1/keys/mine", headers={"Authorization": f"Bearer {token()}"})
+        if r.status_code != 200:
+            return None
+        got = set(r.json().get("providers") or [])
+    except Exception:
+        return None
+    _mine = (time.monotonic(), got)
+    return got
+
+
+def forget_providers() -> None:
+    """Ключ добавлен или удалён — следующий запрос спросит keyguard заново."""
+    global _mine
+    _mine = None
 
 
 async def verify_action(jws: str) -> dict:

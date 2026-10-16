@@ -426,6 +426,8 @@ async def config(u: dict = Me):
                 providers[name] = {"ok": False, "error": str(e)}
     llm_ready = sorted({split_model(m)[0] for m in settings.model_list
                         if agent().llm_key(split_model(m)[0], vault().get(u["id"]))})
+    if kgc.enabled() and not is_team() and (mine := await kgc.my_llm_providers()) is not None:
+        llm_ready = [p for p in llm_ready if p in mine]  # ключи владельца — в keyguard, не здесь
     return {
         "mode": settings.deck_mode,
         "space": {"id": settings.space_id, "kind": settings.space_kind, "name": settings.space_name}
@@ -1310,6 +1312,10 @@ async def _llm_access(c: dict, u: dict, want_model: str | None):
             raise HTTPException(409, why)
         return c["model"], keys, llm_key, budget
     model = _check_model(want_model or c["model"])
+    if kgc.enabled() and (mine := await kgc.my_llm_providers()) is not None and split_model(model)[0] not in mine:
+        kgc.forget_providers()  # ключ могли только что ввести — спросим ещё раз
+        if (mine := await kgc.my_llm_providers()) is not None and split_model(model)[0] not in mine:
+            raise HTTPException(400, f"Нет ключа {split_model(model)[0]}: введите его на экране кластера → «Токены моделей» или выберите другую модель")
     if not agent().llm_key(split_model(model)[0], keys):
         raise HTTPException(400, f"Нет ключа для {split_model(model)[0]}: разблокируйте ключи в приложении"
                             if settings.is_space else f"На сервере не задан ключ {split_model(model)[0]}")
