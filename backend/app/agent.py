@@ -182,7 +182,7 @@ class Agent:
         self._gc()
         keys = dict(keys or {})
         run = Run(id=new_id(), conversation_id=cid, model=model, project_id=project_id, user=user or {},
-                  keys=keys, git=self._git_for(keys, cid, (user or {}).get("username", "")), llm_key=llm_key, budget=budget,
+                  keys=keys, git=self._git_for(keys, cid, (user or {}).get("id", "")), llm_key=llm_key, budget=budget,
                   payer_id=payer_id or (user or {}).get("id"))
         self.runs[run.id] = run
         self.active[cid] = run.id
@@ -359,7 +359,7 @@ class Agent:
         async def on_tool(i: int, name: str):
             await run.emit("tool_call_building", index=i, name=name)
 
-        hdrs = kgc.headers(run.conversation_id, run.user.get("username", "")) if kgc.enabled() else None
+        hdrs = kgc.headers(run.conversation_id, run.user.get("id", "")) if kgc.enabled() else None
         res = await provider.stream(key, model, messages, [t.schema() for t in self.tools_for(run)], on_text, on_tool,
                                     headers=hdrs)
         for c in res.tool_calls:
@@ -387,7 +387,7 @@ class Agent:
             return None
 
         try:
-            hdrs = kgc.headers(run.conversation_id, run.user.get("username", "")) if kgc.enabled() else None
+            hdrs = kgc.headers(run.conversation_id, run.user.get("id", "")) if kgc.enabled() else None
             res = await asyncio.wait_for(get_provider(pname, self.settings).stream(key, model, msgs, [], nothing, nothing, headers=hdrs), 90)
         except Exception:
             return None  # проверка — подсказка человеку; без неё карточка всё равно показывает команду целиком

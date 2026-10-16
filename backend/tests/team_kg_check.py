@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 SPACE = "t-shop000001"
 GRANTS: dict[str, dict] = {}   # id -> условия, как их подписал спонсор
 CALLS: list[tuple[str, str]] = []  # (activate|deactivate, id)
+LLM: list[tuple[str, str]] = []  # (чат, участник) — запросы к модели, которые keyguard пропустил
 
 
 class KG(BaseHTTPRequestHandler):
@@ -28,6 +29,8 @@ class KG(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        if self.path.startswith("/llm/"):
+            return self.llm(body)
         op = self.path.rsplit("/", 1)[-1]
         g = GRANTS.get(body.get("grant_id"))
         if self.headers.get("Authorization") != "Bearer space-token" or op not in ("activate", "deactivate") or not g or g.get("revoked"):
@@ -36,6 +39,21 @@ class KG(BaseHTTPRequestHandler):
         CALLS.append((op, g["id"]))
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "grant": g}).encode())
+
+    def llm(self, body: dict):
+        # как настоящий keyguard: действующее разрешение на чат и модель, участник — в списке допущенных спонсором
+        chat, member = self.headers.get("X-Deck-Chat"), self.headers.get("X-Deck-Member")
+        g = next((g for g in GRANTS.values() if g["active"] and g["chat"] == chat and g["model"] == body.get("model")), None)
+        if not g or member not in g["members"]:
+            self.send_response(403); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(json.dumps({"error": "участник не допущен спонсором"}).encode()); return
+        LLM.append((chat, member))
+        self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+        for d in ({"role": "assistant", "content": "Готово"}, {}):
+            ch = {"id": "x", "object": "chat.completion.chunk", "created": 0, "model": body["model"],
+                  "choices": [{"index": 0, "delta": d, "finish_reason": None if d else "stop"}]}
+            self.wfile.write(f"data: {json.dumps(ch)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
 
 
 kg = HTTPServer(("127.0.0.1", 0), KG)
@@ -149,6 +167,15 @@ with TestClient(main.app) as c:
     assert CALLS[n:] == [("activate", "g-000000b2"), ("deactivate", "g-000000a1")], CALLS[n:]
     conv = c.get(f"/api/conversations/{chat}", headers=anna).json()
     assert conv["model"] == ULTRA and conv["sponsor"]["id"] == "bob" and conv["sponsor"]["limit_usd"] == 50.0, conv
+
+    # Участник пишет в чат: keyguard узнаёт его по id из состава (как в разрешении), а не по username «ник#…».
+    r = c.post(f"/api/conversations/{chat}/messages", headers=anna, json={"content": "привет"})
+    assert r.status_code == 200, r.text
+    for _ in range(100):
+        if any(m["role"] == "assistant" for m in c.get(f"/api/conversations/{chat}", headers=anna).json()["messages"]):
+            break
+        time.sleep(0.05)
+    assert LLM == [(chat, "anna")], LLM
 
     # 3. Спонсор уходит: разрешение снято, чат без модели до нового предложения.
     assert c.patch(f"/api/conversations/{chat}/sponsor", headers=anna, json={"withdraw": True}).status_code == 403
