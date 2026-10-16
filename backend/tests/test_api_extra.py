@@ -281,3 +281,31 @@ async def test_sponsor_thresholds_and_by_member(client):
     assert await db.sponsor_threshold(c["id"]) == ("sp1", 50)
     by = await db.chat_usage_by_member(c["id"], 0)
     assert [(x["user_id"], x["usd"]) for x in by] == [("member2", 45), ("member1", 10.6)]
+
+
+async def test_agents(client):
+    from app.agent import Run
+
+    login(client)
+    assert [a["id"] for a in client.get("/api/agents").json()] == ["fugu"]
+    bad = client.put("/api/agents/Duty", json={"name": "x"})
+    assert bad.status_code == 400
+    assert client.put("/api/agents/duty", json={"name": "Дежурный", "tools": ["root"]}).status_code == 400
+    r = client.put("/api/agents/duty", json={"name": "Дежурный", "tools": ["ssh", "files"], "skills": [],
+                                             "instructions": "Только смотри, ничего не меняй."})
+    assert r.status_code == 200 and r.json()["tools"] == ["ssh", "files"]
+    c = client.post("/api/projects/general/conversations", json={"agent_id": "duty"}).json()
+    assert c["agent_id"] == "duty" and client.get(f"/api/conversations/{c['id']}").json()["agent"]["name"] == "Дежурный"
+    ag = main.agent()
+    run = Run(id="r", conversation_id=c["id"], model="sakana:x", project_id="general", git_status={"github": "octo"},
+              agent=await main.db().get_agent("duty"))
+    names = {t.name for t in ag.tools_for(run)}
+    assert "commit_files" not in names and "memory_save" not in names and "read_attachment" in names
+    ctx = await ag.context(c["id"], run=run)
+    msgs = await ag._build_messages(c["id"], ctx)
+    assert "Дежурный" in msgs[0]["content"] and "Только смотри" in msgs[0]["content"] and ctx.agent_id == "duty"
+    # чат можно передать другому агенту; удаление агента возвращает чаты агенту по умолчанию
+    assert client.patch(f"/api/conversations/{c['id']}", json={"agent_id": "nope"}).status_code == 400
+    assert client.delete("/api/agents/fugu").status_code == 400
+    assert client.delete("/api/agents/duty").status_code == 200
+    assert client.get(f"/api/conversations/{c['id']}").json()["agent"]["id"] == "fugu"

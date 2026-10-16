@@ -286,6 +286,21 @@ export default function Chat() {
   const [link, setLink] = useState<string>("");
   const [models, setModels] = useState<{ list: string[]; ready: string[] } | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [agentList, setAgentList] = useState<{ id: string; name: string }[]>([]);
+  const pickAgent = async (id: string) => {
+    if (!api || !conv) return;
+    setSwitching(true);
+    setError(null);
+    try {
+      await api.setConversationAgent(cid, id);
+      setConv({ ...conv, agent: agentList.find((a) => a.id === id) });
+      setModels(null);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setSwitching(false);
+    }
+  };
   const [atts, setAtts] = useState<Uploaded[]>([]); // загружены и ждут отправки с сообщением
   const [uploading, setUploading] = useState<string | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
@@ -412,7 +427,8 @@ export default function Chat() {
     if (!api) return;
     if (models) return setModels(null);
     try {
-      const c = await api.config();
+      const [c, ags] = await Promise.all([api.config(), api.agents().catch(() => [])]);
+      setAgentList(ags.length > 1 ? ags.map((a) => ({ id: a.id, name: a.name })) : []);
       setModels({ list: c.models, ready: c.llm_ready });
     } catch (e) {
       setError(errText(e));
@@ -475,7 +491,7 @@ export default function Chat() {
         <Pressable onPress={conv.team || runId || !canWrite ? undefined : openModels}>
           <Row style={{ paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.line, justifyContent: "space-between" }}>
             <Txt kind="mono" color={p.accent} numberOfLines={1} style={{ fontSize: 11.5, flex: 1 }}>
-              {conv.model}{conv.team || !canWrite ? "" : "  ▾"}
+              {(conv.agent as { name?: string } | undefined)?.name && (conv.agent as { id?: string }).id !== "fugu" ? `${(conv.agent as { name: string }).name} · ` : ""}{conv.model}{conv.team || !canWrite ? "" : "  ▾"}
             </Txt>
             {copied ? <Chip text="текст скопирован" color={p.ok} /> : runId ? <Chip text={link || "работает"} color={link ? p.warn : p.ok} /> : null}
           </Row>
@@ -493,6 +509,17 @@ export default function Chat() {
             })}
             <Btn small title="Закрыть" kind="ghost" onPress={() => setModels(null)} />
           </Row>
+          {agentList.length ? (
+            <>
+              <Txt kind="label">агент</Txt>
+              <Row gap={6} style={{ flexWrap: "wrap" }}>
+                {agentList.map((a) => (
+                  <Btn key={a.id} small title={a.name} kind={(conv.agent as { id?: string } | undefined)?.id === a.id ? "primary" : "ghost"}
+                    disabled={switching} onPress={() => pickAgent(a.id)} />
+                ))}
+              </Row>
+            </>
+          ) : null}
           {models.list.some((m) => !models.ready.includes(m.split(":")[0])) ? (
             <Txt kind="small">Серые модели недоступны: для их провайдера не введён ключ (экран кластера → ключи).</Txt>
           ) : null}

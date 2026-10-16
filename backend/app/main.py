@@ -22,7 +22,7 @@ from . import auth, backup, devices, kb, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .config import get_settings
-from .db import DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
+from .db import AGENT_TOOLS, DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
 from .outbox import outbox
@@ -817,6 +817,55 @@ async def delete_memory(mid: int, u: dict = Me):
     return {"ok": True}
 
 
+# ================================================================== агенты пространства
+class AgentIn(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=40)
+    model: str | None = Field(None, max_length=120)  # "" — модель чата
+    instructions: str | None = Field(None, max_length=20000)
+    tools: list[str] | None = None
+    skills: list[str] | None = Field(None, max_length=100)
+
+
+AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+
+
+@app.get("/api/agents")
+async def list_agents(u: dict = Me):
+    return await db().list_agents()
+
+
+@app.put("/api/agents/{aid}")
+async def put_agent(aid: str, body: AgentIn, u: dict = Me):
+    """Создать или изменить агента (владелец). id — латиницей: под ним агент входит на серверы (deck-<пространство>-<id>)."""
+    owner_only(u)
+    if not AGENT_ID.match(aid):
+        raise HTTPException(400, "Имя агента (id): латинские строчные буквы, цифры и дефис, 2–31 знак, с буквы")
+    if body.tools is not None and any(t not in AGENT_TOOLS for t in body.tools):
+        raise HTTPException(400, f"Доступы агента: {', '.join(AGENT_TOOLS)}")
+    if body.model:
+        _check_model(body.model)
+    exists = await db().get_agent(aid)
+    if not exists and (len(await db().list_agents()) >= 20):
+        raise HTTPException(409, "В пространстве не больше 20 агентов")
+    if not exists and not body.name:
+        raise HTTPException(400, "Нужно имя агента")
+    a = await db().put_agent(aid, **body.model_dump(exclude_none=True))
+    await broker().publish("agent", None, action="saved", agent_id=aid)
+    return a
+
+
+@app.delete("/api/agents/{aid}")
+async def delete_agent(aid: str, u: dict = Me):
+    owner_only(u)
+    if aid == DEFAULT_AGENT:
+        raise HTTPException(400, "Агента по умолчанию удалить нельзя")
+    if not await db().get_agent(aid):
+        raise HTTPException(404, "Агент не найден")
+    await db().delete_agent(aid)  # его чаты переходят к агенту по умолчанию
+    await broker().publish("agent", None, action="deleted", agent_id=aid)
+    return {"ok": True}
+
+
 # ================================================================== скилы
 class SkillIn(BaseModel):
     description: str = Field(..., min_length=1, max_length=1024)
@@ -866,6 +915,7 @@ async def delete_skill(name: str, u: dict = Me):
 # ================================================================== чаты
 class ConvIn(BaseModel):
     model: str | None = None
+    agent_id: str | None = Field(None, max_length=31)  # какой агент ведёт чат (по умолчанию — fugu)
     title: str | None = Field(None, min_length=1, max_length=120)
     project_id: str | None = None  # перенести чат в другой проект (нужна роль редактора в обоих)
 
@@ -892,9 +942,17 @@ async def list_convs(pid: str, u: dict = Me):
 @app.post("/api/projects/{pid}/conversations")
 async def create_conv(pid: str, body: ConvIn, u: dict = Me):
     await need(u, pid, "editor")
-    model = _check_model(body.model)
+    agent = None
+    if body.agent_id and pid != TALK_PROJECT:
+        agent = await db().get_agent(body.agent_id)
+        if not agent:
+            raise HTTPException(400, "Нет такого агента")
+    model = _check_model(body.model or (agent or {}).get("model") or None)
     # в общем пространстве спонсора назначает выбор модели с условиями оплаты (POST /model)
     c = await db().create_conversation(model, pid, u["id"], body.title or "Новый чат")
+    if agent:
+        await db().update_conversation(c["id"], agent_id=agent["id"])
+        c["agent_id"] = agent["id"]
     await broker().publish("conversation", pid, action="created", conversation_id=c["id"], by=u["display_name"])
     return c
 
@@ -921,7 +979,12 @@ async def update_conv(cid: str, body: ConvIn, u: dict = Me):
         await need(u, to, "editor")
         if (r := agent().active_run(cid)) and r.status == "running":
             raise HTTPException(409, "В чате идёт выполнение — перенесите его, когда агент закончит")
-    await db().update_conversation(cid, title=title, model=_check_model(body.model) if body.model else None, project_id=to)
+    if body.agent_id and not await db().get_agent(body.agent_id):
+        raise HTTPException(400, "Нет такого агента")
+    if body.agent_id and (r := agent().active_run(cid)) and r.status == "running":
+        raise HTTPException(409, "Сменить агента можно, когда он закончит")
+    await db().update_conversation(cid, title=title, model=_check_model(body.model) if body.model else None, project_id=to,
+                                   agent_id=body.agent_id)
     await broker().publish("conversation", c["project_id"], action="updated", conversation_id=cid)
     if to:
         await broker().publish("conversation", to, action="created", conversation_id=cid, by=u["display_name"])
@@ -943,6 +1006,8 @@ async def delete_conv(cid: str, u: dict = Me):
 async def get_conv(cid: str, u: dict = Me):
     c = await conv_access(u, cid)
     c["my_role"] = await db().project_role(u, c["project_id"])
+    ag = await db().get_agent(c.get("agent_id") or DEFAULT_AGENT)
+    c["agent"] = {"id": ag["id"], "name": ag["name"]} if ag else None
     c.update(await chat_model_state(c, u))
     msgs = await db().get_messages(cid)
     items = []

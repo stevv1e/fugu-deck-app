@@ -71,7 +71,10 @@ test("подтверждение команды: подписывается са
 test("инструкция для сервера: ключ CA и имя входа агента этого пространства", () => {
   const sh = setupScript({ ca_public_key: "ssh-ed25519 AAAAC3 ca", principal_prefix: "deck-u-anna-" });
   assert.match(sh, /echo 'ssh-ed25519 AAAAC3 ca' \| sudo tee \/etc\/ssh\/deck_ca\.pub/);
-  assert.match(sh, /echo 'deck-u-anna-fugu' \| sudo tee \/etc\/ssh\/principals\/deck-agent/);
+  assert.match(sh, /printf '%s\\n' 'deck-u-anna-fugu' \| sudo tee \/etc\/ssh\/principals\/deck-agent/);
+  // несколько агентов — все их имена входа в файле
+  const two = setupScript({ ca_public_key: "ssh-ed25519 AAAAC3 ca", principal_prefix: "deck-u-anna-" }, "deck-agent", ["fugu", "duty"]);
+  assert.match(two, /'deck-u-anna-fugu' 'deck-u-anna-duty' \| sudo tee/);
   assert.match(sh, /TrustedUserCAKeys/);
   assert.doesNotMatch(sh, /authorized_keys|PasswordAuthentication yes/);
 });

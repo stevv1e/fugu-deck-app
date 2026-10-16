@@ -7,6 +7,7 @@ import type { RepoInfo } from "@/core/api";
 import { clusterOfSid } from "@/state/cluster";
 import { useApi, useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, Empty, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
+import { AgentsEditor } from "@/ui/AgentsEditor";
 import { useTheme } from "@/ui/theme";
 
 const PROVIDERS: Record<string, string> = { sakana: "Sakana", anthropic: "Claude (Anthropic)", deepseek: "DeepSeek", openai: "OpenAI" };
@@ -16,7 +17,7 @@ export default function SpacePrefs() {
   const { p } = useTheme();
   const { sid } = useLocalSearchParams<{ sid: string }>();
   const { api, error: apiError } = useApi(sid);
-  const [tab, setTab] = useState<"models" | "repos">("models");
+  const [tab, setTab] = useState<"models" | "repos" | "agents">("models");
   const cfg = useLoad(useCallback(() => api?.config() ?? null, [api]));
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
@@ -34,14 +35,19 @@ export default function SpacePrefs() {
   const groups = [...new Set(models.map((m) => m.split(":")[0]))];
 
   return (
-    <Screen title="Настройки">
+    <Screen title="Модели, репозитории, агенты">
       {apiError ? <Notice text={apiError} /> : null}
       <Row gap={8}>
         <Btn title="Модели" kind={tab === "models" ? "primary" : "ghost"} onPress={() => setTab("models")} style={{ flex: 1 }} />
         <Btn title="Репозитории" kind={tab === "repos" ? "primary" : "ghost"} onPress={() => setTab("repos")} style={{ flex: 1 }} />
+        <Btn title="Агенты" kind={tab === "agents" ? "primary" : "ghost"} onPress={() => setTab("agents")} style={{ flex: 1 }} />
       </Row>
+      {tab === "agents" && api ? (
+        <AgentsEditor api={api} models={cfg.data?.models ?? []}
+          canEdit={(cfg.data?.me as { role?: string } | undefined)?.role === "owner"} />
+      ) : null}
 
-      {tab === "models" ? (
+      {tab === "agents" ? null : tab === "models" ? (
         <>
           {!cfg.data && !cfg.error ? <Loading /> : null}
           {cfg.error ? <Notice text={cfg.error} /> : null}

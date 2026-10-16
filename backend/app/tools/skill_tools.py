@@ -6,8 +6,10 @@ from .registry import obj, tool
 
 
 def enabled(ctx, name: str) -> bool:
+    """Скил включён и в проекте, и у агента («*» — все)."""
     allowed = ctx.project.get("skills") or []
-    return "*" in allowed or name in allowed
+    mine = ctx.agent.get("skills") or ["*"]
+    return ("*" in allowed or name in allowed) and ("*" in mine or name in mine)
 
 
 @tool("load_skill", "Загрузить полный текст скила перед выполнением задачи, к которой он относится.",

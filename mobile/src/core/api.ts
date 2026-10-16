@@ -43,6 +43,10 @@ export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" |
 /** Проект целиком для переноса: инструкции, скилы и заметки (формат fugu-deck-project/1). */
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 
+/** Агент пространства: имя, модель («» — модель чата), инструкции, доступы и скилы («*» — все). */
+export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills";
+export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[] };
+
 export type RepoRef = { provider: "github" | "gitlab"; repo: string };
 export type RepoInfo = { full_name: string; private?: boolean; description?: string | null; url?: string; updated_at?: string };
 export type ReposByProvider = Record<string, { ok: boolean; repos?: RepoInfo[]; error?: string }>;
@@ -58,8 +62,12 @@ export class DeckApi {
   projects = () => this.s.request<Project[]>("GET", "/api/projects");
   createProject = (name: string, description = "") => this.s.request<Project>("POST", "/api/projects", { name, description });
   conversations = (pid: string) => this.s.request<Conversation[]>("GET", `/api/projects/${enc(pid)}/conversations`);
-  createConversation = (pid: string, model?: string) =>
-    this.s.request<Conversation>("POST", `/api/projects/${enc(pid)}/conversations`, { model: model || null });
+  createConversation = (pid: string, model?: string, agentId?: string) =>
+    this.s.request<Conversation>("POST", `/api/projects/${enc(pid)}/conversations`, { model: model || null, agent_id: agentId || null });
+  agents = () => this.s.request<SpaceAgent[]>("GET", "/api/agents");
+  saveAgent = (id: string, a: Partial<Omit<SpaceAgent, "id">>) => this.s.request<SpaceAgent>("PUT", `/api/agents/${enc(id)}`, a);
+  deleteAgent = (id: string) => this.s.request("DELETE", `/api/agents/${enc(id)}`);
+  setConversationAgent = (cid: string, agentId: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { agent_id: agentId });
   conversation = (cid: string) => this.s.request<ConversationFull>("GET", `/api/conversations/${enc(cid)}`);
   // ---- база знаний: заметки проекта со связями (агент: /api/projects/<id>/kb, /api/memory) ----
   kb = (pid: string) => this.s.request<KbGraph>("GET", `/api/projects/${enc(pid)}/kb`);
