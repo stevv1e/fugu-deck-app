@@ -1,7 +1,8 @@
 # Сборщик установщиков Windows (Fugu Deck и Fugu Local) на Linux: кросс-компиляция под MSVC (cargo-xwin), NSIS,
 # подпись Authenticode (osslsigncode). Утилиты — готовые бинарники с закреплёнными хешами: компилировать их
 # из исходников (cargo install) на сервере с 8 ГБ слишком тяжело.
-FROM rust:1.99-bookworm
+# Debian trixie: tauri нужен NSIS ≥ 3.09 (в bookworm 3.08 без Win\RestartManager.nsh).
+FROM rust:1.99-trixie
 RUN apt-get update \
  && apt-get install -y --no-install-recommends clang lld llvm nsis osslsigncode \
  && rm -rf /var/lib/apt/lists/* \
