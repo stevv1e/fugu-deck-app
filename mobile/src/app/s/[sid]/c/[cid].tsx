@@ -85,7 +85,7 @@ function RichText({ text, color }: { text: string; color: string }) {
   );
 }
 
-const ACCESS: Record<string, string> = { git: "репозитории", ssh: "серверы", memory: "база знаний", files: "вложения", skills: "навыки" };
+const ACCESS: Record<string, string> = { git: "репозитории", ssh: "серверы", memory: "база знаний", files: "вложения", skills: "навыки", mcp: "MCP-серверы" };
 
 /** Агент, которого модель предлагает создать или изменить: доступы — словами, инструкция — целиком. */
 function AgentPreview({ a }: { a: any }) {
@@ -213,10 +213,10 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
       {error ? <Notice text={error} /> : null}
       <Row>
         <Btn title="Отклонить" kind="ghost" onPress={() => decide(false)} busy={busy === "no"} disabled={!!busy} style={{ flex: 1 }} />
-        <Btn title="Разрешить ⌁" kind={danger ? "danger" : "ok"} onPress={() => decide(true)} busy={busy === "yes"} disabled={!!busy || !matches || !nameOk} style={{ flex: 1.4 }} />
+        <Btn title={req.nosign && !cmd ? "Разрешить" : "Разрешить ⌁"} kind={danger ? "danger" : "ok"} onPress={() => decide(true)} busy={busy === "yes"} disabled={!!busy || !matches || !nameOk} style={{ flex: 1.4 }} />
       </Row>
       <Txt kind="small" style={{ textAlign: "center" }}>
-        «Разрешить» спросит биометрию и подпишет решение ключом этого телефона
+        {req.nosign && !cmd ? "Агент настроен без подписи: «Разрешить» — без биометрии" : "«Разрешить» спросит биометрию и подпишет решение ключом этого телефона"}
       </Txt>
     </View>
   );

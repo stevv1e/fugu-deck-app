@@ -276,11 +276,18 @@ SCHEMA = [
     );
     ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'fugu';
     """,
+    # v15: подтверждения — у каждого агента свои (sign — с подписью, tap — без подписи, dangerous — только опасное,
+    # none — без подтверждений; '' — как на сервере); агенту по умолчанию — доступ к MCP-серверам
+    """
+    ALTER TABLE agents ADD COLUMN approvals TEXT NOT NULL DEFAULT '';
+    UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp"]'
+        WHERE id='fugu' AND tools='["git","ssh","memory","files","skills"]';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
 DEFAULT_AGENT = "fugu"
-AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills")
+AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp")
 # Режим «Общение»: его чаты живут в скрытом проекте — не видны среди проектов инжиниринга, а агент в них — собеседник
 # без инструментов Git, серверов и памяти (agent.py).
 TALK_PROJECT = "talk"
@@ -318,8 +325,8 @@ class Database:
                 (DEFAULT_PROJECT, "Общий", "Проект по умолчанию", now, now))
         if not await self._one("SELECT id FROM agents WHERE id=?", (DEFAULT_AGENT,)):
             now = time.time()
-            await self._exec("INSERT INTO agents (id,name,created_at,updated_at) VALUES (?,?,?,?)",
-                             (DEFAULT_AGENT, "Fugu", now, now))
+            await self._exec("INSERT INTO agents (id,name,tools,created_at,updated_at) VALUES (?,?,?,?,?)",
+                             (DEFAULT_AGENT, "Fugu", json.dumps(list(AGENT_TOOLS)), now, now))
         if not await self._one("SELECT id FROM projects WHERE id=?", (TALK_PROJECT,)):
             now = time.time()
             await self._exec(

@@ -7,6 +7,23 @@ from .db import AGENT_TOOLS
 
 AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 MAX_AGENTS = 20
+# Подтверждения действий агента: sign — с подписью (биометрия), tap — без подписи, dangerous — только опасные
+# (с подписью), none — без подтверждений; "" — как на сервере. Команды на серверах подписываются всегда (их
+# требует ssh-gateway), изменение агентов (agent_save) — тоже.
+APPROVALS = ("", "sign", "tap", "dangerous", "none")
+APPROVAL_TITLES = {"sign": "с подписью", "tap": "без подписи", "dangerous": "только опасные", "none": "без подтверждений"}
+
+
+def approval_mode(agent: dict | None, server_mode: str) -> tuple[str, bool]:
+    """(режим ApprovalPolicy, нужна ли подпись) для агента; без своей настройки — режим сервера и подпись."""
+    a = (agent or {}).get("approvals") or ""
+    if a == "tap":
+        return "all", False
+    if a == "sign":
+        return "all", True
+    if a in ("dangerous", "none"):
+        return a, True
+    return server_mode, True
 
 
 def is_owner(user: dict, settings) -> bool:
@@ -21,6 +38,8 @@ def agent_problem(aid: str, fields: dict, exists: bool, count: int, models: list
     tools = fields.get("tools")
     if tools is not None and any(t not in AGENT_TOOLS for t in tools):
         return f"Доступы агента: {', '.join(AGENT_TOOLS)}"
+    if fields.get("approvals") is not None and fields["approvals"] not in APPROVALS:
+        return "Подтверждения: sign, tap, dangerous, none или пусто"
     if fields.get("model") and fields["model"] not in models:
         return f"Неизвестная модель {fields['model']}"
     if not exists and count >= MAX_AGENTS:
