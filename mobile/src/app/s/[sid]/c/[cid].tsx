@@ -306,6 +306,15 @@ export default function Chat() {
   const [attachMenu, setAttachMenu] = useState(false);
   const stream = useRef<{ close(): void } | null>(null);
   const list = useRef<FlatList<Item>>(null);
+  // Прокручиваем вниз за новым содержимым, только если человек и так внизу: иначе при чтении истории
+  // каждое изменение высоты (поток ответа, опрос, догрузка картинки) сбрасывало бы его в конец.
+  const atEnd = useRef(true);
+  const [showDown, setShowDown] = useState(false);
+  const toEnd = (animated: boolean) => {
+    atEnd.current = true;
+    setShowDown(false);
+    list.current?.scrollToEnd({ animated });
+  };
 
   const follow = useCallback(
     (rid: string) => {
@@ -405,6 +414,7 @@ export default function Chat() {
       setText("");
       setAtts([]);
       setItems((prev) => [...prev, { kind: "user", key: "u" + Date.now(), content: msg, mine: true, attachments: sent }]);
+      toEnd(true);
       follow(r.run_id);
     } catch (e) {
       setError(errText(e));
@@ -529,13 +539,21 @@ export default function Chat() {
           не сжимает — без отступа клавиатура закрывала бы поле ввода. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {!conv && !apiError && !error ? <Loading /> : null}
+        <View style={{ flex: 1 }}>
         <FlatList
           ref={list}
           data={items}
           keyExtractor={(i) => i.key}
           contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
-          onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
-          onLayout={() => list.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: true }); }}
+          onLayout={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
+          scrollEventThrottle={100}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const end = contentSize.height - contentOffset.y - layoutMeasurement.height < 80;
+            atEnd.current = end;
+            setShowDown((v) => (v === !end ? v : !end));
+          }}
           renderItem={({ item }) =>
             item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} onCopied={flashCopied}
               onRetry={!runId && canWrite && item.kind === "notice" && item.retry && items[items.length - 1]?.key === item.key ? retryRun : undefined} />
@@ -558,6 +576,14 @@ export default function Chat() {
             ) : null
           }
         />
+        {showDown ? (
+          <Pressable onPress={() => toEnd(true)} accessibilityLabel="К последним сообщениям"
+            style={{ position: "absolute", right: 14, bottom: 14, width: 40, height: 40, borderRadius: 20, alignItems: "center",
+              justifyContent: "center", backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2 }}>
+            <Text style={{ color: p.accent, fontSize: 20, lineHeight: 22 }}>↓</Text>
+          </Pressable>
+        ) : null}
+        </View>
         {canWrite && (atts.length > 0 || uploading || attachMenu) ? (
           <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
             {attachMenu ? (
