@@ -1544,6 +1544,7 @@ async def chat_model_state(c: dict, u: dict) -> dict:
     out: dict = {"team": is_team()}
     if not is_team():
         return out
+    out["owner_switch"] = u.get("space_role") == "owner"  # владелец меняет модель без голосования
     sp = await db().get_user(c["sponsor_id"]) if c.get("sponsor_id") else None
     pname = split_model(c["model"])[0]
     if sp:
@@ -1679,6 +1680,12 @@ async def propose_model(cid: str, body: ProposalIn, u: dict = Me):
         await _apply(c, model, u, terms)
         pol = POLICIES[body.model_policy or c.get("model_policy") or "vote"]
         await _note(c, f"{u['display_name']} выбрал(а) {_title(model)} и оплачивает чат ({text_terms}). Смена модели: {pol}")
+        return {"applied": True}
+    if u.get("space_role") == "owner":
+        # владелец пространства меняет модель на свою сразу: платит он сам, голосовать не о чем
+        await _apply(c, model, u, terms)
+        await _note(c, f"{u['display_name']} (владелец) сменил(а) модель на {_title(model)} и оплачивает чат ({text_terms})")
+        await broker().publish("model.proposal", c["project_id"], conversation_id=cid, by=u["display_name"], model=model)
         return {"applied": True}
     if c.get("model_policy") == "open":
         # смена модели разрешена коллегам — без голосования
@@ -1820,6 +1827,8 @@ async def attach_grant(pid: str, body: GrantIn, u: dict = Me):
     # Чат, в котором ещё не было переписки, настраивает его создатель — без голосования.
     if not await db().has_dialogue(c["id"]) and c.get("created_by") == u["id"]:
         status = await _finish_with_grant(p, c, u, f"{u['display_name']} выбрал(а) модель нового чата")
+    elif u.get("space_role") == "owner":  # владелец меняет модель на свою без голосования
+        status = await _finish_with_grant(p, c, u, f"{u['display_name']} (владелец) сменил(а) модель")
     elif c.get("model_policy") == "open":
         status = await _finish_with_grant(p, c, u, f"{u['display_name']} сменил(а) модель")
     else:

@@ -145,7 +145,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
 
       {canWrite && !open ? (
         <Row gap={8} style={{ flexWrap: "wrap" }}>
-          <Btn title={sponsor ? "Предложить другую модель" : "Выбрать модель"} small kind={sponsor ? "ghost" : "primary"} onPress={showForm} disabled={!!busy} />
+          <Btn title={sponsor ? (state.owner_switch ? "Сменить модель" : "Предложить другую модель") : "Выбрать модель"} small kind={sponsor ? "ghost" : "primary"} onPress={showForm} disabled={!!busy} />
           {sponsor && sponsor.id === meId ? (
             armed ? (
               <Btn title="Да, перестать" small kind="danger" onPress={stop} busy={busy === "stop"} disabled={!!busy} />
@@ -161,6 +161,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
           <Txt kind="dim">
             Вы станете спонсором: чат будет пользоваться вашим ключом в этих пределах, даже когда вы не в сети.
             Ваш ключ никто не увидит; отозвать разрешение можно в любой момент.
+            {state.owner_switch && sponsor ? " Вы владелец пространства — модель сменится сразу, без голосования." : ""}
           </Txt>
           <Row gap={6} style={{ flexWrap: "wrap" }}>
             {(models ?? []).map((m) => (
@@ -176,7 +177,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
           <Field label="Лимит, долларов" value={limit} onChangeText={setLimit} keyboardType="decimal-pad" />
           <Field label="Срок, дней" value={days} onChangeText={setDays} keyboardType="number-pad" />
           <Field label="На одного участника в день, долларов (необязательно)" value={perDay} onChangeText={setPerDay} keyboardType="decimal-pad" hint={bad ?? undefined} />
-          <Btn title="Подписать и предложить ⌁" onPress={propose} busy={busy === "propose"} disabled={!!busy || !pick || !!bad || !payable(pick)} />
+          <Btn title={state.owner_switch && sponsor ? "Подписать и сменить ⌁" : "Подписать и предложить ⌁"} onPress={propose} busy={busy === "propose"} disabled={!!busy || !pick || !!bad || !payable(pick)} />
           <Btn title="Отмена" kind="ghost" onPress={() => setOpen(false)} disabled={!!busy} />
         </>
       ) : null}
