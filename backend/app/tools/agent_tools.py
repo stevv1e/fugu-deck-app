@@ -20,7 +20,8 @@ async def agent_list(ctx: ToolContext, args: dict):
 
 @tool("agent_save",
       "Создать нового агента пространства или изменить существующего (по id). Владелец подтверждает это в приложении. "
-      "Доступы (tools): git — репозитории; ssh — серверы; memory — база знаний; files — вложения; skills — навыки. "
+      "Доступы (tools): git — репозитории; ssh — серверы; memory — база знаний; files — вложения; skills — навыки; "
+      "mcp — инструменты подключённых MCP-серверов. "
       "Давайте только нужные задаче. Модель — из списка моделей пространства или пусто (модель чата).",
       obj({
           "id": {"type": "string", "description": "латиницей: строчные буквы, цифры, дефис; 2–31 знак, с буквы"},
@@ -29,11 +30,14 @@ async def agent_list(ctx: ToolContext, args: dict):
           "tools": {"type": "array", "items": {"type": "string", "enum": list(AGENT_TOOLS)}},
           "model": {"type": "string", "description": "провайдер:модель или пусто"},
           "skills": {"type": "array", "items": {"type": "string"}, "description": "имена навыков; [\"*\"] — все"},
+          "approvals": {"type": "string", "enum": ["", "sign", "tap", "dangerous", "none"],
+                        "description": "подтверждения: sign — с подписью, tap — без подписи, dangerous — только опасные, "
+                                       "none — без подтверждений, пусто — как на сервере. Без явной просьбы владельца — пусто"},
       }, ["id", "name", "instructions", "tools"]),
       risk="write", group="agents", title="Агент пространства", always_confirm=True)
 async def agent_save(ctx: ToolContext, args: dict):
     aid = str(args.get("id") or "").strip()
-    fields = {k: args[k] for k in ("name", "instructions", "tools", "model", "skills") if k in args and args[k] is not None}
+    fields = {k: args[k] for k in ("name", "instructions", "tools", "model", "skills", "approvals") if k in args and args[k] is not None}
     if isinstance(fields.get("name"), str):
         fields["name"] = fields["name"].strip()[:40]
     if len(fields.get("instructions") or "") > 20000:
@@ -45,5 +49,5 @@ async def agent_save(ctx: ToolContext, args: dict):
     if ctx.broker:
         await ctx.broker.publish("agent", None, action="saved", agent_id=aid)
     return {"ok": True, "created": not exists, "agent": {"id": a["id"], "name": a["name"], "tools": a.get("tools"),
-            "model": a.get("model") or "(модель чата)"},
+            "model": a.get("model") or "(модель чата)", "approvals": a.get("approvals") or ""},
             "hint": "Агента можно выбрать при создании чата или в шапке чата."}

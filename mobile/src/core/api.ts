@@ -44,8 +44,10 @@ export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" |
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 
 /** Агент пространства: имя, модель («» — модель чата), инструкции, доступы и скилы («*» — все). */
-export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills";
-export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[] };
+export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp";
+/** Подтверждения действий агента: "" — как на сервере; sign — с подписью; tap — без подписи; dangerous — только опасные; none — без подтверждений. */
+export type AgentApprovals = "" | "sign" | "tap" | "dangerous" | "none";
+export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[]; approvals?: AgentApprovals };
 
 /** Найденная заметка; linked_to — найдена не по словам, а как связанная с заметкой linked_to. */
 export type FoundNote = { id: number; project_id: string; project_name?: string; title?: string | null; content: string; area?: string; tags: string; linked_to?: number; link_type?: string };
@@ -138,6 +140,7 @@ export class DeckApi {
   async approve(req: ApprovalRequest, approve: boolean, comment = "", typedServer?: string) {
     const path = `/api/approvals/${enc(req.approval_id)}`;
     if (!approve) return this.s.request("POST", path, { approve: false, comment });
+    if (req.nosign && !req.sign) return this.s.request("POST", path, { approve: true, comment }); // агент «без подписи»
     if (req.sign) {
       // Команда на сервере: подпись предназначена ssh-gateway и покрывает саму команду, а не «разрешение инструмента».
       return this.s.request("POST", path, { approve: true, comment, ...(await this.s.signCommand(req.sign, typedServer)) });

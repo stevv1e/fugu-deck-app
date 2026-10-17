@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, backup, devices, kb, obsidian, schedules as sched, spaceauth
+from . import auth, backup, devices, kb, mcp_client, obsidian, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .agent_rules import agent_problem
@@ -884,6 +884,7 @@ class AgentIn(BaseModel):
     instructions: str | None = Field(None, max_length=20000)
     tools: list[str] | None = None
     skills: list[str] | None = Field(None, max_length=100)
+    approvals: str | None = Field(None, pattern="^(|sign|tap|dangerous|none)$")
 
 
 @app.get("/api/agents")
@@ -914,6 +915,28 @@ async def delete_agent(aid: str, u: dict = Me):
     await db().delete_agent(aid)  # его чаты переходят к агенту по умолчанию
     await broker().publish("agent", None, action="deleted", agent_id=aid)
     return {"ok": True}
+
+
+# ================================================================== MCP-серверы владельца (через keyguard)
+@app.get("/api/mcp")
+async def mcp_status(u: dict = Me):
+    """Подключённые MCP-серверы и их инструменты — сейчас, без кэша (экран «MCP-серверы» после добавления)."""
+    owner_only(u)
+    if not mcp_client.enabled() or settings.space_kind == "team":
+        return {"available": False, "servers": []}
+    mcp_client.forget()
+    out = []
+    for srv in await mcp_client.servers():
+        item = {**srv, "tools": [], "error": None}
+        try:
+            for t in await asyncio.wait_for(mcp_client.list_tools(srv["id"]), 20):
+                item["tools"].append({"name": t.get("name"), "title": t.get("title") or t.get("name"),
+                                      "read_only": (t.get("annotations") or {}).get("readOnlyHint") is True,
+                                      "description": (t.get("description") or "")[:300]})
+        except Exception as e:
+            item["error"] = str(e) or e.__class__.__name__
+        out.append(item)
+    return {"available": True, "servers": out}
 
 
 # ================================================================== скилы
@@ -1434,9 +1457,10 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
     if not run:
         raise HTTPException(404, "Запрос на подтверждение не найден или уже обработан")
     await need(u, run.project_id, "editor")
+    nosign = bool((run.approval_meta.get(aid) or {}).get("nosign"))  # агент настроен «без подписи»
     if u.get("_device"):  # с телефона подтверждение «за» действует только с подписью ключом подтверждения (биометрия)
         meta = run.approval_meta.get(aid) or {}
-        if body.approve or body.action:
+        if (body.approve or body.action) and not (nosign and body.approve and not body.action):
             d = u["_device"]
             state["device_auth"].check_action(body.action or {}, body.sig or "", d["confirm_jwk"], d["id"], {
                 "type": "approve_tool", "approval_id": aid, "tool": meta.get("name"),
@@ -1456,7 +1480,7 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
         await broker().publish("run.approval_resolved", run.project_id, conversation_id=run.conversation_id,
                                run_id=run.id, approved=True, by=u["display_name"])
         return {"ok": True}
-    elif settings.is_space and kgc.enabled() and body.approve:
+    elif settings.is_space and kgc.enabled() and body.approve and not nosign:
         # В кластере «за» действует только с подписью ключа подтверждения владельца (биометрия на телефоне).
         # Иначе разрешить агенту действие мог бы любой, кто получил токен пространства, — в том числе control-plane.
         meta = run.approval_meta.get(aid) or {}
