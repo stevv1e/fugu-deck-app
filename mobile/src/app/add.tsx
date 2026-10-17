@@ -10,6 +10,7 @@ import { isInsecure, parseInvite, type Invite } from "@/core/invite";
 import { TrustError } from "@/core/server";
 import type { ServerInfo } from "@/core/types";
 import { useServers } from "@/state/servers";
+import { isDesktop } from "@/platform/desktop";
 import { Btn, Card, Chip, errText, Field, Fingerprint, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
@@ -107,7 +108,7 @@ export default function AddServer() {
           />
           {error ? <Notice text={error.text} /> : null}
           <Btn title="Проверить сервер" onPress={submit} busy={busy} disabled={!text.trim()} />
-          <Btn title="Сканировать QR" kind="ghost" onPress={() => router.replace("/scan")} />
+          {isDesktop ? null : <Btn title="Сканировать QR" kind="ghost" onPress={() => router.replace("/scan")} />}
           <Card>
             <Txt kind="label">как это работает</Txt>
             <Txt kind="dim">

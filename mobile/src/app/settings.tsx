@@ -11,6 +11,7 @@ const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave — ключи в отдельном чипе iPhone",
   strongbox: "StrongBox — ключи в отдельном защищённом чипе",
   tee: "TEE — ключи в защищённой среде процессора",
+  tpm: "TPM — ключи в защищённом чипе компьютера",
   software: "Программные ключи в Keychain/Keystore",
 };
 

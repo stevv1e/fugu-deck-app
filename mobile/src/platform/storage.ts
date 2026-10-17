@@ -11,6 +11,8 @@ import { Platform } from "react-native";
 
 import type { SecretStore } from "@/core/softkeys";
 
+import { desk, isDesktop } from "./desktop";
+
 export const isWeb = Platform.OS === "web";
 
 export const prefs = {
@@ -63,7 +65,14 @@ const nativeSecrets: SecretStore = {
   },
 };
 
-export const secrets: SecretStore = isWeb ? webSecrets : nativeSecrets;
+// Windows: секреты шифрует DPAPI для текущего пользователя (Rust-часть приложения)
+const desktopSecrets: SecretStore = {
+  get: (key) => desk<string | null>("secret_get", { key }),
+  set: (key, value) => desk<void>("secret_set", { key, value }),
+  del: (key) => desk<void>("secret_del", { key }),
+};
+
+export const secrets: SecretStore = isDesktop ? desktopSecrets : isWeb ? webSecrets : nativeSecrets;
 
 /** Хранилище само спросит биометрию при чтении секрета ключа подтверждения. */
 export function storeCanRequireAuth(): boolean {
@@ -86,6 +95,7 @@ export async function biometryAvailable(): Promise<boolean> {
 
 /** Запасной путь: спросить биометрию или код телефона перед использованием программного ключа подтверждения. */
 export async function gate(reason: string): Promise<void> {
+  if (isDesktop) return desk<void>("hello_verify", { message: reason });
   if (isWeb) {
     if (typeof globalThis.confirm === "function" && !globalThis.confirm(reason + "\n\n(веб-версия для разработки: биометрии нет)")) {
       throw new Error("Подтверждение отменено");

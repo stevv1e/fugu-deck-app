@@ -19,6 +19,7 @@ const STORAGE_TEXT: Record<string, string> = {
   secure_enclave: "Ключи создаются в Secure Enclave и не покидают чип.",
   strongbox: "Ключи создаются в StrongBox (отдельный защищённый чип) и не покидают его.",
   tee: "Ключи создаются в защищённой среде процессора (TEE) и не покидают её.",
+  tpm: "Ключи создаются в TPM компьютера и не покидают его; подтверждение — Windows Hello.",
   software: "Ключи программные — в Keychain/Keystore телефона.",
 };
 

@@ -5,12 +5,13 @@
  */
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 import type { FoundNote, KbGraph, KbNote } from "@/core/api";
 import { kbInjection, parseKbMessage } from "@/kb/inject";
+import { KbFrame } from "@/kb/KbFrame";
 import { KB_HTML } from "@/kb/kbHtml";
 import { pickBase64, saveBase64 } from "@/platform/pick";
 import { prefs } from "@/platform/storage";
@@ -224,6 +225,8 @@ export default function KnowledgeBase() {
             )
           ) : null}
         </ScrollView>
+      ) : graph && Platform.OS === "web" ? (
+        <KbFrame key={version} html={KB_HTML} injected={injected} onMessage={onMessage} />
       ) : graph ? (
         <WebView
           key={version}
