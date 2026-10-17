@@ -33,19 +33,7 @@ npx tsc --noEmit && npm test && npx expo lint
 Как у Fugu Deck, только из этого каталога: `npx expo prebuild --platform android` и `./gradlew assembleRelease`
 (на VPS — `~/.deck/android/build-apk-local.sh`). Версия берётся из `DECK_VERSION`.
 
-## Windows (собирать на ПК с Windows)
+## Windows
 
-Нужны: Rust (rustup, MSVC), Visual Studio Build Tools с «Разработка классических приложений на C++», Node 22, WebView2
-(есть в Windows 10/11).
-
-```
-cd fugu-deck-app\local
-npm ci
-npx expo export --platform web --output-dir dist
-cd desktop
-cargo install tauri-cli --version "^2" --locked
-cargo tauri build
-```
-
-Установщик — `desktop\src-tauri\target\release\bundle\nsis\Fugu Local_<версия>_x64-setup.exe`.
-Для разработки: `npx expo start --web` в `local` и `cargo tauri dev` в `local\desktop`.
+Подписанный установщик собирается на сервере: `fugu-deck-app/winbuild/build.sh local <файл.exe>`. Ручная сборка
+на ПК и проверка подписи — в `fugu-deck-app/winbuild/README.md`.
