@@ -55,6 +55,8 @@ function subtitle(name: string, a: any): string {
       return a.query;
     case "load_skill":
       return a.name;
+    case "agent_save":
+      return `${a.name} (${a.id})`;
     default:
       return [a.provider, a.repo, a.path, a.name].filter(Boolean).join(" · ");
   }
@@ -79,6 +81,25 @@ function RichText({ text, color }: { text: string; color: string }) {
           </Txt>
         ) : null,
       )}
+    </View>
+  );
+}
+
+const ACCESS: Record<string, string> = { git: "репозитории", ssh: "серверы", memory: "база знаний", files: "вложения", skills: "навыки" };
+
+/** Агент, которого модель предлагает создать или изменить: доступы — словами, инструкция — целиком. */
+function AgentPreview({ a }: { a: any }) {
+  const { p } = useTheme();
+  const tools: string[] = Array.isArray(a?.tools) ? a.tools : [];
+  return (
+    <View style={{ gap: 6 }}>
+      <Txt>Доступы: {tools.length ? tools.map((t) => ACCESS[t] || t).join(", ") : "никаких"}</Txt>
+      {tools.includes("ssh") ? <Notice kind="warn" text="Агент получит доступ к серверам (каждую команду вы всё равно подписываете)." /> : null}
+      {a?.model ? <Txt kind="small">Модель: {a.model}</Txt> : null}
+      <Txt kind="label">инструкция</Txt>
+      <View style={{ backgroundColor: p.bg2, borderWidth: 1, borderColor: p.line, padding: 10, borderRadius: p.radius }}>
+        <Txt selectable>{String(a?.instructions || "—")}</Txt>
+      </View>
     </View>
   );
 }
@@ -182,7 +203,7 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
       ) : (
         <>
           {subtitle(req.name, req.args) ? <Txt kind="mono">{subtitle(req.name, req.args)}</Txt> : null}
-          <ArgsBlock args={req.args} />
+          {req.name === "agent_save" ? <AgentPreview a={req.args} /> : <ArgsBlock args={req.args} />}
           <Txt kind="small">
             Подпись покроет хэш аргументов {mine.slice(0, 10)}… {matches ? "✓ совпадает с сервером" : ""}
           </Txt>

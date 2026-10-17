@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .agent_rules import is_owner
 from .db import AGENT_TOOLS, DEFAULT_AGENT, TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
@@ -403,9 +404,11 @@ class Agent:
         git_ok = any(run.git_status.values()) if run.git_status is not None else True
         # доступы агента: какие группы инструментов ему даны (по умолчанию — все)
         allowed = set((run.agent or {}).get("tools") or AGENT_TOOLS)
+        owner = is_owner(run.user or {}, self.settings)  # агентов создаёт и меняет только владелец
         return [t for t in REGISTRY.values()
                 if (t.group not in AGENT_TOOLS or t.group in allowed)
-                and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)]
+                and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)
+                and (t.group != "agents" or owner)]
 
     def price(self, model: str) -> list[float] | None:
         pr = self.settings.pricing
@@ -450,7 +453,7 @@ class Agent:
         # Команду на сервере исполняет ssh-gateway, и подпись человека нужна ему, а не нам: настройка «не спрашивать
         # подтверждений» на неё не действует. sign — действие, которое телефон подпишет вместо обычного разрешения.
         sign = ssh_tools.sign_request(ctx, args) if name == "ssh_exec" else None
-        if self.policy.needs_approval(risk) or sign:
+        if self.policy.needs_approval(risk) or sign or tool.always_confirm:
             aid = new_id()
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             run.approvals[aid] = fut
