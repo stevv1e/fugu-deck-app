@@ -1,0 +1,24 @@
+[package]
+name = "fugu-local"
+version = "0.0.0"
+edition = "2021"
+description = "Fugu Local для Windows: модели напрямую, без сервера"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Запросы к провайдерам делает Rust: у окна нет ограничений CORS, тело ответа приходит потоком.
+tauri-plugin-http = "2"
+tauri-plugin-opener = "2"
+# Ключи — в диспетчере учётных данных Windows (защищены учётной записью пользователя).
+keyring = { version = "3", features = ["windows-native"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

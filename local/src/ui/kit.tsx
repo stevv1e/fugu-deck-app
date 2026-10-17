@@ -1,0 +1,265 @@
+/** Базовые элементы интерфейса — копия mobile/src/ui/kit.tsx без отпечатков и QR (здесь нет серверов). */
+import { router } from "expo-router";
+import { type ReactNode } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type StyleProp,
+  type TextInputProps,
+  type TextStyle,
+  type ViewStyle,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { alpha, MONO, useTheme } from "./theme";
+
+type TxtKind = "body" | "title" | "h2" | "label" | "dim" | "mono" | "small";
+
+export function Txt({ kind = "body", color, style, children, numberOfLines, selectable }: {
+  kind?: TxtKind;
+  color?: string;
+  style?: StyleProp<TextStyle>;
+  children: ReactNode;
+  numberOfLines?: number;
+  selectable?: boolean;
+}) {
+  const { p } = useTheme();
+  const base: TextStyle = {
+    body: { fontSize: 15, lineHeight: 21, color: p.text },
+    title: { fontSize: 26, fontWeight: "700", letterSpacing: 0.5, color: p.text },
+    h2: { fontSize: 18, fontWeight: "700", color: p.text },
+    label: { fontSize: 11, letterSpacing: 1.6, textTransform: "uppercase", color: p.dim, fontFamily: MONO },
+    dim: { fontSize: 14, lineHeight: 20, color: p.dim },
+    mono: { fontSize: 13, fontFamily: MONO, color: p.text },
+    small: { fontSize: 12, lineHeight: 17, color: p.dim },
+  }[kind] as TextStyle;
+  const mono = p.monoText && kind !== "label" && kind !== "mono" ? { fontFamily: MONO } : null;
+  return (
+    <Text style={[base, mono, color ? { color } : null, style]} numberOfLines={numberOfLines} selectable={selectable}>
+      {children}
+    </Text>
+  );
+}
+
+export function Screen({ children, scroll = true, title, back = true, right, footer }: {
+  children: ReactNode;
+  scroll?: boolean;
+  title?: string;
+  back?: boolean;
+  right?: ReactNode;
+  footer?: ReactNode;
+}) {
+  const { p } = useTheme();
+  const body = scroll ? (
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }} keyboardShouldPersistTaps="handled">
+      {children}
+    </ScrollView>
+  ) : (
+    <View style={{ flex: 1 }}>{children}</View>
+  );
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
+      {title !== undefined && <TopBar title={title} back={back} right={right} />}
+      {/* Клавиатура не должна закрывать поле, в которое печатают (на Android окно под неё само не сжимается). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+        {body}
+        {footer}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+export function TopBar({ title, back, right }: { title: string; back?: boolean; right?: ReactNode }) {
+  const { p } = useTheme();
+  return (
+    <View style={[s.top, { borderBottomColor: p.line, backgroundColor: p.bg }]}>
+      {back && router.canGoBack() ? (
+        <Pressable onPress={() => router.back()} hitSlop={12} style={s.topBtn} accessibilityLabel="Назад">
+          <Text style={{ color: p.accent, fontSize: 26, lineHeight: 28 }}>‹</Text>
+        </Pressable>
+      ) : (
+        <View style={s.topBtn} />
+      )}
+      <Txt kind="h2" numberOfLines={1} style={{ flex: 1, textAlign: "center", fontSize: 16 }}>
+        {title}
+      </Txt>
+      <View style={[s.topBtn, { alignItems: "flex-end", width: undefined, minWidth: 36 }]}>{right}</View>
+    </View>
+  );
+}
+
+export function IconBtn({ glyph, onPress, label, color }: { glyph: string; onPress(): void; label: string; color?: string }) {
+  const { p } = useTheme();
+  return (
+    <Pressable onPress={onPress} hitSlop={10} accessibilityLabel={label} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingHorizontal: 6 })}>
+      <Text style={{ color: color || p.accent, fontSize: 20 }}>{glyph}</Text>
+    </Pressable>
+  );
+}
+
+export function Btn({ title, onPress, kind = "primary", busy, disabled, style, small }: {
+  title: string;
+  onPress(): void;
+  kind?: "primary" | "ghost" | "danger" | "ok";
+  busy?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+  small?: boolean;
+}) {
+  const { p } = useTheme();
+  const bg = { primary: p.accent, danger: p.accent2, ok: p.ok, ghost: "transparent" }[kind];
+  const fg = { primary: p.onAccent, danger: p.onAccent2, ok: p.onAccent, ghost: p.accent }[kind];
+  const off = disabled || busy;
+  return (
+    <Pressable
+      onPress={off ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!off, busy: !!busy }}
+      style={({ pressed }) => [
+        {
+          backgroundColor: bg,
+          borderColor: kind === "ghost" ? p.line2 : bg,
+          borderWidth: 1,
+          borderRadius: p.radius,
+          paddingVertical: small ? 8 : 13,
+          paddingHorizontal: small ? 12 : 18,
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "row",
+          gap: 8,
+          opacity: off ? 0.5 : pressed ? 0.75 : 1,
+        },
+        style,
+      ]}
+    >
+      {busy && <ActivityIndicator size="small" color={fg} />}
+      <Text style={{ color: fg, fontWeight: "700", fontSize: small ? 13 : 15, letterSpacing: 0.6, fontFamily: p.monoText ? MONO : undefined, flexShrink: 1, textAlign: "center" }}>
+        {title}
+      </Text>
+    </Pressable>
+  );
+}
+
+export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
+  const { p } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Txt kind="label">{label}</Txt>
+      <TextInput
+        placeholderTextColor={p.faint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        {...props}
+        style={[
+          {
+            borderWidth: 1,
+            borderColor: p.line2,
+            backgroundColor: p.bg2,
+            color: p.text,
+            borderRadius: p.radius,
+            paddingHorizontal: 12,
+            paddingVertical: 11,
+            fontSize: 15,
+            fontFamily: p.monoText ? MONO : undefined,
+          },
+          props.style,
+        ]}
+      />
+      {hint ? <Txt kind="small">{hint}</Txt> : null}
+    </View>
+  );
+}
+
+export function Card({ children, accent, style, onPress, onLongPress }: {
+  children: ReactNode; accent?: string; style?: StyleProp<ViewStyle>; onPress?(): void; onLongPress?(): void;
+}) {
+  const { p } = useTheme();
+  const box: ViewStyle = {
+    backgroundColor: p.panel,
+    borderColor: p.line,
+    borderWidth: 1,
+    borderLeftWidth: accent ? 3 : 1,
+    borderLeftColor: accent || p.line,
+    borderRadius: p.radius,
+    padding: 14,
+    gap: 8,
+  };
+  if (!onPress) return <View style={[box, style]}>{children}</View>;
+  return (
+    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [box, { backgroundColor: pressed ? p.panel2 : p.panel }, style]}>
+      {children}
+    </Pressable>
+  );
+}
+
+export function Row({ children, style, gap = 10 }: { children: ReactNode; style?: StyleProp<ViewStyle>; gap?: number }) {
+  return <View style={[{ flexDirection: "row", alignItems: "center", gap }, style]}>{children}</View>;
+}
+
+export function Chip({ text, color }: { text: string; color?: string }) {
+  const { p } = useTheme();
+  const c = color || p.dim;
+  return (
+    <View style={{ borderWidth: 1, borderColor: alpha(c, 0.5), backgroundColor: alpha(c, 0.1), paddingHorizontal: 7, paddingVertical: 2, borderRadius: p.radius ? 99 : 0 }}>
+      <Text style={{ color: c, fontSize: 10.5, fontFamily: MONO, letterSpacing: 0.8, textTransform: "uppercase" }}>{text}</Text>
+    </View>
+  );
+}
+
+export function Notice({ text, kind = "error" }: { text: string; kind?: "error" | "warn" | "info" | "ok" }) {
+  const { p } = useTheme();
+  const c = { error: p.accent2, warn: p.warn, info: p.accent, ok: p.ok }[kind];
+  return (
+    <View style={{ borderWidth: 1, borderColor: alpha(c, 0.55), backgroundColor: alpha(c, 0.08), padding: 12, borderRadius: p.radius }}>
+      <Txt style={{ color: c, fontSize: 14, lineHeight: 20 }} selectable>
+        {text}
+      </Txt>
+    </View>
+  );
+}
+
+export function Loading({ text }: { text?: string }) {
+  const { p } = useTheme();
+  return (
+    <View style={{ padding: 40, alignItems: "center", gap: 12 }}>
+      <ActivityIndicator color={p.accent} />
+      {text ? <Txt kind="dim">{text}</Txt> : null}
+    </View>
+  );
+}
+
+export function Empty({ title, text, children }: { title: string; text?: string; children?: ReactNode }) {
+  return (
+    <View style={{ paddingVertical: 36, paddingHorizontal: 8, alignItems: "center", gap: 10 }}>
+      <Txt kind="h2" style={{ textAlign: "center" }}>
+        {title}
+      </Txt>
+      {text ? (
+        <Txt kind="dim" style={{ textAlign: "center" }}>
+          {text}
+        </Txt>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+export function Divider() {
+  const { p } = useTheme();
+  return <View style={{ height: 1, backgroundColor: p.line, marginVertical: 4 }} />;
+}
+
+export function errText(e: unknown): string {
+  return (e as any)?.message || String(e);
+}
+
+const s = StyleSheet.create({
+  top: { height: 52, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1 },
+  topBtn: { width: 36, justifyContent: "center" },
+});
