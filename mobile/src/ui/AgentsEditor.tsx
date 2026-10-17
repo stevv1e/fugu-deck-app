@@ -90,7 +90,7 @@ export function AgentsEditor({ api, canEdit, models }: { api: DeckApi; canEdit: 
           {a.instructions ? <Txt kind="dim" numberOfLines={2}>{a.instructions}</Txt> : null}
           {canEdit && a.id !== "fugu" ? (
             armed === a.id ? (
-              <Row>
+              <Row style={{ flexWrap: "wrap" }}>
                 <Btn title="Да, удалить" small kind="danger" onPress={() => run(`rm:${a.id}`, async () => { await api.deleteAgent(a.id); return `Агент ${a.name} удалён; его чаты ведёт Fugu`; })} busy={busy === `rm:${a.id}`} />
                 <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
               </Row>

@@ -160,7 +160,7 @@ export default function Projects() {
             {armed?.id === pr.id && armed.mode === "rename" ? (
               <>
                 <Field label="Название проекта" value={newName} onChangeText={setNewName} autoFocus maxLength={80} onSubmitEditing={() => rename(pr.id)} />
-                <Row>
+                <Row style={{ flexWrap: "wrap" }}>
                   <Btn title="Сохранить" small onPress={() => rename(pr.id)} busy={removing === pr.id} disabled={!newName.trim()} />
                   <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} disabled={removing === pr.id} />
                 </Row>
@@ -171,7 +171,7 @@ export default function Projects() {
                 <Txt kind="dim">
                   Удалить проект «{pr.name}» со всеми чатами, вложениями и заметками базы знаний? Вернуть его будет нельзя.
                 </Txt>
-                <Row>
+                <Row style={{ flexWrap: "wrap" }}>
                   <Btn title="Удалить проект" small kind="danger" onPress={() => remove(pr.id)} busy={removing === pr.id} />
                   <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} disabled={removing === pr.id} />
                 </Row>

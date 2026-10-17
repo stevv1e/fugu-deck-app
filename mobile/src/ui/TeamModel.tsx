@@ -6,6 +6,7 @@
 import { useState } from "react";
 
 import type { DeckApi } from "@/core/api";
+import { keyStatus } from "@/core/personal";
 import { proposeModel, termsProblem, vote, withdrawSponsorship, type TeamChatState } from "@/core/teams";
 import { getCluster, parseSid } from "@/state/cluster";
 import { openClusterSession, spaceKey } from "@/state/clusterSession";
@@ -22,6 +23,9 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
   const { p } = useTheme();
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<string[] | null>(null);
+  // Провайдеры, у которых есть МОЙ ключ в кластере: оплатить модель можно только им. Общее пространство этого не
+  // знает (у него нет ключей участников) и отдаёт все модели кластера; null — узнать не удалось, ничего не скрываем.
+  const [mine, setMine] = useState<string[] | null>(null);
   const [pick, setPick] = useState("");
   const [limit, setLimit] = useState("20");
   const [days, setDays] = useState("7");
@@ -58,8 +62,16 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
     if (!models) {
       try {
         const m = (await api.config()).models;
+        let have: string[] | null = null;
+        try {
+          have = (await keyStatus((await cluster()).session)).providers;
+        } catch {
+          have = null;
+        }
+        const ok = (x: string) => !have || have.includes(x.split(":")[0]);
+        setMine(have);
         setModels(m);
-        setPick(m.find((x) => x !== model) || m[0] || "");
+        setPick(m.find((x) => x !== model && ok(x)) || "");
       } catch (e) {
         setErr(errText(e));
       }
@@ -68,6 +80,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
 
   const terms = { limitUsd: Number(limit.replace(",", ".")), days: Number(days), perMemberUsdDay: perDay.trim() ? Number(perDay.replace(",", ".")) : null };
   const bad = open ? termsProblem(terms) : null;
+  const payable = (m: string) => !mine || mine.includes(m.split(":")[0]);
 
   const propose = () => run("propose", async () => {
     const c = await cluster();
@@ -117,7 +130,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
             prop.proposer_id === meId ? (
               <Btn title="Отменить предложение" small kind="ghost" onPress={() => run("vote", () => vote(api.s, prop.id, false))} busy={busy === "vote"} disabled={!!busy} />
             ) : prop.grant_id && prop.my_vote === null ? (
-              <Row>
+              <Row gap={8} style={{ flexWrap: "wrap" }}>
                 <Btn title="За" small kind="ok" onPress={() => run("vote", () => vote(api.s, prop.id, true))} busy={busy === "vote"} disabled={!!busy} />
                 <Btn title="Против" small kind="ghost" onPress={() => run("vote", () => vote(api.s, prop.id, false))} disabled={!!busy} />
               </Row>
@@ -131,7 +144,7 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
       {err ? <Notice text={err} /> : null}
 
       {canWrite && !open ? (
-        <Row>
+        <Row gap={8} style={{ flexWrap: "wrap" }}>
           <Btn title={sponsor ? "Предложить другую модель" : "Выбрать модель"} small kind={sponsor ? "ghost" : "primary"} onPress={showForm} disabled={!!busy} />
           {sponsor && sponsor.id === meId ? (
             armed ? (
@@ -151,16 +164,20 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
           </Txt>
           <Row gap={6} style={{ flexWrap: "wrap" }}>
             {(models ?? []).map((m) => (
-              <Btn key={m} small title={short(m)} kind={m === pick ? "primary" : "ghost"} onPress={() => setPick(m)} />
+              <Btn key={m} small title={short(m)} kind={m === pick ? "primary" : "ghost"} onPress={() => setPick(m)} disabled={!payable(m)} />
             ))}
           </Row>
+          {models && models.some((m) => !payable(m)) ? (
+            <Txt kind="small">
+              {models.some(payable) ? "Серые модели оплатить нечем: " : "Ни одну модель оплатить нечем: "}
+              нет вашего ключа их провайдера. Добавьте его на экране кластера → «Токены моделей».
+            </Txt>
+          ) : null}
           <Field label="Лимит, долларов" value={limit} onChangeText={setLimit} keyboardType="decimal-pad" />
           <Field label="Срок, дней" value={days} onChangeText={setDays} keyboardType="number-pad" />
           <Field label="На одного участника в день, долларов (необязательно)" value={perDay} onChangeText={setPerDay} keyboardType="decimal-pad" hint={bad ?? undefined} />
-          <Row>
-            <Btn title="Подписать и предложить ⌁" onPress={propose} busy={busy === "propose"} disabled={!!busy || !pick || !!bad} style={{ flex: 1.6 }} />
-            <Btn title="Отмена" kind="ghost" onPress={() => setOpen(false)} disabled={!!busy} style={{ flex: 1 }} />
-          </Row>
+          <Btn title="Подписать и предложить ⌁" onPress={propose} busy={busy === "propose"} disabled={!!busy || !pick || !!bad || !payable(pick)} />
+          <Btn title="Отмена" kind="ghost" onPress={() => setOpen(false)} disabled={!!busy} />
         </>
       ) : null}
     </Card>

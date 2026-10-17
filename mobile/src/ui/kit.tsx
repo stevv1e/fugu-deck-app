@@ -142,7 +142,7 @@ export function Btn({ title, onPress, kind = "primary", busy, disabled, style, s
       ]}
     >
       {busy && <ActivityIndicator size="small" color={fg} />}
-      <Text style={{ color: fg, fontWeight: "700", fontSize: small ? 13 : 15, letterSpacing: 0.6, fontFamily: p.monoText ? MONO : undefined }}>
+      <Text style={{ color: fg, fontWeight: "700", fontSize: small ? 13 : 15, letterSpacing: 0.6, fontFamily: p.monoText ? MONO : undefined, flexShrink: 1, textAlign: "center" }}>
         {title}
       </Text>
     </Pressable>
