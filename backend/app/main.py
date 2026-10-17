@@ -21,8 +21,9 @@ from pydantic import BaseModel, Field, field_validator
 from . import auth, backup, devices, kb, obsidian, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
+from .agent_rules import agent_problem
 from .config import get_settings
-from .db import AGENT_TOOLS, DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
+from .db import DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
 from .outbox import outbox
@@ -885,9 +886,6 @@ class AgentIn(BaseModel):
     skills: list[str] | None = Field(None, max_length=100)
 
 
-AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
-
-
 @app.get("/api/agents")
 async def list_agents(u: dict = Me):
     return await db().list_agents()
@@ -897,18 +895,11 @@ async def list_agents(u: dict = Me):
 async def put_agent(aid: str, body: AgentIn, u: dict = Me):
     """Создать или изменить агента (владелец). id — латиницей: под ним агент входит на серверы (deck-<пространство>-<id>)."""
     owner_only(u)
-    if not AGENT_ID.match(aid):
-        raise HTTPException(400, "Имя агента (id): латинские строчные буквы, цифры и дефис, 2–31 знак, с буквы")
-    if body.tools is not None and any(t not in AGENT_TOOLS for t in body.tools):
-        raise HTTPException(400, f"Доступы агента: {', '.join(AGENT_TOOLS)}")
-    if body.model:
-        _check_model(body.model)
+    fields = body.model_dump(exclude_none=True)
     exists = await db().get_agent(aid)
-    if not exists and (len(await db().list_agents()) >= 20):
-        raise HTTPException(409, "В пространстве не больше 20 агентов")
-    if not exists and not body.name:
-        raise HTTPException(400, "Нужно имя агента")
-    a = await db().put_agent(aid, **body.model_dump(exclude_none=True))
+    if why := agent_problem(aid, fields, bool(exists), len(await db().list_agents()), settings.model_list):
+        raise HTTPException(409 if "не больше" in why else 400, why)
+    a = await db().put_agent(aid, **fields)
     await broker().publish("agent", None, action="saved", agent_id=aid)
     return a
 

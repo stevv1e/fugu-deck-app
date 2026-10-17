@@ -369,3 +369,62 @@ async def test_llm_ready_from_keyguard(client, monkeypatch):
     c = client.post("/api/projects/general/conversations", json={}).json()
     r = client.post(f"/api/conversations/{c['id']}/messages", json={"content": "hi", "model": "sakana:fugu-max-v1.0"})
     assert r.status_code == 400 and "Токены моделей" in r.json()["detail"], r.text
+
+
+async def test_agent_save_tool(client):
+    """Модель создаёт агента инструментом agent_save: только владелец видит инструмент, подтверждение — всегда."""
+    from app.agent import Run
+    from app.tools import REGISTRY
+
+    login(client)
+    ag = main.agent()
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    me = client.get("/api/auth/me").json()
+    run = Run(id="r2", conversation_id=c["id"], model="sakana:x", project_id="general", git_status={},
+              agent=await main.db().get_agent("fugu"), user={**me, "role": "owner"})
+    names = {t.name for t in ag.tools_for(run)}
+    assert {"agent_save", "agent_list"} <= names
+    run.user = {**me, "role": "member"}
+    assert "agent_save" not in {t.name for t in ag.tools_for(run)}, "не владельцу инструмент не показывается"
+    assert REGISTRY["agent_save"].always_confirm and not REGISTRY["agent_list"].always_confirm
+
+    ctx = await ag.context(c["id"], run=run)
+    save = REGISTRY["agent_save"].handler
+    try:
+        await save(ctx, {"id": "Bad", "name": "x", "instructions": "", "tools": []})
+        raise AssertionError("неверный id принят")
+    except ValueError as e:
+        assert "латинские" in str(e)
+    try:
+        await save(ctx, {"id": "rev", "name": "x", "instructions": "", "tools": ["root"]})
+        raise AssertionError("неизвестный доступ принят")
+    except ValueError as e:
+        assert "Доступы" in str(e)
+    r = await save(ctx, {"id": "reviewer", "name": "Ревьюер", "instructions": "Смотри PR и пиши замечания.", "tools": ["git"]})
+    assert r["created"] is True and r["agent"]["tools"] == ["git"]
+    a = client.get("/api/agents").json()
+    assert any(x["id"] == "reviewer" and x["name"] == "Ревьюер" for x in a)
+    r = await save(ctx, {"id": "reviewer", "name": "Ревьюер PR", "instructions": "Только замечания.", "tools": ["git", "memory"]})
+    assert r["created"] is False and r["agent"]["name"] == "Ревьюер PR"
+    listed = await REGISTRY["agent_list"].handler(ctx, {})
+    assert any(x["id"] == "reviewer" and x["tools"] == ["git", "memory"] for x in listed)
+    assert client.delete("/api/agents/reviewer").status_code == 200
+    # подтверждения выключены — agent_save всё равно ждёт человека; отказ — агент не создан
+    import asyncio, json as _json
+    old = ag.policy.mode
+    ag.policy.mode = "none"
+    try:
+        run.user = {**me, "role": "owner"}
+        call = {"id": "c1", "function": {"name": "agent_save", "arguments": _json.dumps(
+            {"id": "ops", "name": "Опс", "instructions": "-", "tools": ["ssh"]})}}
+        task = asyncio.create_task(ag._exec_tool(run, call))
+        for _ in range(100):
+            if run.approvals:
+                break
+            await asyncio.sleep(0.01)
+        assert run.approvals, "подтверждение не запрошено"
+        next(iter(run.approvals.values())).set_result((False, "не надо"))
+        out = _json.loads(await task)
+        assert "отклонил" in out["error"] and not await main.db().get_agent("ops")
+    finally:
+        ag.policy.mode = old
