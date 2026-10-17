@@ -23,6 +23,10 @@ export type Role = 'reader' | 'editor' | 'owner' | 'none';
 export type ActionBody =
   | { type: 'key_put'; provider: Provider; key_hint: string; ct_sha256: string }
   | { type: 'key_delete'; provider: Provider }
+  // MCP-сервер владельца: адрес и, если нужен, токен (HPKE, AAD "mcp_put|<device_id>|<id>|<nonce>"); token_hint и
+  // ct_sha256 — оба null без токена.
+  | { type: 'mcp_put'; id: string; name: string; url: string; token_hint: string | null; ct_sha256: string | null }
+  | { type: 'mcp_delete'; id: string }
   // Лимит личных расходов на модели в месяц (своим ключом в личном пространстве); null — без лимита.
   | { type: 'spend_limit'; limit_usd_month: number | null }
   | {
@@ -103,7 +107,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** Действия в пространстве несут space в конверте (и человек его видит); у остальных поля space нет вовсе. */
 export const IN_SPACE: Record<ActionType, boolean> = {
-  key_put: false, key_delete: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
+  key_put: false, key_delete: false, mcp_put: false, mcp_delete: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
   role_change: true, space_delete: true, tool_approve: true,
 };
@@ -142,6 +146,7 @@ const list =
     if (new Set(v).size !== v.length) throw bad(n, 'повторяющиеся элементы');
   };
 
+const MCP_ID = /^[a-z][a-z0-9-]{1,30}$/;
 const PROVIDERS = ['anthropic', 'sakana', 'deepseek', 'github', 'gitlab'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
@@ -152,6 +157,14 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
     ct_sha256: str(64, /^[0-9a-f]{64}$/),
   },
   key_delete: { provider: oneOf(...PROVIDERS) },
+  mcp_put: {
+    id: str(31, MCP_ID),
+    name: str(60),
+    url: str(300, /^https:\/\/[!-~]+$/),
+    token_hint: nullable(str(4, /^[A-Za-z0-9_-]{4}$/)),
+    ct_sha256: nullable(str(64, /^[0-9a-f]{64}$/)),
+  },
+  mcp_delete: { id: str(31, MCP_ID) },
   spend_limit: { limit_usd_month: nullable(money) },
   grant: {
     chat: id,
@@ -217,6 +230,7 @@ export function validateAction(input: unknown): ActionBody {
   if (a.type === 'grant' && a.key_until > a.until) throw bad('key_until', 'позже срока спонсорства');
   if (a.type === 'grant' && (a.provider === 'github' || a.provider === 'gitlab') !== (a.model === 'git'))
     throw bad('model', 'для GitHub/GitLab модель — «git», для остальных провайдеров — имя модели');
+  if (a.type === 'mcp_put' && (a.token_hint === null) !== (a.ct_sha256 === null)) throw bad('token_hint', 'токен и его хеш — вместе');
   if (a.type === 'ssh_danger' && a.typed_server !== a.server) throw bad('typed_server', 'имя сервера введено неверно');
   return a;
 }
@@ -245,6 +259,14 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
       };
     case 'key_delete':
       return { title: 'Удалить ключ API', lines: [`Провайдер: ${PROVIDER_NAMES[a.provider]}`], danger: true };
+    case 'mcp_put':
+      return {
+        title: 'Подключить MCP-сервер — агент сможет вызывать его инструменты',
+        lines: [`${a.name} (${a.id})`, `Адрес: ${a.url}`, a.token_hint ? `Токен: …${a.token_hint} — его увидит только keyguard` : 'Без токена'],
+        danger: false,
+      };
+    case 'mcp_delete':
+      return { title: 'Отключить MCP-сервер', lines: [`Сервер: ${a.id}`], danger: true };
     case 'spend_limit':
       return {
         title: 'Лимит расходов на модели',

@@ -15,10 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .agent_rules import approval_mode, is_owner
 from .db import AGENT_TOOLS, DEFAULT_AGENT, TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
 from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
-from . import filetools, vision
+from . import filetools, mcp_client, vision
 from .outbox import outbox
 from . import keyguard_client as kgc
 from .tools.providers import GitHubProvider, GitLabProvider
@@ -95,6 +96,7 @@ class Run:
     # шаге: иначе каждый шаг — лишние запросы к GitHub/GitLab.
     git_status: dict | None = None
     agent: dict | None = None  # агент пространства, который ведёт этот чат (модель, инструкции, доступы, скилы)
+    mcp_tools: dict = field(default_factory=dict, repr=False)  # инструменты MCP-серверов владельца на этот запуск
     events: list[dict] = field(default_factory=list)
     status: str = "running"
     started_at: float = field(default_factory=time.time)
@@ -286,7 +288,7 @@ class Agent:
         if ag.get("id") and ag.get("id") != DEFAULT_AGENT or ag.get("instructions"):
             no = [x for x in AGENT_TOOLS if x not in (ag.get("tools") or AGENT_TOOLS)]
             parts.append(f"\n## Ты — агент «{ag.get('name') or ag.get('id')}»\n{ag.get('instructions') or ''}"
-                         + (f"\nУ тебя нет доступа к: {', '.join({'git': 'репозиториям', 'ssh': 'серверам', 'memory': 'памяти', 'files': 'файлам', 'skills': 'скилам'}[x] for x in no)}." if no else ""))
+                         + (f"\nУ тебя нет доступа к: {', '.join({'git': 'репозиториям', 'ssh': 'серверам', 'memory': 'памяти', 'files': 'файлам', 'skills': 'скилам', 'mcp': 'MCP-серверам'}[x] for x in no)}." if no else ""))
         p = ctx.project
         if p:
             parts.append(f"\n## Проект: {p['name']}\n{p.get('description') or ''}")
@@ -403,9 +405,14 @@ class Agent:
         git_ok = any(run.git_status.values()) if run.git_status is not None else True
         # доступы агента: какие группы инструментов ему даны (по умолчанию — все)
         allowed = set((run.agent or {}).get("tools") or AGENT_TOOLS)
-        return [t for t in REGISTRY.values()
-                if (t.group not in AGENT_TOOLS or t.group in allowed)
-                and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)]
+        owner = is_owner(run.user or {}, self.settings)  # агентов создаёт и меняет только владелец
+        out = [t for t in REGISTRY.values()
+               if (t.group not in AGENT_TOOLS or t.group in allowed)
+               and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)
+               and (t.group != "agents" or owner)]
+        if "mcp" in allowed:
+            out += list(run.mcp_tools.values())
+        return out
 
     def price(self, model: str) -> list[float] | None:
         pr = self.settings.pricing
@@ -434,7 +441,7 @@ class Agent:
     async def _exec_tool(self, run: Run, call: dict) -> str:
         name = call["function"]["name"]
         ctx = await self.context(run.conversation_id, run.user, run)
-        tool = REGISTRY.get(name)
+        tool = REGISTRY.get(name) or run.mcp_tools.get(name)
         try:
             args = json.loads(call["function"]["arguments"] or "{}")
         except json.JSONDecodeError as e:
@@ -447,18 +454,23 @@ class Agent:
         ctx.ssh_need, ctx.approval_jws, ctx.ssh_preview = "", "", None
         risk = await tool.risk(ctx, args)
         approved: bool | None = None
+        # подтверждения — по настройке агента (без неё — как на сервере)
+        mode, signed = approval_mode(run.agent, self.policy.mode)
+        policy = ApprovalPolicy(mode)
         # Команду на сервере исполняет ssh-gateway, и подпись человека нужна ему, а не нам: настройка «не спрашивать
         # подтверждений» на неё не действует. sign — действие, которое телефон подпишет вместо обычного разрешения.
         sign = ssh_tools.sign_request(ctx, args) if name == "ssh_exec" else None
-        if self.policy.needs_approval(risk) or sign:
+        if policy.needs_approval(risk) or sign or tool.always_confirm:
             aid = new_id()
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             run.approvals[aid] = fut
-            run.approval_meta[aid] = {"name": name, "args": args, "risk": risk, "sign": sign}
+            # без подписи — только если так настроен агент; команды на серверах и изменение агентов — всегда с подписью
+            nosign = not signed and not sign and not tool.always_confirm
+            run.approval_meta[aid] = {"name": name, "args": args, "risk": risk, "sign": sign, "nosign": nosign}
             from .devices import args_hash
             review = await self._review(run, args, ctx.ssh_preview) if sign else None
             await run.emit("approval_request", approval_id=aid, call_id=call["id"], name=name,
-                           title=tool.title, args=args, risk=risk, args_sha256=args_hash(args), sign=sign,
+                           title=tool.title, args=args, risk=risk, args_sha256=args_hash(args), sign=sign, nosign=nosign,
                            preview=ctx.ssh_preview, review=review)
             await self._publish("run.approval", run, title=tool.title, risk=risk)
             outbox.add(run.user.get("id"), "approval", run.conversation_id, run.project_id, tool=tool.title)
@@ -501,6 +513,10 @@ class Agent:
             run.agent = await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT) or await self.db.get_agent(DEFAULT_AGENT)
             git_allowed = run.project_id != TALK_PROJECT and "git" in ((run.agent or {}).get("tools") or AGENT_TOOLS)
             run.git_status = await self.git_status(run.git) if git_allowed else {}
+            # MCP — только в личных пространствах с keyguard и если агенту дан доступ «mcp»
+            if (run.project_id != TALK_PROJECT and mcp_client.enabled() and self.settings.space_kind != "team"
+                    and "mcp" in ((run.agent or {}).get("tools") or AGENT_TOOLS)):
+                run.mcp_tools = await mcp_client.tools()
             for step in range(self.settings.max_agent_steps):
                 if run.budget and (why := await run.budget()):
                     await run.emit("notice", text=why)

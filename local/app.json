@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Fugu Local",
+    "slug": "fugu-local",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "kz.fugudeck.local"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#07080c",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "kz.fugudeck.local",
+      "allowBackup": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": ["expo-router", "expo-status-bar", "expo-secure-store"],
+    "scheme": "fugulocal",
+    "backgroundColor": "#07080c",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

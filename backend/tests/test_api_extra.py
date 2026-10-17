@@ -369,3 +369,118 @@ async def test_llm_ready_from_keyguard(client, monkeypatch):
     c = client.post("/api/projects/general/conversations", json={}).json()
     r = client.post(f"/api/conversations/{c['id']}/messages", json={"content": "hi", "model": "sakana:fugu-max-v1.0"})
     assert r.status_code == 400 and "Токены моделей" in r.json()["detail"], r.text
+
+
+async def test_agent_save_tool(client):
+    """Модель создаёт агента инструментом agent_save: только владелец видит инструмент, подтверждение — всегда."""
+    from app.agent import Run
+    from app.tools import REGISTRY
+
+    login(client)
+    ag = main.agent()
+    c = client.post("/api/projects/general/conversations", json={}).json()
+    me = client.get("/api/auth/me").json()
+    run = Run(id="r2", conversation_id=c["id"], model="sakana:x", project_id="general", git_status={},
+              agent=await main.db().get_agent("fugu"), user={**me, "role": "owner"})
+    names = {t.name for t in ag.tools_for(run)}
+    assert {"agent_save", "agent_list"} <= names
+    run.user = {**me, "role": "member"}
+    assert "agent_save" not in {t.name for t in ag.tools_for(run)}, "не владельцу инструмент не показывается"
+    assert REGISTRY["agent_save"].always_confirm and not REGISTRY["agent_list"].always_confirm
+
+    ctx = await ag.context(c["id"], run=run)
+    save = REGISTRY["agent_save"].handler
+    try:
+        await save(ctx, {"id": "Bad", "name": "x", "instructions": "", "tools": []})
+        raise AssertionError("неверный id принят")
+    except ValueError as e:
+        assert "латинские" in str(e)
+    try:
+        await save(ctx, {"id": "rev", "name": "x", "instructions": "", "tools": ["root"]})
+        raise AssertionError("неизвестный доступ принят")
+    except ValueError as e:
+        assert "Доступы" in str(e)
+    r = await save(ctx, {"id": "reviewer", "name": "Ревьюер", "instructions": "Смотри PR и пиши замечания.", "tools": ["git"]})
+    assert r["created"] is True and r["agent"]["tools"] == ["git"]
+    a = client.get("/api/agents").json()
+    assert any(x["id"] == "reviewer" and x["name"] == "Ревьюер" for x in a)
+    r = await save(ctx, {"id": "reviewer", "name": "Ревьюер PR", "instructions": "Только замечания.", "tools": ["git", "memory"]})
+    assert r["created"] is False and r["agent"]["name"] == "Ревьюер PR"
+    listed = await REGISTRY["agent_list"].handler(ctx, {})
+    assert any(x["id"] == "reviewer" and x["tools"] == ["git", "memory"] for x in listed)
+    assert client.delete("/api/agents/reviewer").status_code == 200
+    # подтверждения выключены — agent_save всё равно ждёт человека; отказ — агент не создан
+    import asyncio, json as _json
+    old = ag.policy.mode
+    ag.policy.mode = "none"
+    try:
+        run.user = {**me, "role": "owner"}
+        call = {"id": "c1", "function": {"name": "agent_save", "arguments": _json.dumps(
+            {"id": "ops", "name": "Опс", "instructions": "-", "tools": ["ssh"]})}}
+        task = asyncio.create_task(ag._exec_tool(run, call))
+        for _ in range(100):
+            if run.approvals:
+                break
+            await asyncio.sleep(0.01)
+        assert run.approvals, "подтверждение не запрошено"
+        next(iter(run.approvals.values())).set_result((False, "не надо"))
+        out = _json.loads(await task)
+        assert "отклонил" in out["error"] and not await main.db().get_agent("ops")
+    finally:
+        ag.policy.mode = old
+
+
+async def test_agent_approvals(client):
+    """Подтверждения по настройке агента: без подписи, только опасные, без подтверждений; agent_save — всегда с подписью."""
+    import asyncio, json as _json
+    from app.agent import Run
+    from app.agent_rules import approval_mode
+
+    assert approval_mode({"approvals": "tap"}, "all") == ("all", False)
+    assert approval_mode({"approvals": "none"}, "all") == ("none", True)
+    assert approval_mode({"approvals": "dangerous"}, "all") == ("dangerous", True)
+    assert approval_mode({"approvals": ""}, "dangerous") == ("dangerous", True)
+    assert approval_mode(None, "all") == ("all", True)
+
+    login(client)
+    assert "mcp" in (await main.db().get_agent("fugu"))["tools"], "агенту по умолчанию дан доступ к MCP"
+    assert client.put("/api/agents/auto", json={"name": "Авто", "tools": ["memory"], "approvals": "maybe"}).status_code == 422
+    r = client.put("/api/agents/auto", json={"name": "Авто", "tools": ["memory"], "approvals": "none"})
+    assert r.status_code == 200 and r.json()["approvals"] == "none"
+    ag = main.agent()
+    me = client.get("/api/auth/me").json()
+    c = client.post("/api/projects/general/conversations", json={"agent_id": "auto"}).json()
+    run = Run(id="r3", conversation_id=c["id"], model="sakana:x", project_id="general", git_status={},
+              agent=await main.db().get_agent("auto"), user={**me, "role": "owner"})
+    m1 = client.post("/api/projects/general/memory", json={"content": "удалить 1"}).json()["id"]
+    m2 = client.post("/api/projects/general/memory", json={"content": "удалить 2"}).json()["id"]
+    call = {"id": "c1", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m1})}}
+    out = _json.loads(await asyncio.wait_for(ag._exec_tool(run, call), 5))
+    assert "error" not in out and not run.approval_meta, out  # «без подтверждений» — изменение сразу
+    call = {"id": "c1b", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m2})}}
+
+    client.put("/api/agents/auto", json={"approvals": "tap", "tools": ["memory"]})
+    run.agent = await main.db().get_agent("auto")
+    task = asyncio.create_task(ag._exec_tool(run, call))
+    for _ in range(100):
+        if run.approvals:
+            break
+        await asyncio.sleep(0.01)
+    aid = next(iter(run.approval_meta))
+    assert run.approval_meta[aid]["nosign"] is True, "«без подписи» — подтверждение без биометрии"
+    run.approvals[aid].set_result((True, ""))
+    assert "error" not in _json.loads(await task)
+
+    # agent_save подтверждается с подписью даже у агента «без подписи»
+    run.agent = {**run.agent, "tools": ["memory"]}
+    call2 = {"id": "c2", "function": {"name": "agent_save", "arguments": _json.dumps({"id": "x2", "name": "X", "instructions": "-", "tools": []})}}
+    task = asyncio.create_task(ag._exec_tool(run, call2))
+    for _ in range(100):
+        if run.approvals:
+            break
+        await asyncio.sleep(0.01)
+    aid = next(iter(run.approval_meta))
+    assert run.approval_meta[aid]["nosign"] is False
+    run.approvals[aid].set_result((False, ""))
+    await task
+    assert client.delete("/api/agents/auto").status_code == 200

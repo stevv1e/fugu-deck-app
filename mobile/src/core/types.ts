@@ -114,6 +114,8 @@ export type RunEvent =
       preview?: { command: string; exit_code?: number; output?: string; error?: string; truncated?: boolean } | null;
       /** Независимая проверка команды другим запросом к модели: что сделает и чем рискованна. */
       review?: string | null;
+      /** Агент настроен «без подписи»: «Разрешить» — без биометрии. */
+      nosign?: boolean;
     }
   | { seq: number; type: "approval_resolved"; approval_id: string; call_id: string; approved: boolean }
   | { seq: number; type: "tool_start"; call_id: string; name: string; title?: string; args: any; risk?: string }

@@ -186,4 +186,16 @@ with TestClient(main.app) as c:
     r = c.post(f"/api/conversations/{chat}/messages", headers=anna, json={"content": "привет"})
     assert r.status_code == 409 and "спонсор" in r.json()["detail"], r.text
 
+    # 4. Владелец пространства меняет модель на свою сразу, без голосования (переписка в чате уже была).
+    assert c.get(f"/api/conversations/{chat}", headers=anna).json()["owner_switch"] is True
+    assert c.get(f"/api/conversations/{chat}", headers=bob).json()["owner_switch"] is False
+    r = c.post(f"/api/conversations/{chat}/model", headers=anna, json={"model": ULTRA, "limit_usd": 10, "days": 2}).json()
+    p5 = r["proposal"]["id"]
+    grant("g-000000c1", chat, p5, ULTRA, "anna", limit_usd=10.0)
+    r = c.post(f"/api/model-proposals/{p5}/grant", headers=anna, json={"grant_id": "g-000000c1"}).json()
+    assert r["status"] == "approved" and r["applied"] is True, r
+    conv = c.get(f"/api/conversations/{chat}", headers=anna).json()
+    assert conv["model"] == ULTRA and conv["sponsor"]["id"] == "anna" and conv["proposal"] is None, conv
+    assert any("(владелец) сменил(а) модель" in (m.get("content") or "") for m in conv["messages"]), conv["messages"][-3:]
+
 print("team-kg: ok")

@@ -88,6 +88,8 @@ export type TeamChatState = {
   proposal?: ProposalInfo | null;
   model_policy?: "vote" | "open";
   created_by?: string | null;
+  /** Я владелец пространства: моя модель применяется сразу, без голосования. */
+  owner_switch?: boolean;
 };
 
 /** То, что агент просит подписать: чат, предложение, модель и список допущенных — из его ответа, условия — от человека. */

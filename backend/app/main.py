@@ -18,11 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, backup, devices, kb, obsidian, schedules as sched, spaceauth
+from . import auth, backup, devices, kb, mcp_client, obsidian, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
+from .agent_rules import agent_problem
 from .config import get_settings
-from .db import AGENT_TOOLS, DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
+from .db import DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
 from .outbox import outbox
@@ -883,9 +884,7 @@ class AgentIn(BaseModel):
     instructions: str | None = Field(None, max_length=20000)
     tools: list[str] | None = None
     skills: list[str] | None = Field(None, max_length=100)
-
-
-AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+    approvals: str | None = Field(None, pattern="^(|sign|tap|dangerous|none)$")
 
 
 @app.get("/api/agents")
@@ -897,18 +896,11 @@ async def list_agents(u: dict = Me):
 async def put_agent(aid: str, body: AgentIn, u: dict = Me):
     """Создать или изменить агента (владелец). id — латиницей: под ним агент входит на серверы (deck-<пространство>-<id>)."""
     owner_only(u)
-    if not AGENT_ID.match(aid):
-        raise HTTPException(400, "Имя агента (id): латинские строчные буквы, цифры и дефис, 2–31 знак, с буквы")
-    if body.tools is not None and any(t not in AGENT_TOOLS for t in body.tools):
-        raise HTTPException(400, f"Доступы агента: {', '.join(AGENT_TOOLS)}")
-    if body.model:
-        _check_model(body.model)
+    fields = body.model_dump(exclude_none=True)
     exists = await db().get_agent(aid)
-    if not exists and (len(await db().list_agents()) >= 20):
-        raise HTTPException(409, "В пространстве не больше 20 агентов")
-    if not exists and not body.name:
-        raise HTTPException(400, "Нужно имя агента")
-    a = await db().put_agent(aid, **body.model_dump(exclude_none=True))
+    if why := agent_problem(aid, fields, bool(exists), len(await db().list_agents()), settings.model_list):
+        raise HTTPException(409 if "не больше" in why else 400, why)
+    a = await db().put_agent(aid, **fields)
     await broker().publish("agent", None, action="saved", agent_id=aid)
     return a
 
@@ -923,6 +915,28 @@ async def delete_agent(aid: str, u: dict = Me):
     await db().delete_agent(aid)  # его чаты переходят к агенту по умолчанию
     await broker().publish("agent", None, action="deleted", agent_id=aid)
     return {"ok": True}
+
+
+# ================================================================== MCP-серверы владельца (через keyguard)
+@app.get("/api/mcp")
+async def mcp_status(u: dict = Me):
+    """Подключённые MCP-серверы и их инструменты — сейчас, без кэша (экран «MCP-серверы» после добавления)."""
+    owner_only(u)
+    if not mcp_client.enabled() or settings.space_kind == "team":
+        return {"available": False, "servers": []}
+    mcp_client.forget()
+    out = []
+    for srv in await mcp_client.servers():
+        item = {**srv, "tools": [], "error": None}
+        try:
+            for t in await asyncio.wait_for(mcp_client.list_tools(srv["id"]), 20):
+                item["tools"].append({"name": t.get("name"), "title": t.get("title") or t.get("name"),
+                                      "read_only": (t.get("annotations") or {}).get("readOnlyHint") is True,
+                                      "description": (t.get("description") or "")[:300]})
+        except Exception as e:
+            item["error"] = str(e) or e.__class__.__name__
+        out.append(item)
+    return {"available": True, "servers": out}
 
 
 # ================================================================== скилы
@@ -1443,9 +1457,10 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
     if not run:
         raise HTTPException(404, "Запрос на подтверждение не найден или уже обработан")
     await need(u, run.project_id, "editor")
+    nosign = bool((run.approval_meta.get(aid) or {}).get("nosign"))  # агент настроен «без подписи»
     if u.get("_device"):  # с телефона подтверждение «за» действует только с подписью ключом подтверждения (биометрия)
         meta = run.approval_meta.get(aid) or {}
-        if body.approve or body.action:
+        if (body.approve or body.action) and not (nosign and body.approve and not body.action):
             d = u["_device"]
             state["device_auth"].check_action(body.action or {}, body.sig or "", d["confirm_jwk"], d["id"], {
                 "type": "approve_tool", "approval_id": aid, "tool": meta.get("name"),
@@ -1465,7 +1480,7 @@ async def approve(aid: str, body: ApprovalIn, u: dict = Me):
         await broker().publish("run.approval_resolved", run.project_id, conversation_id=run.conversation_id,
                                run_id=run.id, approved=True, by=u["display_name"])
         return {"ok": True}
-    elif settings.is_space and kgc.enabled() and body.approve:
+    elif settings.is_space and kgc.enabled() and body.approve and not nosign:
         # В кластере «за» действует только с подписью ключа подтверждения владельца (биометрия на телефоне).
         # Иначе разрешить агенту действие мог бы любой, кто получил токен пространства, — в том числе control-plane.
         meta = run.approval_meta.get(aid) or {}
@@ -1544,6 +1559,7 @@ async def chat_model_state(c: dict, u: dict) -> dict:
     out: dict = {"team": is_team()}
     if not is_team():
         return out
+    out["owner_switch"] = u.get("space_role") == "owner"  # владелец меняет модель без голосования
     sp = await db().get_user(c["sponsor_id"]) if c.get("sponsor_id") else None
     pname = split_model(c["model"])[0]
     if sp:
@@ -1679,6 +1695,12 @@ async def propose_model(cid: str, body: ProposalIn, u: dict = Me):
         await _apply(c, model, u, terms)
         pol = POLICIES[body.model_policy or c.get("model_policy") or "vote"]
         await _note(c, f"{u['display_name']} выбрал(а) {_title(model)} и оплачивает чат ({text_terms}). Смена модели: {pol}")
+        return {"applied": True}
+    if u.get("space_role") == "owner":
+        # владелец пространства меняет модель на свою сразу: платит он сам, голосовать не о чем
+        await _apply(c, model, u, terms)
+        await _note(c, f"{u['display_name']} (владелец) сменил(а) модель на {_title(model)} и оплачивает чат ({text_terms})")
+        await broker().publish("model.proposal", c["project_id"], conversation_id=cid, by=u["display_name"], model=model)
         return {"applied": True}
     if c.get("model_policy") == "open":
         # смена модели разрешена коллегам — без голосования
@@ -1820,6 +1842,8 @@ async def attach_grant(pid: str, body: GrantIn, u: dict = Me):
     # Чат, в котором ещё не было переписки, настраивает его создатель — без голосования.
     if not await db().has_dialogue(c["id"]) and c.get("created_by") == u["id"]:
         status = await _finish_with_grant(p, c, u, f"{u['display_name']} выбрал(а) модель нового чата")
+    elif u.get("space_role") == "owner":  # владелец меняет модель на свою без голосования
+        status = await _finish_with_grant(p, c, u, f"{u['display_name']} (владелец) сменил(а) модель")
     elif c.get("model_policy") == "open":
         status = await _finish_with_grant(p, c, u, f"{u['display_name']} сменил(а) модель")
     else:
