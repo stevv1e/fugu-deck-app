@@ -1,0 +1,8 @@
+node_modules/
+dist/
+android/
+ios/
+.expo/
+expo-env.d.ts
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
