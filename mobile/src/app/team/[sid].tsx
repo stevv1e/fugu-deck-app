@@ -147,19 +147,19 @@ export default function Team() {
               {owner && m.role !== "owner" && transfer === m.nick ? (
                 <>
                   <Txt kind="dim">Передать владение {m.nick}? Владелец меняет состав и может удалить пространство; вы станете редактором. Вернуть владение сможет только {m.nick}.</Txt>
-                  <Row>
+                  <Row style={{ flexWrap: "wrap" }}>
                     <Btn title="Передать ⌁" small kind="danger" onPress={() => change(m.nick, "owner")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
                     <Btn title="Отмена" small kind="ghost" onPress={() => setTransfer(null)} />
                   </Row>
                 </>
               ) : owner && m.role !== "owner" ? (
                 armed === m.nick ? (
-                  <Row>
+                  <Row style={{ flexWrap: "wrap" }}>
                     <Btn title="Да, исключить" small kind="danger" onPress={() => change(m.nick, "none")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
                     <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
                   </Row>
                 ) : (
-                  <Row>
+                  <Row style={{ flexWrap: "wrap" }}>
                     <Btn title={m.role === "editor" ? "Сделать читателем" : "Сделать редактором"} small kind="ghost"
                       onPress={() => change(m.nick, m.role === "editor" ? "reader" : "editor")} busy={busy === `m:${m.nick}`} disabled={!!busy} />
                     <Btn title="Исключить" small kind="ghost" onPress={() => setArmed(m.nick)} disabled={!!busy} />
@@ -179,7 +179,7 @@ export default function Team() {
               <Txt kind="h2">Добавить участника</Txt>
               <Txt kind="dim">По нику пользователя этого кластера. Редактор пишет в чатах и голосует за модель; читатель только читает.</Txt>
               <Field label="Ник" value={nick} onChangeText={(t) => setNick(t.trim().toLowerCase())} autoCapitalize="none" autoCorrect={false} hint={nickBad ?? undefined} />
-              <Row gap={6}>
+              <Row gap={6} style={{ flexWrap: "wrap" }}>
                 <Btn small title="Редактор" kind={role === "editor" ? "primary" : "ghost"} onPress={() => setRole("editor")} />
                 <Btn small title="Читатель" kind={role === "reader" ? "primary" : "ghost"} onPress={() => setRole("reader")} />
               </Row>
@@ -189,7 +189,7 @@ export default function Team() {
 
           {owner && !st.delete_at ? (
             armed === "#delete" ? (
-              <Row>
+              <Row style={{ flexWrap: "wrap" }}>
                 <Btn title="Да, удалить пространство" small kind="danger" onPress={remove} busy={busy === "delete"} disabled={!!busy} />
                 <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
               </Row>

@@ -124,7 +124,7 @@ export default function ServerSettings() {
               <Txt kind="small" style={{ textAlign: "center" }}>
                 Новый участник сканирует QR в приложении — адрес и отпечаток сервера проверятся автоматически. Логин и пароль ему выдаёте вы.
               </Txt>
-              <Row>
+              <Row style={{ flexWrap: "wrap" }}>
                 <Btn title="Копировать ссылку" kind="ghost" small onPress={() => Clipboard.setStringAsync(invite.link)} />
                 <Btn title="Поделиться" kind="ghost" small onPress={() => Share.share({ message: invite.link })} />
               </Row>
