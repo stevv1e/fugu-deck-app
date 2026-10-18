@@ -1,5 +1,6 @@
 /**
- * Задания агента по расписанию в проекте: что поручить и когда. Каждое задание пишет в свой чат «⏰ <название>».
+ * Задания агента по расписанию в проекте: что поручить и когда. Каждое задание пишет в свой чат «⏰ <название>»;
+ * в общем пространстве — в выбранный чат с моделью спонсора (от имени автора, в пределах разрешения спонсора).
  * Пространство в кластере спит, когда им не пользуются; к сроку задания его будит control-plane.
  */
 import { router, useLocalSearchParams } from "expo-router";
@@ -21,6 +22,8 @@ export default function Schedules() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
+  const [chat, setChat] = useState<string | null>(null); // общее пространство: чат задания
+  const chats = useLoad(useCallback(() => api?.conversations(pid) ?? null, [api, pid]));
 
   const run = async (tag: string, fn: () => Promise<string>) => {
     if (!api) return;
@@ -41,7 +44,8 @@ export default function Schedules() {
   const save = () => {
     if (!form || typeof built === "string" || !built) return;
     void run("save", async () => {
-      const s = form.id ? await api!.updateSchedule(form.id, built) : await api!.createSchedule(pid, built);
+      const s = form.id ? await api!.updateSchedule(form.id, built)
+        : await api!.createSchedule(pid, team ? { ...built, conversation_id: chat ?? undefined } : built);
       setForm(null);
       return `«${s.title}»: ${s.description}. Следующий запуск — ${whenText(s.next_at)}.`;
     });
@@ -71,7 +75,7 @@ export default function Schedules() {
     <Screen title="Расписание">
       {apiError || error ? <Notice text={(apiError || error)!} /> : null}
       {msg ? <Notice kind={msg.kind} text={msg.text} /> : null}
-      {team ? <Notice kind="info" text="В общем пространстве задания по расписанию не выполняются: модель там оплачивает спонсор по своему разрешению." /> : null}
+      {team ? <Notice kind="info" text="В общем пространстве задание выполняется в выбранном чате — его моделью, от вашего имени и в пределах разрешения спонсора. Исключат вас из пространства — задание выключится." /> : null}
       <Txt kind="small">Агент выполнит поручение в назначенное время и напишет результат в чат задания. Подтверждения действий, как обычно, — с телефона.</Txt>
 
       {form ? (
@@ -99,7 +103,18 @@ export default function Schedules() {
               placeholder={form.f.kind === "hourly" ? ":15" : "09:00"} keyboardType="numbers-and-punctuation" style={{ minWidth: 90 }} />
           </Row>
           <Txt kind="small">Часовой пояс: {form.f.tz}</Txt>
-          {models.length ? (
+          {team && !form.id ? (
+            <>
+              <Txt kind="label">чат задания (с моделью спонсора)</Txt>
+              <Row gap={6} style={{ flexWrap: "wrap" }}>
+                {(chats.data ?? []).map((c) => (
+                  <Btn key={c.id} small title={`${c.title} · ${c.model.split(":").pop()}`} kind={chat === c.id ? "primary" : "ghost"} onPress={() => setChat(c.id)} />
+                ))}
+              </Row>
+              {chats.data && chats.data.length === 0 ? <Txt kind="small">В проекте нет чатов — создайте чат и договоритесь о модели.</Txt> : null}
+            </>
+          ) : null}
+          {models.length && !team ? (
             <>
               <Txt kind="label">модель</Txt>
               <Row gap={6} style={{ flexWrap: "wrap" }}>
@@ -111,13 +126,13 @@ export default function Schedules() {
           ) : null}
           {typeof built === "string" ? <Txt kind="small" color={p.warn}>{built}</Txt> : null}
           <Row>
-            <Btn title="Сохранить" onPress={save} busy={busy === "save"} disabled={typeof built === "string"} style={{ flex: 1 }} />
+            <Btn title="Сохранить" onPress={save} busy={busy === "save"} disabled={typeof built === "string" || (!!team && !form.id && !chat)} style={{ flex: 1 }} />
             <Btn title="Отмена" kind="ghost" onPress={() => setForm(null)} style={{ flex: 1 }} />
           </Row>
         </Card>
-      ) : !team ? (
+      ) : (
         <Btn title="＋ Задание" kind="ghost" onPress={() => setForm({ f: emptyForm(cfg.data?.default_model || models[0] || "") })} />
-      ) : null}
+      )}
 
       {data && data.length === 0 && !form ? <Empty title="Заданий нет" text="Например: каждое утро — сводка по открытым PR." /> : null}
       {data?.map((s) => (
@@ -130,10 +145,10 @@ export default function Schedules() {
           <Txt kind="dim" numberOfLines={3}>{s.prompt}</Txt>
           <Txt kind="small">Следующий запуск: {s.enabled ? whenText(s.next_at) : "—"}{s.last_status ? ` · последний: ${s.last_status}` : ""}</Txt>
           <Row gap={6} style={{ flexWrap: "wrap" }}>
-            <Btn small title="Запустить сейчас" onPress={() => now(s)} busy={busy === `n:${s.id}`} disabled={!!busy || !!team} />
+            <Btn small title="Запустить сейчас" onPress={() => now(s)} busy={busy === `n:${s.id}`} disabled={!!busy} />
             {s.conversation_id ? <Btn small kind="ghost" title="Чат" onPress={() => router.push(`/s/${sid}/c/${s.conversation_id}`)} /> : null}
-            <Btn small kind="ghost" title={s.enabled ? "Пауза" : "Включить"} onPress={() => toggle(s)} busy={busy === `t:${s.id}`} disabled={!!busy || !!team} />
-            <Btn small kind="ghost" title="Изменить" onPress={() => setForm({ id: s.id, f: formOf(s) })} disabled={!!busy || !!team} />
+            <Btn small kind="ghost" title={s.enabled ? "Пауза" : "Включить"} onPress={() => toggle(s)} busy={busy === `t:${s.id}`} disabled={!!busy} />
+            <Btn small kind="ghost" title="Изменить" onPress={() => setForm({ id: s.id, f: formOf(s) })} disabled={!!busy} />
             {armed === s.id
               ? <Btn small kind="danger" title="Да, удалить" onPress={() => remove(s)} busy={busy === `rm:${s.id}`} />
               : <Btn small kind="ghost" title="Удалить" onPress={() => setArmed(s.id)} disabled={!!busy} />}
