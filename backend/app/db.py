@@ -299,6 +299,19 @@ SCHEMA = [
     """
     ALTER TABLE conversations ADD COLUMN sponsor_member_day REAL;
     """,
+    # v19: очередь предложений агента — в проекте с проверкой заметок агент предлагает, человек принимает
+    """
+    ALTER TABLE projects ADD COLUMN kb_review INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS note_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        fields TEXT NOT NULL DEFAULT '{}',
+        conversation_id TEXT,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS note_proposals_project ON note_proposals(project_id);
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -944,6 +957,23 @@ class Database:
     async def list_memories(self, pid: str, limit: int = 500) -> list[dict]:
         return await self._all("SELECT * FROM memories WHERE project_id=? ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                                (pid, limit))
+
+    async def add_proposal(self, pid: str, content: str, fields: dict, conversation_id: str | None) -> dict:
+        """Предложение агента (проект с проверкой заметок): в базу знаний попадёт, когда человек примет."""
+        pid_ = await self._exec("INSERT INTO note_proposals (project_id,content,fields,conversation_id,created_at) VALUES (?,?,?,?,?)",
+                                (pid, content, json.dumps(fields, ensure_ascii=False), conversation_id, time.time()))
+        return await self.get_proposal(pid_)  # type: ignore[return-value]
+
+    async def get_proposal(self, nid: int) -> dict | None:
+        r = await self._one("SELECT * FROM note_proposals WHERE id=?", (nid,))
+        return {**r, "fields": json.loads(r["fields"] or "{}")} if r else None
+
+    async def list_proposals(self, pid: str) -> list[dict]:
+        return [{**r, "fields": json.loads(r["fields"] or "{}")}
+                for r in await self._all("SELECT * FROM note_proposals WHERE project_id=? ORDER BY created_at", (pid,))]
+
+    async def delete_proposal(self, nid: int) -> None:
+        await self._exec("DELETE FROM note_proposals WHERE id=?", (nid,))
 
     async def get_memory(self, mid: int) -> dict | None:
         return await self._one("SELECT * FROM memories WHERE id=?", (mid,))

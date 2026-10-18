@@ -616,6 +616,7 @@ class ProjectPatch(BaseModel):
     skills: list[str] | None = None
     color: str | None = None
     repos: list[RepoRef] | None = Field(None, max_length=100)
+    kb_review: bool | None = None  # заметки агента — только после проверки человеком (очередь предложений)
 
 
 @app.get("/api/projects")
@@ -873,6 +874,40 @@ async def patch_memory(mid: int, body: MemoryPatch, u: dict = Me):
     nm = await db().get_memory(mid)
     await broker().publish("memory", m["project_id"], action="updated", memory=nm, by=u["display_name"])
     return nm
+
+
+@app.get("/api/projects/{pid}/kb/proposals")
+async def list_note_proposals(pid: str, u: dict = Me):
+    await need(u, pid)
+    return await db().list_proposals(pid)
+
+
+async def _proposal_for_edit(nid: int, u: dict) -> dict:
+    pr = await db().get_proposal(nid)
+    if not pr:
+        raise HTTPException(404, "Предложение не найдено")
+    await need(u, pr["project_id"], "editor")
+    return pr
+
+
+@app.post("/api/kb/proposals/{nid}/accept")
+async def accept_note_proposal(nid: int, u: dict = Me):
+    """Принять предложение агента: заметка попадает в базу знаний такой, какой её предложил агент."""
+    pr = await _proposal_for_edit(nid, u)
+    f = dict(pr["fields"])
+    m = await db().add_memory(pr["project_id"], pr["content"], f.pop("tags", ""), "agent", "Fugu", pr["conversation_id"],
+                              bool(f.pop("pinned", False)), **f)
+    await db().delete_proposal(nid)
+    await broker().publish("memory", pr["project_id"], action="added", memory=m, by=u["display_name"])
+    return m
+
+
+@app.delete("/api/kb/proposals/{nid}")
+async def reject_note_proposal(nid: int, u: dict = Me):
+    pr = await _proposal_for_edit(nid, u)
+    await db().delete_proposal(nid)
+    await broker().publish("memory", pr["project_id"], action="rejected", proposal_id=nid, by=u["display_name"])
+    return {"ok": True}
 
 
 @app.delete("/api/memory/{mid}")

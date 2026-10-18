@@ -87,7 +87,7 @@ async def test_agent_search_returns_neighbors_and_strengthens(tmp_path):
         await db.update_memory(b["id"], stale=True)
         await db.add_note_link(a["id"], b["id"], "ref", 0.5)
         await db.add_note_link(c["id"], a["id"], "dep", 0.3)
-        ctx = SimpleNamespace(db=db, project_id=DEFAULT_PROJECT, readable_projects={DEFAULT_PROJECT: "general"}, run_id="r1",
+        ctx = SimpleNamespace(db=db, project_id=DEFAULT_PROJECT, project={}, readable_projects={DEFAULT_PROJECT: "general"}, run_id="r1",
                               conversation_id="c1", broker=None)
         out = await memory_tools.memory_search(ctx, {"query": "checkout 502"})
         ids = [o["id"] for o in out]

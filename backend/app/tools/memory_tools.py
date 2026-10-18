@@ -90,12 +90,20 @@ async def memory_save(ctx, a):
     src = kb_watch.source_file(a.get("source_file")) if a.get("source_file") else None
     if a.get("source_file") and not src:
         raise ProviderError("source_file: нужны provider (github|gitlab), repo, path и version из read_file")
-    m = await ctx.db.add_memory(ctx.project_id, a["content"].strip(), a.get("tags", ""), "agent",
-                                "Fugu", ctx.conversation_id, a.get("pinned", False) and not ext,
-                                title=(a.get("title") or "").strip()[:120] or None,
-                                area=a.get("area") if a.get("area") in kb.AREAS else None,
-                                source_ref=(a.get("source") or "").strip()[:300] or None, external=ext, origin="chats",
-                                src_file=src[0] if src else None, src_version=src[1] if src else None)
+    fields = {"tags": a.get("tags", ""), "pinned": bool(a.get("pinned", False)) and not ext,
+              "title": (a.get("title") or "").strip()[:120] or None,
+              "area": a.get("area") if a.get("area") in kb.AREAS else None,
+              "source_ref": (a.get("source") or "").strip()[:300] or None, "external": ext, "origin": "chats",
+              "src_file": src[0] if src else None, "src_version": src[1] if src else None}
+    if ctx.project.get("kb_review"):
+        # проект с проверкой заметок: в базу знаний попадёт, когда человек примет предложение
+        p = await ctx.db.add_proposal(ctx.project_id, a["content"].strip(), fields, ctx.conversation_id)
+        if ctx.broker:
+            await ctx.broker.publish("memory", ctx.project_id, action="proposed", proposal_id=p["id"], by="agent")
+        return {"proposal": p["id"], "saved": False,
+                "note": "в этом проекте заметки агента проверяет человек: запись ждёт решения и пока не в памяти"}
+    m = await ctx.db.add_memory(ctx.project_id, a["content"].strip(), fields.pop("tags"), "agent", "Fugu",
+                                ctx.conversation_id, fields.pop("pinned"), **fields)
     await _changed(ctx, "added", memory=m)
     return {"id": m["id"], "saved": True}
 

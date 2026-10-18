@@ -9,7 +9,7 @@ import { ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
-import type { FoundNote, KbGraph, KbNote } from "@/core/api";
+import type { FoundNote, KbGraph, KbNote, NoteProposal } from "@/core/api";
 import { kbInjection, parseKbMessage } from "@/kb/inject";
 import { KB_HTML } from "@/kb/kbHtml";
 import { pickBase64, saveBase64 } from "@/platform/pick";
@@ -39,12 +39,17 @@ export default function KnowledgeBase() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [linkType, setLinkType] = useState("dep");
   const [linkQ, setLinkQ] = useState("");
+  // очередь предложений агента (проект с проверкой заметок)
+  const [review, setReview] = useState(false);
+  const [props, setProps] = useState<NoteProposal[]>([]);
 
   const load = useCallback(async () => {
     if (!api) return;
     try {
-      const [g, v] = await Promise.all([api.kb(pid), prefs.get<string | null>(VIEW_KEY, null)]);
+      const [g, v, ps, pr] = await Promise.all([api.kb(pid), prefs.get<string | null>(VIEW_KEY, null), api.proposals(pid), api.projects()]);
       setGraph(g);
+      setProps(ps);
+      setReview(!!pr.find((x) => x.id === pid)?.kb_review);
       setView(v);
       setVersion((x) => x + 1);
       setErr(null);
@@ -132,6 +137,32 @@ export default function KnowledgeBase() {
     if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
   };
 
+  const toggleReview = async () => {
+    if (!api) return;
+    setBusy(true);
+    try {
+      await api.updateProject(pid, { kb_review: !review });
+      setReview(!review);
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const decide = async (n: NoteProposal, ok: boolean) => {
+    if (!api) return;
+    setBusy(true);
+    try {
+      await (ok ? api.acceptProposal(n.id) : api.rejectProposal(n.id));
+      setOkMsg(ok ? "Заметка принята в базу знаний" : "Предложение отклонено");
+      await load();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
       <TopBar title="База знаний" back right={draft ? undefined : (
@@ -142,6 +173,11 @@ export default function KnowledgeBase() {
       )} />
       {apiError || err ? <View style={{ padding: 12 }}><Notice text={(apiError || err)!} /></View> : null}
       {okMsg ? <View style={{ paddingHorizontal: 12, paddingTop: 8 }}><Notice kind="ok" text={okMsg} /></View> : null}
+      {props.length && !tools && !draft ? (
+        <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+          <Btn small kind="ghost" title={`Предложения агента: ${props.length} — проверить`} onPress={() => setTools(true)} />
+        </View>
+      ) : null}
       {tools && !draft ? (
         <ScrollView style={{ maxHeight: 360, flexGrow: 0 }} contentContainerStyle={{ padding: 12, gap: 8 }} keyboardShouldPersistTaps="handled">
           <Field label="Поиск по базе знаний" value={q} onChangeText={setQ} placeholder="бэкап, порядок выкатки…" onSubmitEditing={search} returnKeyType="search"
@@ -153,6 +189,21 @@ export default function KnowledgeBase() {
               <Txt style={{ fontWeight: "600" }} numberOfLines={1}>{n.title || n.content.split("\n")[0]}</Txt>
               <Txt kind="dim" numberOfLines={2}>{n.content}</Txt>
               <Txt kind="small">{n.linked_to ? "связана с найденной" : "по словам"}{n.project_id !== pid && n.project_name ? ` · проект ${n.project_name}` : ""}</Txt>
+            </Card>
+          ))}
+          <Txt kind="label">заметки агента</Txt>
+          <Btn small kind={review ? "primary" : "ghost"} title={review ? "Проверяю заметки агента — выключить" : "Проверять заметки агента"}
+            onPress={toggleReview} disabled={busy} style={{ alignSelf: "flex-start" }} />
+          <Txt kind="small">{review ? "Новая заметка агента ждёт вашего решения и до него не попадает в память." : "Агент записывает в память сам."}</Txt>
+          {props.map((n) => (
+            <Card key={n.id} accent={p.warn}>
+              {n.fields.title ? <Txt style={{ fontWeight: "600" }}>{n.fields.title}</Txt> : null}
+              <Txt selectable>{n.content}</Txt>
+              {n.fields.source_ref ? <Txt kind="small">Источник: {n.fields.source_ref}</Txt> : null}
+              <Row>
+                <Btn small title="Принять" onPress={() => decide(n, true)} disabled={busy} style={{ flex: 1 }} />
+                <Btn small kind="ghost" title="Отклонить" onPress={() => decide(n, false)} disabled={busy} style={{ flex: 1 }} />
+              </Row>
             </Card>
           ))}
           <Txt kind="label">obsidian</Txt>
