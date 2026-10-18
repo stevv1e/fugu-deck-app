@@ -71,6 +71,18 @@ export default function ClusterDevices() {
       await load(r);
     });
 
+  // Телефон потерян: отозвать и сразу пригласить того же пользователя заново. Если у него больше нет действующих
+  // устройств, control-plane при выпуске приглашения удаляет его старые passkey (они остались на потерянном).
+  const lost = (d: ClusterDevice) =>
+    run(`lost:${d.id}`, `Устройство «${d.name}» отозвано, новое приглашение для ${d.user} — ниже`, async (r) => {
+      const s = await openClusterSession(r, r.api);
+      const keys = await keysOf(r);
+      await revokeDevice(s, keys, d);
+      setInvite(null);
+      setInvite(await createInvite(s, keys, d.user));
+      await load(r);
+    });
+
   const issue = (who: string) =>
     run("invite", `Приглашение для ${who} выпущено`, async (r) => {
       setInvite(null);
@@ -112,10 +124,16 @@ export default function ClusterDevices() {
               </>
             ) : d.status === "active" && !mine ? (
               armed === d.id ? (
-                <Row>
-                  <Btn title="Да, отозвать" small kind="danger" onPress={() => act("revoke", d)} busy={busy === `revoke:${d.id}`} disabled={!!busy} />
-                  <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
-                </Row>
+                <>
+                  <Row style={{ flexWrap: "wrap" }}>
+                    <Btn title="Да, отозвать" small kind="danger" onPress={() => act("revoke", d)} busy={busy === `revoke:${d.id}`} disabled={!!busy} />
+                    {list.admin || d.user === list.user ? (
+                      <Btn title="Потерян: отозвать и пригласить заново" small kind="danger" onPress={() => lost(d)} busy={busy === `lost:${d.id}`} disabled={!!busy} />
+                    ) : null}
+                    <Btn title="Отмена" small kind="ghost" onPress={() => setArmed(null)} />
+                  </Row>
+                  <Txt kind="small">«Потерян» — две подписи: отзыв и приглашение. Новый телефон входит по приглашению и регистрирует свой passkey.</Txt>
+                </>
               ) : (
                 <Btn title="Отозвать" small kind="ghost" onPress={() => setArmed(d.id)} disabled={!!busy} />
               )
