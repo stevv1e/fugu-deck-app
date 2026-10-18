@@ -16,7 +16,7 @@ import { KB_HTML } from "@/kb/kbHtml";
 import { pickBase64, saveBase64 } from "@/platform/pick";
 import { prefs } from "@/platform/storage";
 import { useApi } from "@/state/hooks";
-import { Btn, Card, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { Btn, Card, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt, usePage } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
 const VIEW_KEY = "fd.kb.view";
@@ -25,6 +25,7 @@ const EMPTY: Draft = { mid: null, title: "", content: "", area: null, tags: "", 
 
 export default function KnowledgeBase() {
   const { p } = useTheme();
+  const page = usePage();
   const { sid, pid } = useLocalSearchParams<{ sid: string; pid: string }>();
   const { api, error: apiError } = useApi(sid);
   const [graph, setGraph] = useState<KbGraph | null>(null);
@@ -165,7 +166,7 @@ export default function KnowledgeBase() {
         </ScrollView>
       ) : null}
       {draft ? (
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[{ padding: 16, gap: 12, paddingBottom: 40 }, page]} keyboardShouldPersistTaps="handled">
           <Txt kind="h2">{draft.mid === null ? "Новая заметка" : "Заметка"}</Txt>
           <Field label="Заголовок (необязательно)" value={draft.title} onChangeText={(t) => setDraft({ ...draft, title: t })} maxLength={120} />
           <Field label="Текст" value={draft.content} onChangeText={(t) => setDraft({ ...draft, content: t })} multiline maxLength={8000}

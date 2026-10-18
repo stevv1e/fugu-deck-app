@@ -38,3 +38,14 @@ test("прослойка: команды Rust и события потоков �
   fire({ id: "s1", kind: "chunk", text: "data: 2\n\n" });
   assert.deepEqual(got, ["data: 1\n\n"]);
 });
+
+test("боковая панель понимает, что открыто, по адресу экрана", async () => {
+  const { placeOf } = await import("../src/desktop/place");
+  assert.deepEqual(placeOf("/s/cluster.api.x~t-1/c/abc"), { sid: "cluster.api.x~t-1", pid: null, chat: "abc", cluster: null, section: "c" });
+  assert.deepEqual(placeOf("/s/srv1/kb/general"), { sid: "srv1", pid: "general", chat: null, cluster: null, section: "kb" });
+  assert.equal(placeOf("/s/srv1").section, "");
+  assert.deepEqual(placeOf("/team/cluster.h~t-2"), { sid: "cluster.h~t-2", pid: null, chat: null, cluster: null, section: "team" });
+  assert.deepEqual(placeOf("/keys/h?kind=llm"), { sid: null, pid: null, chat: null, cluster: "h", section: "keys" });
+  assert.deepEqual(placeOf("/settings"), { sid: null, pid: null, chat: null, cluster: null, section: "settings" });
+  assert.equal(placeOf("/s/a%20b/c/x").sid, "a b");
+});

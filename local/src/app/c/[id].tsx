@@ -9,10 +9,11 @@ import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ask, titleOf } from "@/core/chat";
+import { READ_WIDTH, useWide } from "@/desktop/wide";
 import { costUsd, PROVIDERS, splitModel, type Msg } from "@/core/providers";
 import { streamFetch } from "@/platform/net";
 import { getKey } from "@/platform/secrets";
-import { getChat, getMessages, getSettings, newId, saveChat, type ChatMeta, type StoredMsg } from "@/state/store";
+import { getChat, getMessages, getSettings, newId, saveChat, setOpenChat, type ChatMeta, type StoredMsg } from "@/state/store";
 import { Btn, errText, IconBtn, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { alpha, MONO, useTheme } from "@/ui/theme";
 
@@ -41,7 +42,8 @@ export default function Chat() {
       const s = await getSettings();
       setModels(s.models);
       setSystem(s.system);
-      const existing = param && param !== "new" ? await getChat(param) : null;
+      // «new-…» — новый чат (у каждого свой адрес, чтобы Ctrl+N из нового чата открыл ещё один)
+      const existing = param && !param.startsWith("new") ? await getChat(param) : null;
       if (existing) {
         setMeta(existing);
         setMsgs(await getMessages(existing.id));
@@ -52,6 +54,15 @@ export default function Chat() {
   }, [param]);
 
   useEffect(() => () => abort.current?.abort(), []);
+  // боковая панель компьютера подсвечивает открытый чат (у нового чата id появляется здесь, а не в адресе)
+  const openId = meta?.id ?? null;
+  useEffect(() => {
+    setOpenChat(openId);
+    return () => setOpenChat(null);
+  }, [openId]);
+  // компьютер: колонка по центру; Enter отправляет, Shift+Enter — новая строка
+  const wide = useWide();
+  const col = wide ? ({ width: "100%", maxWidth: READ_WIDTH, alignSelf: "center" } as const) : null;
 
   const toEnd = () => {
     atEnd.current = true;
@@ -129,7 +140,7 @@ export default function Chat() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
-      <TopBar title={meta?.title ?? "Чат"} back right={<IconBtn glyph="⚙" label="Настройки" onPress={() => router.push("/settings")} />} />
+      <TopBar title={meta?.title ?? "Чат"} back right={wide ? null : <IconBtn glyph="⚙" label="Настройки" onPress={() => router.push("/settings")} />} />
       <Pressable onPress={live ? undefined : () => setPicking((v) => !v)} style={{ paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: p.line }}>
         <Txt kind="small">
           модель: <Text style={{ color: p.accent, fontFamily: MONO }}>{meta ? short(meta.model) : "—"}</Text>
@@ -154,7 +165,7 @@ export default function Chat() {
             ref={list}
             data={items}
             keyExtractor={(m, i) => `${m.at}-${i}`}
-            contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
+            contentContainerStyle={[{ padding: 14, gap: 12, paddingBottom: 20 }, col, wide ? { paddingHorizontal: 28, paddingTop: 20 } : null]}
             onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: true }); }}
             onLayout={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
             scrollEventThrottle={100}
@@ -207,13 +218,20 @@ export default function Chat() {
             </Pressable>
           ) : null}
         </View>
-        <Row style={{ padding: 10, borderTopWidth: 1, borderTopColor: p.line, alignItems: "flex-end" }}>
+        <View style={{ borderTopWidth: 1, borderTopColor: p.line }}>
+        <Row style={[{ padding: 10, alignItems: "flex-end" }, col, wide ? { paddingHorizontal: 28, paddingVertical: 14 } : null]}>
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder="Сообщение"
+            placeholder={wide ? "Сообщение — Enter отправить, Shift+Enter новая строка" : "Сообщение"}
             placeholderTextColor={p.faint}
             multiline
+            onKeyPress={wide ? (e) => {
+              const k = e.nativeEvent as unknown as { key: string; shiftKey?: boolean; isComposing?: boolean };
+              if (k.key !== "Enter" || k.shiftKey || k.isComposing) return;
+              e.preventDefault();
+              void send();
+            } : undefined}
             style={{
               flex: 1, maxHeight: 160, borderWidth: 1, borderColor: p.line2, backgroundColor: p.bg2, color: p.text,
               borderRadius: p.radius, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
@@ -225,6 +243,7 @@ export default function Chat() {
             <Btn title="➤" onPress={send} disabled={!text.trim() || !meta} />
           )}
         </Row>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
