@@ -464,6 +464,10 @@ class Database:
             (model, sponsor_id, limit_usd if sponsor_id else None, limit_tokens if sponsor_id else None, until,
              now if sponsor_id else None, now, cid))
 
+    async def sponsored_conversations(self) -> list[dict]:
+        """Чаты, у которых есть спонсор модели (общее пространство)."""
+        return await self._all("SELECT * FROM conversations WHERE sponsor_id IS NOT NULL")
+
     async def set_sponsor_limits(self, cid: str, **fields: Any) -> None:
         """Меняет только переданные поля: sponsor_limit_usd, sponsor_limit_tokens, sponsor_until (None = снять)."""
         if not fields:
