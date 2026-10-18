@@ -2242,7 +2242,27 @@ async def internal_roster(body: RosterIn):
         raise HTTPException(400, "bad action")
     await db().set_roster([{"id": m["id"], "name": m["name"], "role": m["role"]} for m in cl["members"]
                            if m.get("role") in ("viewer", "editor", "owner")])
+    await drop_departed_sponsors({m["id"] for m in cl["members"] if m.get("role") in ("editor", "owner")})
     return {"ok": True, "members": len(cl["members"])}
+
+
+async def drop_departed_sponsors(payers: set[str]) -> None:
+    """Спонсор больше не редактор пространства (исключён или стал читателем): его ключом не платим. keyguard отзывает
+    его разрешения по сигналу control-plane; здесь — чат без модели и остановка запусков на его ключе."""
+    for c in await db().sponsored_conversations():
+        if c["sponsor_id"] in payers:
+            continue
+        if c.get("grant_id"):
+            try:
+                await kgc.grant_switch(c["grant_id"], False)
+            except Exception:  # noqa: BLE001 — разрешение уже отозвано keyguard
+                pass
+            await db().set_conversation_grant(c["id"], None)
+        await db().set_sponsor(c["id"], c["model"], None, None)
+        for r in list(agent().runs.values()):
+            if r.status == "running" and r.conversation_id == c["id"]:
+                await agent().cancel(r)
+        await _note(c, "Спонсор модели больше не участник пространства — нужна новая модель")
 
 
 class OutboxIn(BaseModel):

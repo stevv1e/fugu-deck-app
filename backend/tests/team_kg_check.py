@@ -239,4 +239,22 @@ with TestClient(main.app) as c:
     assert r.status_code == 409 and "больше не редактор" in r.json()["detail"], r.text
     assert c.get(f"/api/projects/{pid}/schedules", headers=anna).json()[0]["enabled"] is False
 
+    # 6. Спонсора исключили — его ключом больше не платим: чат без модели, разрешение снято.
+    roster = tok({"aud": f"space-internal:{SPACE}", "sub": "control-plane", "action": "roster", "members": [
+        {"id": "anna", "name": "anna", "role": "owner"}, {"id": "bob", "name": "bob", "role": "editor"},
+        {"id": "carol", "name": "carol", "role": "viewer"}]})
+    assert c.post("/internal/roster", json={"token": roster}).status_code == 200
+    r = c.post(f"/api/conversations/{bare}/model", headers=bob, json={"model": MAX, "limit_usd": 5, "days": 1}).json()
+    pb = r["proposal"]["id"]
+    grant("g-000000d1", bare, pb, MAX, "bob", limit_usd=5.0)
+    r = c.post(f"/api/model-proposals/{pb}/grant", headers=bob, json={"grant_id": "g-000000d1"}).json()
+    assert r["applied"] is True and c.get(f"/api/conversations/{bare}", headers=bob).json()["sponsor"]["id"] == "bob", r
+    roster = tok({"aud": f"space-internal:{SPACE}", "sub": "control-plane", "action": "roster", "members": [
+        {"id": "anna", "name": "anna", "role": "owner"}, {"id": "carol", "name": "carol", "role": "viewer"}]})
+    assert c.post("/internal/roster", json={"token": roster}).status_code == 200
+    conv = c.get(f"/api/conversations/{bare}", headers=anna).json()
+    assert conv["sponsor"] is None and CALLS[-1] == ("deactivate", "g-000000d1"), (conv["sponsor"], CALLS[-3:])
+    assert any("больше не участник" in (m.get("content") or "") for m in conv["messages"]), conv["messages"][-2:]
+    assert c.get(f"/api/conversations/{chat}", headers=anna).json()["sponsor"]["id"] == "anna", "чат Анны не тронут"
+
 print("team-kg: ok")
