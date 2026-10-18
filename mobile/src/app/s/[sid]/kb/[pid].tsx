@@ -19,7 +19,7 @@ import { Btn, Card, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt }
 import { useTheme } from "@/ui/theme";
 
 const VIEW_KEY = "fd.kb.view";
-type Draft = { mid: number | null; title: string; content: string; area: string | null; tags: string; stale: boolean };
+type Draft = { mid: number | null; title: string; content: string; area: string | null; tags: string; stale: boolean; reason?: string };
 const EMPTY: Draft = { mid: null, title: "", content: "", area: null, tags: "", stale: false };
 
 export default function KnowledgeBase() {
@@ -66,7 +66,7 @@ export default function KnowledgeBase() {
     if (m.type === "error") setErr("Страница базы знаний сообщила об ошибке: " + m.message);
     if (m.type === "edit") {
       const n = graph?.notes.find((x: KbNote) => x.mid === m.mid);
-      if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale });
+      if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
     }
   };
 
@@ -129,7 +129,7 @@ export default function KnowledgeBase() {
   });
   const openNote = (id: number) => {
     const n = graph?.notes.find((x: KbNote) => x.mid === id);
-    if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale });
+    if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
   };
 
   return (
@@ -207,7 +207,10 @@ export default function KnowledgeBase() {
             );
           })() : null}
           {draft.mid !== null ? (
-            <Btn small kind="ghost" title={draft.stale ? "Отмечена устаревшей — снять отметку" : "Отметить устаревшей"} onPress={() => setDraft({ ...draft, stale: !draft.stale })} />
+            <>
+              <Btn small kind="ghost" title={draft.stale ? "Отмечена устаревшей — снять отметку" : "Отметить устаревшей"} onPress={() => setDraft({ ...draft, stale: !draft.stale })} />
+              {draft.stale && draft.reason ? <Txt kind="small" color={p.warn}>{draft.reason}</Txt> : null}
+            </>
           ) : null}
           <Row>
             <Btn title="Сохранить" onPress={save} busy={busy} disabled={!draft.content.trim()} style={{ flex: 1.5 }} />

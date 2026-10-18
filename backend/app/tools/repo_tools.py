@@ -9,7 +9,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from .. import filetools
+from .. import filetools, kb_watch
 
 from .providers import FileChange, GitProvider, ProviderError
 from .registry import ToolContext, obj, tool
@@ -67,17 +67,18 @@ async def list_files(ctx, a):
       group="git", title="Чтение файла")
 async def read_file(ctx, a):
     raw = await _provider(ctx, a["provider"]).read_file(a["repo"], a["path"], a.get("ref"))
+    version = kb_watch.version_of(raw)  # для заметки из этого файла: memory_save(source_file={…, version})
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return {"path": a["path"], "binary": True, "size": len(raw)}
+        return {"path": a["path"], "binary": True, "size": len(raw), "version": version}
     lines = text.splitlines()
     s, e = a.get("start_line"), a.get("end_line")
     if s or e:
         s = (s or 1) - 1
         e = e or len(lines)
         text = "\n".join(lines[s:e])
-    out = {"path": a["path"], "total_lines": len(lines), "content": text[:MAX_READ_CHARS]}
+    out = {"path": a["path"], "total_lines": len(lines), "content": text[:MAX_READ_CHARS], "version": version}
     if len(text) > MAX_READ_CHARS:
         out["truncated"] = True
         out["hint"] = "Файл обрезан — дочитайте через start_line/end_line"
