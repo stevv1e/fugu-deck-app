@@ -10,7 +10,6 @@ import { buildSchedule, emptyForm, formOf, KIND_TITLES, WEEKDAYS, whenText, type
 import { useApi, useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
-import { DEV } from "@/platform/desktop";
 
 export default function Schedules() {
   const { p } = useTheme();
@@ -73,7 +72,7 @@ export default function Schedules() {
       {apiError || error ? <Notice text={(apiError || error)!} /> : null}
       {msg ? <Notice kind={msg.kind} text={msg.text} /> : null}
       {team ? <Notice kind="info" text="В общем пространстве задания по расписанию не выполняются: модель там оплачивает спонсор по своему разрешению." /> : null}
-      <Txt kind="small">Агент выполнит поручение в назначенное время и напишет результат в чат задания. Подтверждения действий, как обычно, — с {DEV.gen}.</Txt>
+      <Txt kind="small">Агент выполнит поручение в назначенное время и напишет результат в чат задания. Подтверждения действий, как обычно, — с телефона.</Txt>
 
       {form ? (
         <Card accent={p.accent}>

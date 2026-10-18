@@ -1,9 +1,9 @@
 /** Ключи провайдеров (только на этом устройстве), модели, системная подсказка и тема. */
 import Constants from "expo-constants";
 import { useEffect, useState } from "react";
+import { Linking } from "react-native";
 
 import { DEFAULT_MODELS, PROVIDER_IDS, PROVIDERS, validModel, type Provider } from "@/core/providers";
-import { openLink } from "@/platform/desktop";
 import { delKey, getKey, secretsWeak, setKey } from "@/platform/secrets";
 import { getSettings, saveSettings, type Settings } from "@/state/store";
 import { Btn, Card, errText, Field, Notice, Row, Screen, Txt } from "@/ui/kit";
@@ -50,7 +50,7 @@ function KeyCard({ prov }: { prov: Provider }) {
       <Row gap={8} style={{ flexWrap: "wrap" }}>
         <Btn small title="Сохранить" onPress={save} disabled={!v || /\s/.test(v) || v.length < 8} />
         {saved ? <Btn small kind="ghost" title="Удалить ключ" onPress={drop} /> : null}
-        <Btn small kind="ghost" title="Где взять" onPress={() => openLink(P.keyUrl)} />
+        <Btn small kind="ghost" title="Где взять" onPress={() => void Linking.openURL(P.keyUrl)} />
       </Row>
     </Card>
   );
@@ -78,7 +78,7 @@ export default function SettingsScreen() {
         Fugu Local не обращается к серверу Fugu Deck: сообщения и ключ уходят с этого устройства прямо провайдеру модели.
         Ключи хранятся в защищённом хранилище системы, история чатов — только здесь.
       </Txt>
-      {secretsWeak() ? <Notice kind="warn" text="Это браузер: ключи лежат в localStorage. Настоящие ключи вводите в приложении для Android или Windows." /> : null}
+      {secretsWeak() ? <Notice kind="warn" text="Это браузер: ключи лежат в localStorage. Настоящие ключи вводите в приложении для Android." /> : null}
 
       <Txt kind="label">ключи моделей</Txt>
       {PROVIDER_IDS.map((prov) => <KeyCard key={prov} prov={prov} />)}

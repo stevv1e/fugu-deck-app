@@ -11,7 +11,6 @@ import {
   browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
-import { browserAuth, isDesktop } from "@/platform/desktop";
 import { keyProvider } from "@/platform/keys";
 import { plainHttp } from "@/platform/http";
 import { clusterId, getCluster, loadRefresh, removeCluster, saveCluster, saveRefresh } from "@/state/cluster";
@@ -19,7 +18,7 @@ import { Btn, Card, errText, Field, Notice, Screen, Txt } from "@/ui/kit";
 
 export default function Join() {
   const q = useLocalSearchParams<Record<string, string>>();
-  const [name, setName] = useState(isDesktop ? "Мой компьютер" : "Мой телефон");
+  const [name, setName] = useState("Мой телефон");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState("");
@@ -62,10 +61,7 @@ export default function Join() {
       newAlias = alias;
       const pkce = newPkce();
       setStep("Вход в браузере…");
-      // Windows: вход в системном браузере, возврат — ссылкой fugudeck://oauth, которую Windows отдаст приложению
-      const res = isDesktop
-        ? await browserAuth(browserStartUrl(inv, pkce), REDIRECT_URI)
-        : await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
+      const res = await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
       if (res.type !== "success") throw new Error("Вход отменён");
       const code = parseRedirect(res.url, pkce);
       setStep("Получаю токен, привязанный к ключу устройства…");

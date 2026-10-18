@@ -10,10 +10,9 @@ import { makeKey, type DeviceKeys, type KeyProvider } from "@/core/keys";
 import { softwareProvider } from "@/core/softkeys";
 import type { KeyStorage } from "@/core/types";
 
-import { isDesktop } from "./desktop";
 import { biometryAvailable, gate, isWeb, secrets, storeCanRequireAuth } from "./storage";
 
-const RANK: Record<KeyStorage, number> = { secure_enclave: 3, strongbox: 3, tee: 2, tpm: 2, software: 1 };
+const RANK: Record<KeyStorage, number> = { secure_enclave: 3, strongbox: 3, tee: 2, software: 1 };
 
 function nativeProvider(mod: NonNullable<typeof FdSecure>): KeyProvider {
   const caps = mod.capabilities();
@@ -56,8 +55,7 @@ function nativeProvider(mod: NonNullable<typeof FdSecure>): KeyProvider {
     },
     async describe() {
       return {
-        storage: caps.platform === "ios" ? (caps.hardware ? "secure_enclave" : "software")
-          : caps.platform === "windows" ? (caps.hardware ? "tpm" : "software") : caps.strongbox ? "strongbox" : "tee",
+        storage: caps.platform === "ios" ? (caps.hardware ? "secure_enclave" : "software") : caps.strongbox ? "strongbox" : "tee",
         biometry: caps.biometry,
         mtls: caps.mtls,
       };
@@ -69,8 +67,7 @@ let provider: KeyProvider | null = null;
 
 export async function keyProvider(): Promise<KeyProvider> {
   if (provider) return provider;
-  if (FdSecure && (!isWeb || isDesktop)) {
-    if (isDesktop) await (FdSecure as unknown as { ready?: Promise<unknown> }).ready; // возможности TPM и Hello
+  if (FdSecure && !isWeb) {
     provider = nativeProvider(FdSecure);
   } else {
     const storeAuth = storeCanRequireAuth();
@@ -87,4 +84,4 @@ export async function keyProvider(): Promise<KeyProvider> {
   return provider;
 }
 
-export const hasNativeKeys = () => !!FdSecure && (!isWeb || isDesktop);
+export const hasNativeKeys = () => !!FdSecure && !isWeb;

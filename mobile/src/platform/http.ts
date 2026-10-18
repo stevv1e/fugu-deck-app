@@ -8,8 +8,6 @@ import { FdSecure } from "fd-secure";
 import { randomId } from "@/core/bytes";
 import { ApiError, errorFrom, fetchHttp, type Http } from "@/core/http";
 
-import { isDesktop } from "./desktop";
-
 function xhrStream(): Http["stream"] {
   return (req, on) => {
     const xhr = new XMLHttpRequest();
@@ -60,8 +58,6 @@ function xhrStream(): Http["stream"] {
 }
 
 export function plainHttp(): Http {
-  // Windows: запросы делает Rust-часть (нет CORS у WebView), тот же транспорт, только без сертификата устройства
-  if (isDesktop && FdSecure) return nativeHttp(FdSecure, null);
   const base = fetchHttp((...a) => fetch(...a));
   return { request: base.request, stream: xhrStream() };
 }
@@ -70,10 +66,6 @@ export function plainHttp(): Http {
 export function mtlsHttp(certAlias: string): Http {
   const mod = FdSecure;
   if (!mod) throw new Error("mTLS доступен только в сборке с модулем fd-secure");
-  return nativeHttp(mod, certAlias);
-}
-
-function nativeHttp(mod: NonNullable<typeof FdSecure>, certAlias: string | null): Http {
   return {
     async request(req) {
       try {

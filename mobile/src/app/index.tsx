@@ -14,7 +14,6 @@ const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave",
   strongbox: "StrongBox",
   tee: "TEE",
-  tpm: "TPM",
   software: "программные ключи",
 };
 

@@ -12,7 +12,6 @@ import { getCluster, type ClusterRecord } from "@/state/cluster";
 import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
-import { DEV } from "@/platform/desktop";
 
 const KEY_TITLES: Record<KeyProvider, string> = { anthropic: "Claude (Anthropic)", sakana: "Sakana", deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab" };
 const HINTS: Partial<Record<KeyProvider, string>> = {
@@ -151,7 +150,7 @@ export default function Keys() {
       <Field label={`${git ? "Токен" : "Ключ"} ${KEY_TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false}
         hint={HINTS[provider] ? `Где взять: ${HINTS[provider]}` : undefined} />
       <Btn title="Сохранить ключ ⌁" onPress={save} busy={busy === "put"} disabled={!apiKey} />
-      <Txt kind="small">Ключ шифруется на этом {DEV.prep} для keyguard — ни сервер, ни администратор его не видят. ⌁ — понадобится биометрия.</Txt>
+      <Txt kind="small">Ключ шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят. ⌁ — понадобится биометрия.</Txt>
     </Screen>
   );
 }
