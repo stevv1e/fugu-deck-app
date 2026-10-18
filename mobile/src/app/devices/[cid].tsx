@@ -15,7 +15,7 @@ import { Btn, Card, Chip, errText, Field, Loading, Notice, QrCode, Row, Screen, 
 import { useTheme } from "@/ui/theme";
 
 const STATUS = { pending: "ждёт подтверждения", active: "действует", revoked: "отозвано" } as const;
-const STORAGE: Record<string, string> = { strongbox: "StrongBox", tee: "TEE", tpm: "TPM", secure_enclave: "Secure Enclave", software: "программный ключ" };
+const STORAGE: Record<string, string> = { strongbox: "StrongBox", tee: "TEE", secure_enclave: "Secure Enclave", software: "программный ключ" };
 
 export default function ClusterDevices() {
   const { cid } = useLocalSearchParams<{ cid: string }>();

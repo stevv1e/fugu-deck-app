@@ -15,8 +15,6 @@ import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, PREVIEW_
 import { argsHash } from "@/core/crypto";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
-import { READ_WIDTH, useWide } from "@/desktop/wide";
-import { DEV, isDesktop } from "@/platform/desktop";
 import { readAll, readChunk } from "@/platform/files";
 import { pickFiles, pickPhotos, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
@@ -211,14 +209,14 @@ function ApprovalCard({ t, onDecide }: { t: Tool; onDecide(req: ApprovalRequest,
           </Txt>
         </>
       )}
-      {!matches ? <Notice kind="warn" text={`Хэш аргументов на ${DEV.prep} и на сервере не совпал. Не разрешайте: то, что вы видите, может отличаться от того, что выполнится.`} /> : null}
+      {!matches ? <Notice kind="warn" text="Хэш аргументов на телефоне и на сервере не совпал. Не разрешайте: то, что вы видите, может отличаться от того, что выполнится." /> : null}
       {error ? <Notice text={error} /> : null}
       <Row>
         <Btn title="Отклонить" kind="ghost" onPress={() => decide(false)} busy={busy === "no"} disabled={!!busy} style={{ flex: 1 }} />
         <Btn title={req.nosign && !cmd ? "Разрешить" : "Разрешить ⌁"} kind={danger ? "danger" : "ok"} onPress={() => decide(true)} busy={busy === "yes"} disabled={!!busy || !matches || !nameOk} style={{ flex: 1.4 }} />
       </Row>
       <Txt kind="small" style={{ textAlign: "center" }}>
-        {req.nosign && !cmd ? "Агент настроен без подписи: «Разрешить» — без биометрии" : `«Разрешить» спросит ${DEV.bio} и подпишет решение ключом этого ${DEV.gen}`}
+        {req.nosign && !cmd ? "Агент настроен без подписи: «Разрешить» — без биометрии" : "«Разрешить» спросит биометрию и подпишет решение ключом этого телефона"}
       </Txt>
     </View>
   );
@@ -515,14 +513,11 @@ export default function Chat() {
   }, []);
 
   const pending = items.filter((i): i is Tool => i.kind === "tool" && i.status === "pending" && !!i.approval);
-  // компьютер: сообщения и поле ввода — колонкой по центру; Enter отправляет, Shift+Enter — новая строка
-  const wide = useWide();
-  const col = wide ? ({ width: "100%", maxWidth: READ_WIDTH, alignSelf: "center" } as const) : null;
   const canWrite = conv?.my_role !== "viewer";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
-      <TopBar title={conv?.title || "Чат"} back={!wide} />
+      <TopBar title={conv?.title || "Чат"} back />
       {conv ? (
         <Pressable onPress={conv.team || runId || !canWrite ? undefined : openModels}>
           <Row style={{ paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.line, justifyContent: "space-between" }}>
@@ -570,7 +565,7 @@ export default function Chat() {
           ref={list}
           data={items}
           keyExtractor={(i) => i.key}
-          contentContainerStyle={[{ padding: 14, gap: 12, paddingBottom: 20 }, col, wide ? { paddingHorizontal: 28, paddingTop: 20 } : null]}
+          contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
           onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: true }); }}
           onLayout={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
           scrollEventThrottle={100}
@@ -611,10 +606,10 @@ export default function Chat() {
         ) : null}
         </View>
         {canWrite && (atts.length > 0 || uploading || attachMenu) ? (
-          <View style={[{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }, col, wide ? { paddingHorizontal: 28 } : null]}>
+          <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
             {attachMenu ? (
               <Row gap={6}>
-                {isDesktop ? null : <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />}
+                <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />
                 <Btn small title="Фото" kind="ghost" onPress={() => attach("photo")} />
                 <Btn small title="Файл" kind="ghost" onPress={() => attach("file")} />
                 <Txt kind="small" style={{ flex: 1 }}>до {sizeText(MAX_ATTACHMENT_BYTES)}; агент видит картинки, читает текст, PDF, DOCX, XLSX и архивы</Txt>
@@ -632,23 +627,16 @@ export default function Chat() {
           </View>
         ) : null}
         {canWrite ? (
-          <View style={{ borderTopWidth: atts.length || uploading || attachMenu ? 0 : 1, borderTopColor: p.line, backgroundColor: p.bg }}>
-          <View style={[{ flexDirection: "row", gap: 8, padding: 10, alignItems: "flex-end" }, col, wide ? { paddingHorizontal: 28, paddingVertical: 14 } : null]}>
+          <View style={{ flexDirection: "row", gap: 8, padding: 10, borderTopWidth: atts.length || uploading || attachMenu ? 0 : 1, borderTopColor: p.line, backgroundColor: p.bg, alignItems: "flex-end" }}>
             {!runId ? (
               <Btn title="📎" kind="ghost" onPress={() => setAttachMenu(!attachMenu)} disabled={!!uploading || sending} style={{ minWidth: 44, paddingHorizontal: 0 }} />
             ) : null}
             <TextInput
               value={text}
               onChangeText={setText}
-              placeholder={runId ? "Агент работает…" : wide ? "Сообщение агенту — Enter отправить, Shift+Enter новая строка" : "Сообщение агенту"}
+              placeholder={runId ? "Агент работает…" : "Сообщение агенту"}
               placeholderTextColor={p.faint}
               multiline
-              onKeyPress={wide ? (e) => {
-                const k = e.nativeEvent as unknown as { key: string; shiftKey?: boolean; isComposing?: boolean };
-                if (k.key !== "Enter" || k.shiftKey || k.isComposing) return;
-                e.preventDefault();
-                if (!runId && !sending && !uploading && (text.trim() || atts.length)) void send();
-              } : undefined}
               style={{
                 flex: 1,
                 maxHeight: 140,
@@ -669,7 +657,6 @@ export default function Chat() {
             ) : (
               <Btn title="↑" onPress={send} busy={sending} disabled={(!text.trim() && atts.length === 0) || !!uploading} style={{ minWidth: 52 }} />
             )}
-          </View>
           </View>
         ) : null}
       </KeyboardAvoidingView>

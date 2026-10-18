@@ -9,13 +9,11 @@ import { useApi, useLoad } from "@/state/hooks";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Divider, errText, Fingerprint, Loading, Notice, QrCode, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
-import { DEV } from "@/platform/desktop";
 
 const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave",
   strongbox: "StrongBox",
   tee: "TEE",
-  tpm: "TPM",
   software: "программные",
 };
 
@@ -85,7 +83,7 @@ export default function ServerSettings() {
 
       {d ? (
         <Card>
-          <Txt kind="label">этот {DEV.nom}</Txt>
+          <Txt kind="label">этот телефон</Txt>
           <Row style={{ justifyContent: "space-between" }}>
             <Txt>{d.user.display_name || d.user.username}</Txt>
             <Chip text={STORAGE[d.keyStorage]} color={d.keyStorage === "software" ? p.warn : p.ok} />
@@ -114,7 +112,7 @@ export default function ServerSettings() {
           ) : null}
         </Card>
       ))}
-      <Txt kind="small">Отзыв подписывается ключом подтверждения — понадобится {DEV.bioNom}. Отозванный {DEV.nom} теряет доступ сразу.</Txt>
+      <Txt kind="small">Отзыв подписывается ключом подтверждения — понадобится биометрия. Отозванный телефон теряет доступ сразу.</Txt>
 
       {owner ? (
         <>
@@ -141,7 +139,7 @@ export default function ServerSettings() {
       <View style={{ gap: 10 }}>
         {d ? (
           <Btn
-            title={`Выйти с этого ${DEV.gen}`}
+            title="Выйти с этого телефона"
             kind="ghost"
             busy={busy === "out"}
             onPress={async () => {
@@ -160,7 +158,7 @@ export default function ServerSettings() {
             router.replace("/");
           }}
         />
-        <Txt kind="small">Выход отзывает это устройство на сервере и удаляет его ключи с {DEV.gen}.</Txt>
+        <Txt kind="small">Выход отзывает это устройство на сервере и удаляет его ключи с телефона.</Txt>
       </View>
     </Screen>
   );

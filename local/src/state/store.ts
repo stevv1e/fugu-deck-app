@@ -8,24 +8,6 @@ export type StoredMsg = Msg & { model?: string; usage?: Usage; reasoning?: strin
 const LIST = "fl:chats";
 const chatKey = (id: string) => `fl:chat:${id}`;
 
-// Подписка на изменения списка (боковая панель компьютера) и открытый сейчас чат.
-const subs = new Set<() => void>();
-export function onChatsChanged(f: () => void): () => void {
-  subs.add(f);
-  return () => void subs.delete(f);
-}
-const changed = () => subs.forEach((f) => f());
-let open: string | null = null;
-export const openChatId = () => open;
-export function setOpenChat(id: string | null): void {
-  if (open === id) return;
-  open = id;
-  changed();
-}
-
-/** Адрес экрана нового чата. */
-export const newChatHref = () => ({ pathname: "/c/[id]" as const, params: { id: `new-${Date.now().toString(36)}` } });
-
 export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 export const listChats = async () => (await getJson<ChatMeta[]>(LIST, [])).sort((a, b) => b.updated - a.updated);
@@ -35,7 +17,6 @@ export async function saveChat(meta: ChatMeta, msgs: StoredMsg[]): Promise<void>
   await setJson(chatKey(meta.id), msgs);
   const all = (await getJson<ChatMeta[]>(LIST, [])).filter((c) => c.id !== meta.id);
   await setJson(LIST, [meta, ...all]);
-  changed();
 }
 
 export async function getChat(id: string): Promise<ChatMeta | null> {
@@ -45,7 +26,6 @@ export async function getChat(id: string): Promise<ChatMeta | null> {
 export async function deleteChat(id: string): Promise<void> {
   await remove(chatKey(id));
   await setJson(LIST, (await getJson<ChatMeta[]>(LIST, [])).filter((c) => c.id !== id));
-  changed();
 }
 
 export type Settings = { models: string[]; defaultModel: string; system: string };

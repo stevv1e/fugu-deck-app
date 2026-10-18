@@ -4,9 +4,6 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-http": "^2.6.0",
-    "@tauri-apps/plugin-opener": "^2.5.0",
     "expo": "~57.0.26",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.20",

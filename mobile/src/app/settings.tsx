@@ -6,13 +6,11 @@ import { versionLabel } from "@/core/version";
 import { useServers } from "@/state/servers";
 import { Card, Chip, Row, Screen, Txt } from "@/ui/kit";
 import { THEMES, useTheme } from "@/ui/theme";
-import { DEV } from "@/platform/desktop";
 
 const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave — ключи в отдельном чипе iPhone",
   strongbox: "StrongBox — ключи в отдельном защищённом чипе",
   tee: "TEE — ключи в защищённой среде процессора",
-  tpm: "TPM — ключи в защищённом чипе компьютера",
   software: "Программные ключи в Keychain/Keystore",
 };
 
@@ -54,7 +52,7 @@ export default function AppSettings() {
         })}
       </View>
 
-      <Txt kind="label">безопасность {DEV.gen}</Txt>
+      <Txt kind="label">безопасность телефона</Txt>
       <Card>
         {caps ? (
           <>

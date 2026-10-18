@@ -1,4 +1,4 @@
-/** Настройки и чаты — AsyncStorage (на Windows и в вебе — localStorage окна). Ключи моделей здесь не хранятся. */
+/** Настройки и чаты — AsyncStorage (в вебе — localStorage). Ключи моделей здесь не хранятся. */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const prefs = {

@@ -12,7 +12,6 @@ import type { ServerInfo } from "@/core/types";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, errText, Field, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
-import { DEV } from "@/platform/desktop";
 
 const DEFAULT_NAME = Platform.select({ ios: "iPhone", android: "Android", default: "Браузер" });
 
@@ -20,7 +19,6 @@ const STORAGE_TEXT: Record<string, string> = {
   secure_enclave: "Ключи создаются в Secure Enclave и не покидают чип.",
   strongbox: "Ключи создаются в StrongBox (отдельный защищённый чип) и не покидают его.",
   tee: "Ключи создаются в защищённой среде процессора (TEE) и не покидают её.",
-  tpm: "Ключи создаются в TPM компьютера и не покидают его; подтверждение — Windows Hello.",
   software: "Ключи программные — в Keychain/Keystore телефона.",
 };
 
@@ -78,27 +76,27 @@ export default function Login() {
       {info?.auth.totp ? (
         <Field label="Код из приложения" value={totp} onChangeText={setTotp} keyboardType="number-pad" maxLength={8} textContentType="oneTimeCode" hint="Нужен владельцу сервера" />
       ) : null}
-      <Field label="Имя устройства" value={deviceName} onChangeText={setDeviceName} hint={`Так ${DEV.nom} будет виден в списке устройств`} />
+      <Field label="Имя устройства" value={deviceName} onChangeText={setDeviceName} hint="Так телефон будет виден в списке устройств" />
 
       {error ? <Notice text={error} /> : null}
-      <Btn title={`Войти и привязать ${DEV.nom}`} onPress={submit} busy={busy} disabled={!password} />
+      <Btn title="Войти и привязать телефон" onPress={submit} busy={busy} disabled={!password} />
 
       {caps ? (
         <Card>
           <Row style={{ justifyContent: "space-between" }}>
-            <Txt kind="label">защита {DEV.gen}</Txt>
+            <Txt kind="label">защита телефона</Txt>
             <Chip text={caps.storage} color={caps.storage === "software" ? p.warn : p.ok} />
           </Row>
           <Txt kind="dim">{STORAGE_TEXT[caps.storage]}</Txt>
           <Txt kind="dim">
             {caps.biometry
               ? "Подтверждения действий агента и отзыв устройств — только с биометрией, на каждую подпись."
-              : `Биометрия не настроена — подтверждения будут защищены кодом ${DEV.gen}.`}
+              : "Биометрия не настроена — подтверждения будут защищены кодом телефона."}
           </Txt>
           {info?.devices.mtls && info.devices.mtls !== "off" ? (
             <Txt kind="dim">
               {caps.mtls
-                ? `Сервер использует mTLS: ${DEV.nom} получит сертификат на ключ сессии.`
+                ? "Сервер использует mTLS: телефон получит сертификат на ключ сессии."
                 : info.devices.mtls === "required"
                   ? "Сервер требует mTLS — эта сборка приложения его не умеет."
                   : "Сервер поддерживает mTLS, эта сборка — нет; вход по DPoP."}

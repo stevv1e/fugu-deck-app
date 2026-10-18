@@ -10,15 +10,12 @@ import { pickText } from "@/platform/pick";
 import { useApi, useLoad } from "@/state/hooks";
 import { clusterOfSid, parseSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
-import { Btn, Card, Chip, Empty, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt, usePage } from "@/ui/kit";
+import { Btn, Card, Chip, Empty, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { ModeSwitch, TalkChats, useMode } from "@/ui/Modes";
 import { useTheme } from "@/ui/theme";
-import { useWide } from "@/desktop/wide";
 
 export default function Projects() {
   const { p } = useTheme();
-  const page = usePage();
-  const wide = useWide();
   const { sid } = useLocalSearchParams<{ sid: string }>();
   const { get } = useServers();
   const rec = get(sid);
@@ -121,10 +118,10 @@ export default function Projects() {
               : <IconBtn glyph="⚙" label="Кластер и ключи" onPress={() => router.push({ pathname: "/cluster/[cid]", params: { cid: clusterOfSid(sid)! } })} />
             : <IconBtn glyph="⚙" label="Сервер и устройства" onPress={() => router.push(`/s/${sid}/settings`)} />
         } />
-      {mode && !wide ? <ModeSwitch mode={mode} onChange={setMode} /> : null}
+      {mode ? <ModeSwitch mode={mode} onChange={setMode} /> : null}
       {mode === "talk" ? <TalkChats sid={sid} api={api} apiError={apiError} /> : mode === null ? <Loading /> : (
       <ScrollView
-        contentContainerStyle={[{ padding: 16, gap: 12, paddingBottom: 40 }, page]}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}
       >
         <Row style={{ justifyContent: "space-between" }}>

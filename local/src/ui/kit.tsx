@@ -17,8 +17,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { READ_WIDTH, useWide } from "@/desktop/wide";
-
 import { alpha, MONO, useTheme } from "./theme";
 
 type TxtKind = "body" | "title" | "h2" | "label" | "dim" | "mono" | "small";
@@ -49,12 +47,6 @@ export function Txt({ kind = "body", color, style, children, numberOfLines, sele
   );
 }
 
-/** На широком окне содержимое экрана — колонкой по центру. */
-export function usePage(): ViewStyle | null {
-  const wide = useWide();
-  return wide ? { width: "100%", maxWidth: READ_WIDTH, alignSelf: "center", paddingHorizontal: 28, paddingTop: 22 } : null;
-}
-
 export function Screen({ children, scroll = true, title, back = true, right, footer }: {
   children: ReactNode;
   scroll?: boolean;
@@ -64,9 +56,8 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
   footer?: ReactNode;
 }) {
   const { p } = useTheme();
-  const page = usePage();
   const body = scroll ? (
-    <ScrollView contentContainerStyle={[{ padding: 16, paddingBottom: 40, gap: 14 }, page]} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }} keyboardShouldPersistTaps="handled">
       {children}
     </ScrollView>
   ) : (
@@ -86,17 +77,6 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
 
 export function TopBar({ title, back, right }: { title: string; back?: boolean; right?: ReactNode }) {
   const { p } = useTheme();
-  const wide = useWide();
-  if (wide) {
-    // компьютер: заголовок слева; переходы и настройки — в боковой панели
-    return (
-      <View style={[s.top, { height: 56, paddingHorizontal: 20, gap: 10, borderBottomColor: p.line, backgroundColor: p.bg }]}>
-        <Text numberOfLines={1} style={{ flex: 1, color: p.text, fontFamily: MONO, fontWeight: "600", fontSize: 14.5 }}>
-          {title}
-        </Text>
-      </View>
-    );
-  }
   return (
     <View style={[s.top, { borderBottomColor: p.line, backgroundColor: p.bg }]}>
       {back && router.canGoBack() ? (
