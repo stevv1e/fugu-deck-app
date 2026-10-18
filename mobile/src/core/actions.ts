@@ -27,6 +27,8 @@ export type ActionBody =
   // ct_sha256 — оба null без токена.
   | { type: 'mcp_put'; id: string; name: string; url: string; token_hint: string | null; ct_sha256: string | null }
   | { type: 'mcp_delete'; id: string }
+  // Домены, с которых агент личного пространства читает страницы через keyguard: весь список целиком.
+  | { type: 'egress_set'; domains: string[] }
   // Лимит личных расходов на модели в месяц (своим ключом в личном пространстве); null — без лимита.
   | { type: 'spend_limit'; limit_usd_month: number | null }
   | {
@@ -107,7 +109,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** Действия в пространстве несут space в конверте (и человек его видит); у остальных поля space нет вовсе. */
 export const IN_SPACE: Record<ActionType, boolean> = {
-  key_put: false, key_delete: false, mcp_put: false, mcp_delete: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
+  key_put: false, key_delete: false, mcp_put: false, mcp_delete: false, egress_set: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
   role_change: true, space_delete: true, tool_approve: true,
 };
@@ -147,6 +149,8 @@ const list =
   };
 
 const MCP_ID = /^[a-z][a-z0-9-]{1,30}$/;
+/** Домен для агента: точное имя хоста строчными буквами, без «*» и IP. */
+export const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const PROVIDERS = ['anthropic', 'sakana', 'deepseek', 'github', 'gitlab'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
@@ -165,6 +169,7 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
     ct_sha256: nullable(str(64, /^[0-9a-f]{64}$/)),
   },
   mcp_delete: { id: str(31, MCP_ID) },
+  egress_set: { domains: list(str(253, DOMAIN), 0, 50) },
   spend_limit: { limit_usd_month: nullable(money) },
   grant: {
     chat: id,
@@ -267,6 +272,12 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
       };
     case 'mcp_delete':
       return { title: 'Отключить MCP-сервер', lines: [`Сервер: ${a.id}`], danger: true };
+    case 'egress_set':
+      return {
+        title: 'Домены для агента — он сможет читать страницы с них',
+        lines: a.domains.length ? a.domains.map((d) => `• ${d}`) : ['Список пуст — агент не читает сайты'],
+        danger: false,
+      };
     case 'spend_limit':
       return {
         title: 'Лимит расходов на модели',

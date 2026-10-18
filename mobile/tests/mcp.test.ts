@@ -70,3 +70,11 @@ test("mcp_put без токена и mcp_delete", async () => {
   assert.equal(sent.path, "/v1/mcp/delete");
   assert.deepEqual([payload(sent.body.jws).type, payload(sent.body.jws).id], ["mcp_delete", "weather"]);
 });
+
+test("домены для агента: из адреса — имя хоста, мусор отклоняется", async () => {
+  const { domainFrom } = await import("../src/core/egress");
+  assert.equal(domainFrom("https://Docs.Python.org/3/library/"), "docs.python.org");
+  assert.equal(domainFrom("developer.mozilla.org/ru/"), "developer.mozilla.org");
+  assert.equal(domainFrom("example.com."), "example.com");
+  for (const bad of ["*.python.org", "10.0.0.1", "localhost", "https://", "a b.com", ""]) assert.equal(domainFrom(bad), null, bad);
+});
