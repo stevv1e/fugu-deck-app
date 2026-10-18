@@ -8,6 +8,7 @@ import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } fro
 export type KbNote = {
   id: string; mid: number | null; area: string; title: string; body: string; days: number; source: string; src: string;
   stale: boolean; ext: boolean; pinned: boolean; tags: string; hub?: boolean;
+  stale_reason?: string; // почему «устарела»: файл-источник изменился или удалён (сверка раз в сутки)
 };
 export type KbGraph = {
   project: { id: string; name: string }; hub: string; notes: KbNote[]; edges: [string, string, string, number][];

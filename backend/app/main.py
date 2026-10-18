@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, backup, devices, kb, mcp_client, obsidian, schedules as sched, spaceauth
+from . import auth, backup, devices, kb, kb_watch, mcp_client, obsidian, schedules as sched, spaceauth
 from . import keyguard_client as kgc
 from .agent import Agent
 from .agent_rules import agent_problem
@@ -61,9 +61,11 @@ async def lifespan(app: FastAPI):
     scheduler = sched.Scheduler(db, fire_schedule)
     scheduler.start()
     janitor = asyncio.create_task(attachment_janitor())
+    watcher = asyncio.create_task(kb_watch.loop(db, lambda: state["agent"].git_providers()))
     yield
     await scheduler.stop()
     janitor.cancel()
+    watcher.cancel()
     for p in providers.values():
         await p.http.aclose()
     await db.close()
@@ -863,7 +865,10 @@ async def _memory_for_edit(mid: int, u: dict) -> dict:
 @app.patch("/api/memory/{mid}")
 async def patch_memory(mid: int, body: MemoryPatch, u: dict = Me):
     m = await _memory_for_edit(mid, u)
-    await db().update_memory(mid, **body.model_dump(exclude_none=True))
+    ch = body.model_dump(exclude_none=True)
+    if "stale" in ch:
+        ch["stale_reason"] = ""  # пометку поставил или снял человек — причина сверки больше не относится к делу
+    await db().update_memory(mid, **ch)
     nm = await db().get_memory(mid)
     await broker().publish("memory", m["project_id"], action="updated", memory=nm, by=u["display_name"])
     return nm

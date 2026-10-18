@@ -158,6 +158,10 @@ class Agent:
                 out[name] = None
         return out
 
+    def git_providers(self) -> dict:
+        """Git-провайдеры для фоновых дел пространства (сверка заметок с источниками): без чата и участника."""
+        return self._git_for({})
+
     def _git_for(self, keys: dict, chat_id: str = "", member: str = "") -> dict:
         git: dict = {}
         if kgc.enabled():  # кластер v2: GitHub и GitLab через keyguard, токен пространства на каждый запрос

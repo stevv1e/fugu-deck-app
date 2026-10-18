@@ -288,6 +288,13 @@ SCHEMA = [
     UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp","web"]'
         WHERE id='fugu' AND tools='["git","ssh","memory","files","skills","mcp"]';
     """,
+    # v17: заметка помнит файл-источник и версию его содержимого; раз в сутки проверка ставит «устарела» с причиной
+    """
+    ALTER TABLE memories ADD COLUMN src_file TEXT;
+    ALTER TABLE memories ADD COLUMN src_version TEXT;
+    ALTER TABLE memories ADD COLUMN src_checked REAL;
+    ALTER TABLE memories ADD COLUMN stale_reason TEXT;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -297,7 +304,7 @@ AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp", "web")
 # без инструментов Git, серверов и памяти (agent.py).
 TALK_PROJECT = "talk"
 HIDDEN_PROJECTS = (TALK_PROJECT,)
-NOTE_FIELDS = ("title", "area", "grp", "origin", "source_ref", "external")
+NOTE_FIELDS = ("title", "area", "grp", "origin", "source_ref", "external", "src_file", "src_version")
 
 
 def new_id() -> str:
@@ -941,7 +948,7 @@ class Database:
         return await self.get_memory(mid)  # type: ignore[return-value]
 
     async def update_memory(self, mid: int, **fields: Any) -> None:
-        allowed = {"content", "tags", "pinned", *NOTE_FIELDS, "stale"}
+        allowed = {"content", "tags", "pinned", *NOTE_FIELDS, "stale", "stale_reason", "src_checked"}
         fields = {k: (int(v) if k in ("pinned", "external", "stale") else v) for k, v in fields.items()
                   if v is not None and k in allowed}
         if not fields:
@@ -951,6 +958,21 @@ class Database:
         await self._exec(f"UPDATE memories SET {sets} WHERE id=?", (*fields.values(), mid))
         if "content" in fields or "title" in fields:
             await self.sync_wiki_links(mid)
+
+    async def notes_to_check(self, before: float, limit: int) -> list[dict]:
+        """Заметки с файлом-источником, которые давно не сверяли (раньше before), — самые давние первыми."""
+        return await self._all(
+            "SELECT id, project_id, src_file, src_version, stale, stale_reason FROM memories WHERE src_file IS NOT NULL "
+            "AND src_version IS NOT NULL AND COALESCE(src_checked, 0) < ? ORDER BY COALESCE(src_checked, 0) LIMIT ?",
+            (before, limit))
+
+    async def mark_source(self, mid: int, *, stale: bool | None, reason: str | None, now: float) -> None:
+        """Итог сверки с источником: stale None — проверить не удалось (повторим в следующий раз)."""
+        if stale is None:
+            await self._exec("UPDATE memories SET src_checked=? WHERE id=?", (now, mid))
+        else:
+            await self._exec("UPDATE memories SET src_checked=?, stale=?, stale_reason=? WHERE id=?",
+                             (now, int(stale), reason, mid))
 
     # ================================================================ база знаний: связи и использование
     async def sync_wiki_links(self, mid: int) -> None:

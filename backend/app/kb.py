@@ -130,6 +130,7 @@ def graph(project: dict, memories: list[dict], links: list[dict], now: float | N
             "source": m.get("source_ref") or {"agent": "записал агент", "user": "записал(а) " + (m.get("author") or "участник")}.get(
                 m.get("source") or "", m.get("author") or "заметка"),
             "src": origin_of(m), "stale": bool(m.get("stale")), "ext": bool(m.get("external")),
+            "stale_reason": m.get("stale_reason") or "",
             "pinned": bool(m.get("pinned")), "tags": m.get("tags") or "",
         })
         groups[area].setdefault(group_of(m.get("tags") or "", m.get("grp")), []).append(nid)
