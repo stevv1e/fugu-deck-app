@@ -95,3 +95,14 @@ def test_deepseek_reasoning_roundtrip():
     assert "reasoning_content" not in msgs[2]
     s = get_settings()
     assert "deepseek:deepseek-flash" in s.model_list and s.pricing["deepseek:deepseek-v4-pro"][1] == 3.96
+
+
+def test_long_context_price():
+    """Ultra: вход больше 272K — весь запрос по длинному тарифу ($10/$45, кэш $1); у других моделей тариф один."""
+    from app.agent import Agent
+    from app.config import Settings
+    a = Agent.__new__(Agent)
+    a.settings = Settings()
+    assert a.price("sakana:fugu-ultra-v1.1", 272_000) == [5, 30, 0.5]
+    assert a.price("sakana:fugu-ultra-v2.0", 272_001) == [10, 45, 1]
+    assert a.price("anthropic:claude-sonnet-5", 900_000) == [2, 10, 0.2, 2.5]

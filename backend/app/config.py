@@ -28,13 +28,19 @@ class Settings(BaseSettings):
     pricing_json: str = (
         '{"sakana:fugu-max-v1.0": [2, 6, 0.25], "sakana:fugu-ultra-v2.0": [5, 30, 0.5], "sakana:sakana-namazu-v1.0": [0.95, 4, 0.15],'
         ' "sakana:fugu-max": [2, 6, 0.25], "sakana:fugu-ultra": [5, 30, 0.5], "sakana:sakana-namazu": [0.95, 4, 0.15],'
+        ' "sakana:fugu-ultra-v1.0": [5, 30, 0.5], "sakana:fugu-ultra-v1.1": [5, 30, 0.5],'
         # у этих моделей опубликованной цены нет: расход показывается по верхней известной ставке Sakana (оценка сверху)
-        ' "sakana:fugu": [10, 45, 1], "sakana:fugu-ultra-v1.0": [10, 45, 1], "sakana:fugu-ultra-v1.1": [10, 45, 1],'
-        ' "sakana:fugu-cyber": [10, 45, 1], "sakana:fugu-cyber-v1.0": [10, 45, 1],'
+        ' "sakana:fugu": [10, 45, 1], "sakana:fugu-cyber": [10, 45, 1], "sakana:fugu-cyber-v1.0": [10, 45, 1],'
         ' "anthropic:claude-sonnet-5": [2, 10, 0.2, 2.5], "anthropic:claude-opus-5-5": [4, 20, 0.2, 5],'
         ' "anthropic:claude-haiku-4-5": [1, 5, 0.1, 1.25], "anthropic:claude-fable-5-1": [10, 50, 0.25, 12.5],'
         # DeepSeek: днём вдвое дороже, чем ночью, — показываем по дневной цене (оценка сверху)
         ' "deepseek:deepseek-flash": [0.3, 1.2, 0.006], "deepseek:deepseek-v4-pro": [1.32, 3.96, 0.044]}'
+    )
+    # Тариф длинного контекста: {"модель": [порог токенов входа, input, output, cached_input]} — запрос со входом
+    # длиннее порога считается целиком по этим ставкам (Sakana Ultra: больше 272K — $10/$45, кэш $1)
+    pricing_long_json: str = (
+        '{"sakana:fugu-ultra-v2.0": [272000, 10, 45, 1], "sakana:fugu-ultra": [272000, 10, 45, 1],'
+        ' "sakana:fugu-ultra-v1.0": [272000, 10, 45, 1], "sakana:fugu-ultra-v1.1": [272000, 10, 45, 1]}'
     )
     deepseek_api_key: str = ""   # только для одиночного режима
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -128,6 +134,13 @@ class Settings(BaseSettings):
     def pricing(self) -> dict[str, list[float]]:
         try:
             return json.loads(self.pricing_json)
+        except json.JSONDecodeError:
+            return {}
+
+    @property
+    def pricing_long(self) -> dict[str, list[float]]:
+        try:
+            return json.loads(self.pricing_long_json)
         except json.JSONDecodeError:
             return {}
 

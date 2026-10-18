@@ -32,6 +32,8 @@ export default function SpacePrefs() {
   const models = cfg.data?.models ?? [];
   const ready = cfg.data?.llm_ready ?? [];
   const pricing = (cfg.data?.pricing ?? {}) as Record<string, number[]>;
+  // тариф длинного контекста: [порог токенов входа, input, output, …] — запрос длиннее порога целиком по нему
+  const pricingLong = (cfg.data?.pricing_long ?? {}) as Record<string, number[]>;
   const groups = [...new Set(models.map((m) => m.split(":")[0]))];
 
   return (
@@ -59,10 +61,11 @@ export default function SpacePrefs() {
               </Row>
               {models.filter((m) => m.startsWith(g + ":")).map((m) => {
                 const pr = pricing[m];
+                const lg = pricingLong[m];
                 return (
                   <Row key={m} style={{ justifyContent: "space-between" }}>
                     <Txt kind="mono" numberOfLines={1} style={{ flex: 1, fontSize: 12.5 }}>{m.split(":")[1]}{m === cfg.data?.default_model ? " · по умолчанию" : ""}</Txt>
-                    {pr ? <Txt kind="small">${pr[0]} / ${pr[1]} за 1M</Txt> : null}
+                    {pr ? <Txt kind="small">${pr[0]} / ${pr[1]} за 1M{lg ? ` · больше ${Math.round(lg[0] / 1000)}K: $${lg[1]} / $${lg[2]}` : ""}</Txt> : null}
                   </Row>
                 );
               })}

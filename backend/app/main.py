@@ -447,6 +447,7 @@ async def config(u: dict = Me):
         "models": settings.model_list,
         "default_model": settings.model_list[0] if settings.model_list else "",
         "pricing": settings.pricing,
+        "pricing_long": settings.pricing_long,
         "providers": providers,
         "approval_mode": settings.approval_mode,
         "llm_configured": bool(llm_ready),

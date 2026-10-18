@@ -419,15 +419,20 @@ class Agent:
             out += list(run.mcp_tools.values())
         return out
 
-    def price(self, model: str) -> list[float] | None:
+    def price(self, model: str, prompt_tokens: int = 0) -> list[float] | None:
+        """[input, output, cached, (cache_write)] за 1M; вход длиннее порога модели — по тарифу длинного контекста."""
         pr = self.settings.pricing
-        return pr.get(model) or pr.get(split_model(model)[1])
+        base = pr.get(model) or pr.get(split_model(model)[1])
+        long = self.settings.pricing_long.get(model)
+        if base and long and prompt_tokens > long[0]:
+            return [*long[1:], *base[len(long) - 1:]]
+        return base
 
     async def _record_usage(self, run: Run, usage) -> None:
         if not usage:
             return
         p, c, cached, cw = usage.prompt_tokens, usage.completion_tokens, usage.cached_tokens, usage.cache_write_tokens
-        price = self.price(run.model)
+        price = self.price(run.model, p)
         cost = 0.0
         if price:
             pin, pout = price[0], price[1]
