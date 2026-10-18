@@ -1579,6 +1579,11 @@ async def chat_model_state(c: dict, u: dict) -> dict:
                           "until": c.get("sponsor_until"), "since": c.get("sponsor_since"),
                           "spent_usd": round(used["usd"], 4), "spent_tokens": used["tokens"],
                           "blocked": await sponsor_blocker(c)}
+        if c.get("sponsor_member_day"):
+            # дневной лимит на участника keyguard считает по суткам UTC — так же считаем и здесь
+            day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            out["sponsor"]["per_member_usd_day"] = c["sponsor_member_day"]
+            out["sponsor"]["my_today_usd"] = round(await db().member_usage_since(c["id"], u["id"], day), 4)
     else:
         out["sponsor"] = None
     await expire_due()
@@ -1816,7 +1821,8 @@ async def _finish_with_grant(p: dict, c: dict, u: dict, why: str) -> str:
             pass
     until = datetime.fromisoformat(g["until"].replace("Z", "+00:00")).timestamp() if g.get("until") else None
     await db().decide_proposal(p["id"], "approved", u["id"])
-    await db().set_sponsor(c["id"], p["model"], p["proposer_id"], g.get("limit_usd"), None, None, until)
+    await db().set_sponsor(c["id"], p["model"], p["proposer_id"], g.get("limit_usd"), None, None, until,
+                           member_day=g.get("per_member_usd_day") or None)
     await db().set_conversation_grant(c["id"], p["grant_id"])
     await _note(c, f"{why}: чат переходит на {_title(p['model'])}, платит {p.get('proposer_name') or p['proposer_id']} "
                    f"({_terms(g.get('limit_usd'), None, None, until)})")

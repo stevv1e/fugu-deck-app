@@ -129,6 +129,8 @@ with TestClient(main.app) as c:
     assert conv["model"] == MAX and conv["sponsor"]["id"] == "anna" and conv["sponsor"]["limit_usd"] == 20.0 \
         and conv["sponsor"]["grant_id"] == "g-000000a1" and conv["sponsor"]["online"] is True \
         and conv["sponsor"]["proposal_id"] == p1, conv
+    # дневной лимит на участника — из подписанного разрешения; участник видит, сколько потратил сегодня
+    assert conv["sponsor"]["per_member_usd_day"] == 5.0 and conv["sponsor"]["my_today_usd"] == 0, conv["sponsor"]
     # условия подписаны: менять их правкой нельзя — только новым предложением
     assert c.patch(f"/api/conversations/{chat}/sponsor", headers=anna, json={"limit_usd": 500}).status_code == 409
 

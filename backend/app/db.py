@@ -295,6 +295,10 @@ SCHEMA = [
     ALTER TABLE memories ADD COLUMN src_checked REAL;
     ALTER TABLE memories ADD COLUMN stale_reason TEXT;
     """,
+    # v18: лимит на участника в день из подписанного разрешения спонсора (keyguard считает его по суткам UTC)
+    """
+    ALTER TABLE conversations ADD COLUMN sponsor_member_day REAL;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -452,7 +456,8 @@ class Database:
 
     # --- спонсор модели и предложения ---
     async def set_sponsor(self, cid: str, model: str, sponsor_id: str | None, limit_usd: float | None = None,
-                          limit_tokens: int | None = None, days: float | None = None, until: float | None = None) -> None:
+                          limit_tokens: int | None = None, days: float | None = None, until: float | None = None,
+                          member_day: float | None = None) -> None:
         now = time.time()
         if sponsor_id and until is None and days:
             until = now + days * 86400
@@ -460,9 +465,9 @@ class Database:
             until = None
         await self._exec(
             "UPDATE conversations SET model=?, sponsor_id=?, sponsor_limit_usd=?, sponsor_limit_tokens=?, sponsor_until=?, "
-            "sponsor_since=?, sponsor_alert=0, updated_at=? WHERE id=?",
+            "sponsor_since=?, sponsor_member_day=?, sponsor_alert=0, updated_at=? WHERE id=?",
             (model, sponsor_id, limit_usd if sponsor_id else None, limit_tokens if sponsor_id else None, until,
-             now if sponsor_id else None, now, cid))
+             now if sponsor_id else None, member_day if sponsor_id else None, now, cid))
 
     async def sponsored_conversations(self) -> list[dict]:
         """Чаты, у которых есть спонсор модели (общее пространство)."""
@@ -495,6 +500,11 @@ class Database:
             "LEFT JOIN users us ON us.id=u.user_id WHERE u.conversation_id=? AND u.created_at>=? AND u.user_id IS NOT NULL "
             "GROUP BY u.user_id ORDER BY usd DESC", (cid, since or 0))
         return [{"user_id": r["user_id"], "name": r["name"], "usd": round(r["usd"] or 0, 4)} for r in rows]
+
+    async def member_usage_since(self, cid: str, user_id: str, since: float) -> float:
+        r = await self._one("SELECT COALESCE(SUM(cost_usd),0) AS usd FROM usage WHERE conversation_id=? AND user_id=? AND created_at>=?",
+                            (cid, user_id, since))
+        return float(r["usd"])
 
     async def sponsor_usage(self, cid: str, since: float | None) -> dict:
         if not since:
