@@ -44,7 +44,7 @@ export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" |
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 
 /** Агент пространства: имя, модель («» — модель чата), инструкции, доступы и скилы («*» — все). */
-export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp";
+export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp" | "web";
 /** Подтверждения действий агента: "" — как на сервере; sign — с подписью; tap — без подписи; dangerous — только опасные; none — без подтверждений. */
 export type AgentApprovals = "" | "sign" | "tap" | "dangerous" | "none";
 export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[]; approvals?: AgentApprovals };

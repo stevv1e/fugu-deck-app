@@ -283,11 +283,16 @@ SCHEMA = [
     UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp"]'
         WHERE id='fugu' AND tools='["git","ssh","memory","files","skills"]';
     """,
+    # v16: доступ «web» — страницы с доменов, разрешённых владельцем подписью (keyguard, D65); агенту по умолчанию — да
+    """
+    UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp","web"]'
+        WHERE id='fugu' AND tools='["git","ssh","memory","files","skills","mcp"]';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
 DEFAULT_AGENT = "fugu"
-AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp")
+AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp", "web")
 # Режим «Общение»: его чаты живут в скрытом проекте — не видны среди проектов инжиниринга, а агент в них — собеседник
 # без инструментов Git, серверов и памяти (agent.py).
 TALK_PROJECT = "talk"

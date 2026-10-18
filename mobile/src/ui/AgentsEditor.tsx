@@ -10,7 +10,7 @@ import { useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Txt } from "./kit";
 import { useTheme } from "./theme";
 
-const TOOLS: [AgentTool, string][] = [["git", "Репозитории"], ["ssh", "Серверы"], ["memory", "Память"], ["files", "Файлы"], ["skills", "Скилы"], ["mcp", "MCP"]];
+const TOOLS: [AgentTool, string][] = [["git", "Репозитории"], ["ssh", "Серверы"], ["memory", "Память"], ["files", "Файлы"], ["skills", "Скилы"], ["mcp", "MCP"], ["web", "Сайты"]];
 const APPROVALS: [AgentApprovals, string, string][] = [
   ["", "как на сервере", "по общей настройке сервера"],
   ["sign", "с подписью", "каждое изменение — «Разрешить» с биометрией"],

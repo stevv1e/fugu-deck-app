@@ -251,6 +251,7 @@ export default function ClusterDevice() {
             <Btn title="Git-токены" onPress={() => router.push({ pathname: "/keys/[cid]", params: { cid: rec.id, kind: "git" } })} style={{ flex: 1 }} />
           </Row>
           <Btn title="MCP-серверы" kind="ghost" onPress={() => router.push({ pathname: "/mcp/[cid]", params: { cid: rec.id } })} />
+          <Btn title="Домены для агента" kind="ghost" onPress={() => router.push({ pathname: "/egress/[cid]", params: { cid: rec.id } })} />
           {!space?.delete_requested ? (
             armAccount ? (
               <Card accent={p.accent2}>

@@ -85,7 +85,7 @@ function RichText({ text, color }: { text: string; color: string }) {
   );
 }
 
-const ACCESS: Record<string, string> = { git: "репозитории", ssh: "серверы", memory: "база знаний", files: "вложения", skills: "навыки", mcp: "MCP-серверы" };
+const ACCESS: Record<string, string> = { git: "репозитории", ssh: "серверы", memory: "база знаний", files: "вложения", skills: "навыки", mcp: "MCP-серверы", web: "сайты" };
 
 /** Агент, которого модель предлагает создать или изменить: доступы — словами, инструкция — целиком. */
 function AgentPreview({ a }: { a: any }) {

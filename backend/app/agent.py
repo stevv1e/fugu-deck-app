@@ -18,7 +18,7 @@ from typing import Any
 from .agent_rules import approval_mode, is_owner
 from .db import AGENT_TOOLS, DEFAULT_AGENT, TALK_PROJECT, Database, new_id
 from .llm import PROVIDER_TITLES, LLMError, get_provider, split_model
-from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools
+from .tools import REGISTRY, ApprovalPolicy, ToolContext, ssh_tools, web_tools
 from . import filetools, mcp_client, vision
 from .outbox import outbox
 from . import keyguard_client as kgc
@@ -288,7 +288,7 @@ class Agent:
         if ag.get("id") and ag.get("id") != DEFAULT_AGENT or ag.get("instructions"):
             no = [x for x in AGENT_TOOLS if x not in (ag.get("tools") or AGENT_TOOLS)]
             parts.append(f"\n## Ты — агент «{ag.get('name') or ag.get('id')}»\n{ag.get('instructions') or ''}"
-                         + (f"\nУ тебя нет доступа к: {', '.join({'git': 'репозиториям', 'ssh': 'серверам', 'memory': 'памяти', 'files': 'файлам', 'skills': 'скилам', 'mcp': 'MCP-серверам'}[x] for x in no)}." if no else ""))
+                         + (f"\nУ тебя нет доступа к: {', '.join({'git': 'репозиториям', 'ssh': 'серверам', 'memory': 'памяти', 'files': 'файлам', 'skills': 'скилам', 'mcp': 'MCP-серверам', 'web': 'сайтам'}[x] for x in no)}." if no else ""))
         p = ctx.project
         if p:
             parts.append(f"\n## Проект: {p['name']}\n{p.get('description') or ''}")
@@ -409,6 +409,7 @@ class Agent:
         out = [t for t in REGISTRY.values()
                if (t.group not in AGENT_TOOLS or t.group in allowed)
                and (t.group != "ssh" or ssh_tools.enabled()) and (t.group != "git" or git_ok)
+               and (t.group != "web" or web_tools.enabled(self.settings))
                and (t.group != "agents" or owner)]
         if "mcp" in allowed:
             out += list(run.mcp_tools.values())
