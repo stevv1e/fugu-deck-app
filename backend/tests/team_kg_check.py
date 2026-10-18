@@ -198,4 +198,45 @@ with TestClient(main.app) as c:
     assert conv["model"] == ULTRA and conv["sponsor"]["id"] == "anna" and conv["proposal"] is None, conv
     assert any("(владелец) сменил(а) модель" in (m.get("content") or "") for m in conv["messages"]), conv["messages"][-3:]
 
+    # 5. Расписание в общем пространстве: в чате с разрешением спонсора, от имени автора, в пределах лимитов спонсора.
+    for _ in range(100):  # прошлый ответ модели должен закончиться: в чате один запуск за раз
+        run = main.agent().active_run(chat)
+        if not run or run.status != "running":
+            break
+        time.sleep(0.05)
+    body = {"title": "Сводка", "prompt": "Собери сводку", "kind": "daily", "at_time": "09:00"}
+    r = c.post(f"/api/projects/{pid}/schedules", headers=bob, json=body)
+    assert r.status_code == 400 and "выберите чат" in r.json()["detail"], r.text
+    assert c.post(f"/api/projects/{pid}/schedules", headers=carol, json={**body, "conversation_id": chat}).status_code == 403
+    bare = c.post(f"/api/projects/{pid}/conversations", headers=bob, json={}).json()["id"]
+    r = c.post(f"/api/projects/{pid}/schedules", headers=bob, json={**body, "conversation_id": bare})
+    assert r.status_code == 409 and "спонсор" in r.json()["detail"], r.text
+    r = c.post(f"/api/projects/{pid}/schedules", headers=bob, json={**body, "conversation_id": chat, "model": MAX})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["conversation_id"] == chat and s["model"] == ULTRA, s  # модель — чата (её оплачивает спонсор)
+    assert c.patch(f"/api/schedules/{s['id']}", headers=carol, json={"enabled": False}).status_code == 403
+    LLM.clear()
+    r = c.post(f"/api/schedules/{s['id']}/run", headers=bob)
+    assert r.status_code == 200 and r.json()["last_status"].startswith("запущено"), r.text
+    for _ in range(100):
+        if LLM:
+            break
+        time.sleep(0.05)
+    assert LLM == [(chat, "bob")], LLM  # keyguard видит автора задания — допущенного спонсором участника
+    msgs = c.get(f"/api/conversations/{chat}", headers=anna).json()["messages"]
+    assert any((m.get("meta") or {}).get("author", "").startswith("⏰ Сводка · bob") for m in msgs), msgs[-3:]
+    # Боба исключили из пространства — его задание больше не запускается и выключается
+    roster = tok({"aud": f"space-internal:{SPACE}", "sub": "control-plane", "action": "roster", "members": [
+        {"id": "anna", "name": "anna", "role": "owner"}, {"id": "carol", "name": "carol", "role": "viewer"}]})
+    assert c.post("/internal/roster", json={"token": roster}).status_code == 200
+    for _ in range(100):
+        run = main.agent().active_run(chat)
+        if not run or run.status != "running":
+            break
+        time.sleep(0.05)
+    r = c.post(f"/api/schedules/{s['id']}/run", headers=anna)
+    assert r.status_code == 409 and "больше не редактор" in r.json()["detail"], r.text
+    assert c.get(f"/api/projects/{pid}/schedules", headers=anna).json()[0]["enabled"] is False
+
 print("team-kg: ok")

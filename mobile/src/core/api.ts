@@ -39,7 +39,7 @@ export type Schedule = {
   at_time: string; weekdays: number[]; tz: string; run_at: number | null; next_at: number | null; enabled: boolean;
   last_run_at: number | null; last_status: string | null; description: string;
 };
-export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" | "at_time" | "weekdays" | "tz" | "run_at" | "model" | "enabled">>;
+export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" | "at_time" | "weekdays" | "tz" | "run_at" | "model" | "enabled" | "conversation_id">>;
 /** Проект целиком для переноса: инструкции, скилы и заметки (формат fugu-deck-project/1). */
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 

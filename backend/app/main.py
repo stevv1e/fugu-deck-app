@@ -1983,6 +1983,8 @@ class ScheduleIn(BaseModel):
     run_at: float | None = None
     model: str | None = None
     enabled: bool = True
+    # общее пространство: чат с действующим разрешением спонсора — в нём задание и выполняется
+    conversation_id: str | None = Field(None, max_length=64)
 
 
 class SchedulePatch(BaseModel):
@@ -1997,11 +1999,26 @@ class SchedulePatch(BaseModel):
     enabled: bool | None = None
 
 
-def schedules_allowed() -> None:
-    # В общем пространстве модель оплачивает спонсор по своему разрешению: запуски «сами по себе» его ключом
-    # он не подписывал. Поэтому расписания — только в личном пространстве и на своём сервере.
-    if is_team():
-        raise HTTPException(409, "Задания по расписанию — только в личном пространстве")
+async def team_schedule_chat(pid: str, cid: str | None, u: dict) -> dict:
+    """Общее пространство: модель оплачивает спонсор по разрешению на конкретный чат, поэтому задание выполняется
+    в чате с действующим разрешением — от имени автора, в пределах лимитов спонсора (как если бы автор написал сам)."""
+    if not cid:
+        raise HTTPException(400, "В общем пространстве задание выполняется в чате с моделью спонсора — выберите чат")
+    c = await conv_access(u, cid, "editor")
+    if c["project_id"] != pid:
+        raise HTTPException(400, "Чат из другого проекта")
+    _, _, why = await sponsor_access(c)
+    if why:
+        raise HTTPException(409, why)
+    return c
+
+
+async def team_author(s: dict) -> dict | None:
+    """Автор задания в общем пространстве — по составу от control-plane: исключённый или читатель не запускает."""
+    for m in await db().roster():
+        if m["id"] == s.get("created_by") and m["role"] in ("editor", "owner"):
+            return m
+    return None
 
 
 def schedule_out(s: dict) -> dict:
@@ -2028,13 +2045,18 @@ async def list_schedules(pid: str, u: dict = Me):
 
 @app.post("/api/projects/{pid}/schedules")
 async def create_schedule(pid: str, body: ScheduleIn, u: dict = Me):
-    schedules_allowed()
     await need(u, pid, "editor")
     if pid == TALK_PROJECT:
         raise HTTPException(400, "Задания по расписанию — в проектах инжиниринга")
     if await db().count_schedules(pid) >= sched.MAX_PER_PROJECT:
         raise HTTPException(409, f"В проекте не больше {sched.MAX_PER_PROJECT} заданий")
-    s = _checked_schedule({**body.model_dump(), "title": body.title.strip(), "prompt": body.prompt.strip()})
+    s = {**body.model_dump(), "title": body.title.strip(), "prompt": body.prompt.strip()}
+    if is_team():
+        c = await team_schedule_chat(pid, body.conversation_id, u)
+        s["model"] = c["model"]  # модель чата выбрал спонсор; у задания своей нет
+    else:
+        s["conversation_id"] = None  # в личном — свой чат задания («⏰ …»), создаётся при первом запуске
+    s = _checked_schedule(s)
     out = await db().create_schedule(project_id=pid, created_by=u["id"], **s)
     await broker().publish("project", pid, action="updated")
     return schedule_out(out)
@@ -2050,8 +2072,9 @@ async def _schedule_for_edit(sid: str, u: dict) -> dict:
 
 @app.patch("/api/schedules/{sid}")
 async def patch_schedule(sid: str, body: SchedulePatch, u: dict = Me):
-    schedules_allowed()
     s = await _schedule_for_edit(sid, u)
+    if is_team() and s.get("created_by") != u["id"] and u.get("space_role") != "owner":
+        raise HTTPException(403, "Менять задание в общем пространстве может его автор или владелец")
     ch = body.model_dump(exclude_unset=True)
     merged = {**s, **{k: v for k, v in ch.items() if v is not None or k == "run_at"}}
     if s["kind"] == "once" and ("run_at" in ch or "kind" in ch):
@@ -2074,7 +2097,6 @@ async def delete_schedule(sid: str, u: dict = Me):
 @app.post("/api/schedules/{sid}/run")
 async def run_schedule_now(sid: str, u: dict = Me):
     """Выполнить задание сейчас (проверить, что оно делает); срок следующего запуска не меняется."""
-    schedules_allowed()
     s = await _schedule_for_edit(sid, u)
     status = await fire_schedule(s)
     await db().update_schedule(sid, last_status=status[:300])
@@ -2087,7 +2109,7 @@ async def run_schedule_now(sid: str, u: dict = Me):
 async def fire_schedule(s: dict) -> str:
     """Запуск задания: сообщение агенту в чат задания от имени автора. Возвращает итог для last_status."""
     if is_team():
-        return "пропущено: в общем пространстве расписания не выполняются"
+        return await fire_team_schedule(s)
     u = await db().get_user(s["created_by"]) if s.get("created_by") else None
     if not u or u.get("disabled"):
         await db().update_schedule(s["id"], enabled=False, next_at=None)
@@ -2112,6 +2134,31 @@ async def fire_schedule(s: dict) -> str:
                            meta={"author": f"⏰ {s['title']}", "author_id": u["id"], "schedule": s["id"]})
     await db().update_conversation(c["id"], model=model)
     await agent().start(c["id"], model, u, s["project_id"], keys, payer_id=u["id"])
+    tz = sched.zone(s.get("tz") or "UTC")
+    return "запущено " + datetime.now(tz).strftime("%d.%m %H:%M")
+
+
+async def fire_team_schedule(s: dict) -> str:
+    """Общее пространство: в чате задания, моделью и ключом спонсора (его разрешение и лимиты проверяет keyguard)."""
+    m = await team_author(s)
+    if not m:
+        await db().update_schedule(s["id"], enabled=False, next_at=None)
+        return "выключено: автор задания больше не редактор этого пространства"
+    c = await db().get_conversation(s["conversation_id"]) if s.get("conversation_id") else None
+    if not c or c["project_id"] != s["project_id"]:
+        await db().update_schedule(s["id"], enabled=False, next_at=None)
+        return "выключено: чата задания больше нет"
+    llm_key, budget, why = await sponsor_access(c)
+    if why:
+        return f"пропущено: {why}"
+    if (r := agent().active_run(c["id"])) and r.status == "running":
+        return "пропущено: в чате задания ещё идёт другой запуск"
+    u = dict(await db().get_user(m["id"]) or {"id": m["id"], "username": m["id"], "display_name": m["name"]})
+    u["space_role"] = m["role"]
+    await db().add_message(c["id"], "user", s["prompt"],
+                           meta={"author": f"⏰ {s['title']} · {m['name']}", "author_id": m["id"], "schedule": s["id"]})
+    await agent().start(c["id"], c["model"], u, s["project_id"], vault().get(m["id"]), llm_key=llm_key, budget=budget,
+                        payer_id=c.get("sponsor_id"))
     tz = sched.zone(s.get("tz") or "UTC")
     return "запущено " + datetime.now(tz).strftime("%d.%m %H:%M")
 
