@@ -100,6 +100,11 @@ export default function ClusterDevices() {
             {d.status === "pending" ? (
               <>
                 <Txt kind="dim">Сверьте этот код с экраном нового устройства и только потом подтверждайте.</Txt>
+                {!d.attested ? (
+                  <Txt kind="small" color={p.warn}>
+                    Без аттестации (ключи не подтверждены чипом телефона): подтвердить его может только устройство, прошедшее аттестацию.
+                  </Txt>
+                ) : null}
                 <Row>
                   <Btn title="Подтвердить" small onPress={() => act("confirm", d)} busy={busy === `confirm:${d.id}`} disabled={!!busy} />
                   <Btn title="Отклонить" small kind="danger" onPress={() => act("revoke", d)} busy={busy === `revoke:${d.id}`} disabled={!!busy} />
