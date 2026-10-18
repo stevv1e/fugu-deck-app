@@ -43,8 +43,9 @@ docker run --rm --memory "${WB_MEM:-3g}" --memory-swap "${WB_MEM:-3g}" --cpus "$
   -e CARGO_TARGET_DIR=/cache/target-$APP -e CARGO_PROFILE_RELEASE_LTO=thin -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
   -e DECK_SIGN_TS="${DECK_SIGN_TS-http://timestamp.digicert.com}" \
   -w "/src/$TAURI" deck-wbuild:1 \
-  sh -c "cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis --ci --config '$CONF' \
-    && cp /cache/target-$APP/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe /src/.winbuild-out.exe"
+  sh -c "B=/cache/target-$APP/x86_64-pc-windows-msvc/release/bundle/nsis; rm -rf \$B \
+    && cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis --ci --config '$CONF' \
+    && cp \"\$B\"/*_${V}_x64-setup.exe /src/.winbuild-out.exe"
 mkdir -p "$(dirname "$OUT")"
 mv "$ROOT/.winbuild-out.exe" "$OUT"
 echo "== готово: $OUT ($(du -h "$OUT" | cut -f1)), $(date -u +%H:%M:%S)"
