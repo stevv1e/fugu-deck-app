@@ -6,6 +6,7 @@ import { versionLabel } from "@/core/version";
 import { useServers } from "@/state/servers";
 import { Card, Chip, Row, Screen, Txt } from "@/ui/kit";
 import { THEMES, useTheme } from "@/ui/theme";
+import { DEV } from "@/platform/desktop";
 
 const STORAGE: Record<string, string> = {
   secure_enclave: "Secure Enclave — ключи в отдельном чипе iPhone",
@@ -53,7 +54,7 @@ export default function AppSettings() {
         })}
       </View>
 
-      <Txt kind="label">безопасность телефона</Txt>
+      <Txt kind="label">безопасность {DEV.gen}</Txt>
       <Card>
         {caps ? (
           <>

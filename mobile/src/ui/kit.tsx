@@ -19,8 +19,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { formatFp } from "@/core/invite";
+import { READ_WIDTH, useWide } from "@/desktop/wide";
 
 import { alpha, MONO, useTheme } from "./theme";
+
+/** На широком окне содержимое экрана — колонкой по центру, а не во всю ширину. */
+export function usePage(): ViewStyle | null {
+  const wide = useWide();
+  return wide ? { width: "100%", maxWidth: READ_WIDTH, alignSelf: "center", paddingHorizontal: 28, paddingTop: 22 } : null;
+}
 
 type TxtKind = "body" | "title" | "h2" | "label" | "dim" | "mono" | "small";
 
@@ -59,8 +66,9 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
   footer?: ReactNode;
 }) {
   const { p } = useTheme();
+  const page = usePage();
   const body = scroll ? (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={[{ padding: 16, paddingBottom: 40, gap: 14 }, page]} keyboardShouldPersistTaps="handled">
       {children}
     </ScrollView>
   ) : (
@@ -80,6 +88,23 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
 
 export function TopBar({ title, back, right }: { title: string; back?: boolean; right?: ReactNode }) {
   const { p } = useTheme();
+  const wide = useWide();
+  if (wide) {
+    // компьютер: заголовок слева, переходы — в боковой панели; «назад» остаётся для вложенных экранов
+    return (
+      <View style={[s.top, { height: 56, paddingHorizontal: 20, gap: 10, borderBottomColor: p.line, backgroundColor: p.bg }]}>
+        {back && router.canGoBack() ? (
+          <Pressable onPress={() => router.back()} accessibilityLabel="Назад" style={{ paddingRight: 4 }}>
+            <Text style={{ color: p.dim, fontSize: 22, lineHeight: 24 }}>‹</Text>
+          </Pressable>
+        ) : null}
+        <Text numberOfLines={1} style={{ flex: 1, color: p.text, fontFamily: MONO, fontWeight: "600", fontSize: 14.5 }}>
+          {title}
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>{right}</View>
+      </View>
+    );
+  }
   return (
     <View style={[s.top, { borderBottomColor: p.line, backgroundColor: p.bg }]}>
       {back && router.canGoBack() ? (

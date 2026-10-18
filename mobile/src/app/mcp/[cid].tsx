@@ -12,6 +12,7 @@ import { getCluster, type ClusterRecord } from "@/state/cluster";
 import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
+import { DEV } from "@/platform/desktop";
 
 export default function Mcp() {
   const { cid } = useLocalSearchParams<{ cid: string }>();
@@ -112,7 +113,7 @@ export default function Mcp() {
       <Field label="Адрес (https)" value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false}
         placeholder="https://mcp.example.com/mcp" hint={urlBad ?? undefined} />
       <Field label="Токен (если сервер требует)" value={token} onChangeText={setToken} secureTextEntry autoCapitalize="none" autoCorrect={false}
-        hint="Уходит как «Authorization: Bearer …». Шифруется на телефоне для keyguard." />
+        hint={`Уходит как «Authorization: Bearer …». Шифруется на ${DEV.prep} для keyguard.`} />
       <Btn title="Подключить ⌁" onPress={add} busy={busy === "add"} disabled={!url.trim() || !!urlBad || !!busy} />
       <Txt kind="small">Только личные пространства. Не больше 10 серверов. Адрес — https, порт 443, без перенаправлений.</Txt>
     </Screen>

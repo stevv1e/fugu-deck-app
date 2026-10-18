@@ -10,7 +10,7 @@ import type { DeckApi } from "@/core/api";
 import { useLoad } from "@/state/hooks";
 import { prefs } from "@/platform/storage";
 
-import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Txt } from "./kit";
+import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Txt, usePage } from "./kit";
 import { useTheme } from "./theme";
 
 export type Mode = "eng" | "talk";
@@ -19,18 +19,24 @@ export const TALK_PROJECT = "talk";
 
 const key = (sid: string) => `fd.mode.${sid}`;
 
+// Экраны и боковая панель компьютера держат режим каждый у себя — смену рассылаем всем.
+const listeners = new Set<(sid: string, m: Mode) => void>();
+
 export function useMode(sid: string): [Mode | null, (m: Mode) => void] {
   const [mode, setMode] = useState<Mode | null>(null);
   useEffect(() => {
     let alive = true;
     prefs.get<Mode>(key(sid), "eng").then((m) => alive && setMode(m === "talk" ? "talk" : "eng"));
+    const on = (s: string, m: Mode) => s === sid && setMode(m);
+    listeners.add(on);
     return () => {
       alive = false;
+      listeners.delete(on);
     };
   }, [sid]);
   const set = useCallback((m: Mode) => {
-    setMode(m);
     void prefs.set(key(sid), m);
+    listeners.forEach((f) => f(sid, m));
   }, [sid]);
   return [mode, set];
 }
@@ -67,6 +73,7 @@ function ago(ts?: number): string {
 /** Режим «Общение»: плоский список разговоров. Удержание — переименовать или удалить. */
 export function TalkChats({ sid, api, apiError }: { sid: string; api: DeckApi | null; apiError: string | null }) {
   const { p } = useTheme();
+  const page = usePage();
   const { data, error, loading, reload } = useLoad(useCallback(() => api?.conversations(TALK_PROJECT) ?? null, [api]));
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -93,7 +100,7 @@ export function TalkChats({ sid, api, apiError }: { sid: string; api: DeckApi | 
   });
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }} keyboardShouldPersistTaps="handled"
+    <ScrollView contentContainerStyle={[{ padding: 16, gap: 12, paddingBottom: 40 }, page]} keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}>
       {apiError || error ? <Notice text={(apiError || error)!} /> : null}
       {err ? <Notice text={err} /> : null}

@@ -6,6 +6,11 @@ import { desktopInvoke } from "fd-secure";
 
 export const isDesktop = !!desktopInvoke;
 
+/** Слова для текстов экранов: в Windows устройство — компьютер, а подпись подтверждает Windows Hello. */
+export const DEV = isDesktop
+  ? { nom: "компьютер", gen: "компьютера", prep: "компьютере", bio: "Windows Hello", bioNom: "Windows Hello" }
+  : { nom: "телефон", gen: "телефона", prep: "телефоне", bio: "биометрию", bioNom: "биометрия" };
+
 export function desk<R>(cmd: string, args?: Record<string, unknown>): Promise<R> {
   if (!desktopInvoke) return Promise.reject(new Error("только в приложении для Windows"));
   return desktopInvoke<R>(cmd, args);

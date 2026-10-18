@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { Conversation } from "@/core/types";
 import { useApi, useLoad } from "@/state/hooks";
-import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, TopBar, Txt, usePage } from "@/ui/kit";
 import { ProjectRepos } from "@/ui/ProjectRepos";
 import { ProjectTransfer } from "@/ui/ProjectTransfer";
 import { useTheme } from "@/ui/theme";
@@ -24,6 +24,7 @@ type Mode = "menu" | "rename" | "move" | "delete";
 
 export default function ProjectChats() {
   const { p } = useTheme();
+  const page = usePage();
   const { sid, pid } = useLocalSearchParams<{ sid: string; pid: string }>();
   const { api, error: apiError } = useApi(sid);
   const projects = useLoad(useCallback(() => api?.projects() ?? null, [api]));
@@ -128,7 +129,7 @@ export default function ProjectChats() {
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }}>
       <TopBar title={proj?.name || "Проект"} back />
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
+        contentContainerStyle={[{ padding: 16, gap: 12, paddingBottom: 40 }, page]}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}
         keyboardShouldPersistTaps="handled"
       >
