@@ -14,6 +14,8 @@ export type KbGraph = {
   project: { id: string; name: string }; hub: string; notes: KbNote[]; edges: [string, string, string, number][];
   areas: Record<string, { name: string; groups: [string, string[]][] }>; sources: Record<string, string>; link_types: Record<string, string>;
 };
+/** Предложение агента в проекте с проверкой заметок: в базу знаний попадёт, когда человек примет. */
+export type NoteProposal = { id: number; project_id: string; content: string; fields: { title?: string | null; area?: string | null; tags?: string; source_ref?: string | null }; created_at: number };
 export type NoteInput = { content: string; title?: string | null; area?: string | null; tags?: string; grp?: string | null; source_ref?: string | null; pinned?: boolean };
 
 export type AppConfig = {
@@ -93,7 +95,10 @@ export class DeckApi {
   /** Репозитории пользователя на GitHub/GitLab (по его токенам). */
   repos = (q = "") => this.s.request<ReposByProvider>("GET", `/api/repos${q ? `?q=${enc(q)}` : ""}`, undefined, { timeoutMs: 60000 });
   setProjectRepos = (pid: string, repos: RepoRef[]) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, { repos });
-  updateProject = (pid: string, f: { name?: string; description?: string; instructions?: string }) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, f);
+  proposals = (pid: string) => this.s.request<NoteProposal[]>("GET", `/api/projects/${enc(pid)}/kb/proposals`);
+  acceptProposal = (id: number) => this.s.request("POST", `/api/kb/proposals/${id}/accept`);
+  rejectProposal = (id: number) => this.s.request("DELETE", `/api/kb/proposals/${id}`);
+  updateProject = (pid: string, f: { name?: string; description?: string; instructions?: string; kb_review?: boolean }) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, f);
   exportProject = (pid: string) => this.s.request<ProjectExport>("GET", `/api/projects/${enc(pid)}/export`);
   importProject = (data: ProjectExport) => this.s.request<Project>("POST", "/api/projects/import", data, { timeoutMs: 120000 });
 

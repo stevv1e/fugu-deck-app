@@ -295,6 +295,37 @@ SCHEMA = [
     ALTER TABLE memories ADD COLUMN src_checked REAL;
     ALTER TABLE memories ADD COLUMN stale_reason TEXT;
     """,
+    # v18: лимит на участника в день из подписанного разрешения спонсора (keyguard считает его по суткам UTC)
+    """
+    ALTER TABLE conversations ADD COLUMN sponsor_member_day REAL;
+    """,
+    # v19: очередь предложений агента — в проекте с проверкой заметок агент предлагает, человек принимает
+    """
+    ALTER TABLE projects ADD COLUMN kb_review INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS note_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        fields TEXT NOT NULL DEFAULT '{}',
+        conversation_id TEXT,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS note_proposals_project ON note_proposals(project_id);
+    """,
+    # v20: «мысль агента» — что агент искал в базе знаний и какие заметки прочитал (экран базы знаний)
+    """
+    CREATE TABLE IF NOT EXISTS kb_thoughts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL DEFAULT '',
+        agent TEXT NOT NULL DEFAULT '',
+        query TEXT NOT NULL,
+        found TEXT NOT NULL DEFAULT '[]',
+        linked TEXT NOT NULL DEFAULT '[]',
+        at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS kb_thoughts_project ON kb_thoughts(project_id, at);
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -452,7 +483,8 @@ class Database:
 
     # --- спонсор модели и предложения ---
     async def set_sponsor(self, cid: str, model: str, sponsor_id: str | None, limit_usd: float | None = None,
-                          limit_tokens: int | None = None, days: float | None = None, until: float | None = None) -> None:
+                          limit_tokens: int | None = None, days: float | None = None, until: float | None = None,
+                          member_day: float | None = None) -> None:
         now = time.time()
         if sponsor_id and until is None and days:
             until = now + days * 86400
@@ -460,9 +492,9 @@ class Database:
             until = None
         await self._exec(
             "UPDATE conversations SET model=?, sponsor_id=?, sponsor_limit_usd=?, sponsor_limit_tokens=?, sponsor_until=?, "
-            "sponsor_since=?, sponsor_alert=0, updated_at=? WHERE id=?",
+            "sponsor_since=?, sponsor_member_day=?, sponsor_alert=0, updated_at=? WHERE id=?",
             (model, sponsor_id, limit_usd if sponsor_id else None, limit_tokens if sponsor_id else None, until,
-             now if sponsor_id else None, now, cid))
+             now if sponsor_id else None, member_day if sponsor_id else None, now, cid))
 
     async def sponsored_conversations(self) -> list[dict]:
         """Чаты, у которых есть спонсор модели (общее пространство)."""
@@ -495,6 +527,11 @@ class Database:
             "LEFT JOIN users us ON us.id=u.user_id WHERE u.conversation_id=? AND u.created_at>=? AND u.user_id IS NOT NULL "
             "GROUP BY u.user_id ORDER BY usd DESC", (cid, since or 0))
         return [{"user_id": r["user_id"], "name": r["name"], "usd": round(r["usd"] or 0, 4)} for r in rows]
+
+    async def member_usage_since(self, cid: str, user_id: str, since: float) -> float:
+        r = await self._one("SELECT COALESCE(SUM(cost_usd),0) AS usd FROM usage WHERE conversation_id=? AND user_id=? AND created_at>=?",
+                            (cid, user_id, since))
+        return float(r["usd"])
 
     async def sponsor_usage(self, cid: str, since: float | None) -> dict:
         if not since:
@@ -935,6 +972,23 @@ class Database:
         return await self._all("SELECT * FROM memories WHERE project_id=? ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                                (pid, limit))
 
+    async def add_proposal(self, pid: str, content: str, fields: dict, conversation_id: str | None) -> dict:
+        """Предложение агента (проект с проверкой заметок): в базу знаний попадёт, когда человек примет."""
+        pid_ = await self._exec("INSERT INTO note_proposals (project_id,content,fields,conversation_id,created_at) VALUES (?,?,?,?,?)",
+                                (pid, content, json.dumps(fields, ensure_ascii=False), conversation_id, time.time()))
+        return await self.get_proposal(pid_)  # type: ignore[return-value]
+
+    async def get_proposal(self, nid: int) -> dict | None:
+        r = await self._one("SELECT * FROM note_proposals WHERE id=?", (nid,))
+        return {**r, "fields": json.loads(r["fields"] or "{}")} if r else None
+
+    async def list_proposals(self, pid: str) -> list[dict]:
+        return [{**r, "fields": json.loads(r["fields"] or "{}")}
+                for r in await self._all("SELECT * FROM note_proposals WHERE project_id=? ORDER BY created_at", (pid,))]
+
+    async def delete_proposal(self, nid: int) -> None:
+        await self._exec("DELETE FROM note_proposals WHERE id=?", (nid,))
+
     async def get_memory(self, mid: int) -> dict | None:
         return await self._one("SELECT * FROM memories WHERE id=?", (mid,))
 
@@ -1034,6 +1088,31 @@ class Database:
                 seen.add(r["id"])
                 out.append(r)
         return out[:limit]
+
+    async def add_thought(self, pid: str, run_id: str, agent: str, query: str, found: list[int],
+                          linked: list[tuple[int, int]]) -> None:
+        """Поиск агента в базе знаний: запрос, найденные по словам и связанные с ними заметки — по порядку."""
+        await self._exec("INSERT INTO kb_thoughts (project_id,run_id,agent,query,found,linked,at) VALUES (?,?,?,?,?,?,?)",
+                         (pid, run_id or "", agent, query[:200], json.dumps(found), json.dumps(linked), time.time()))
+        # хранится немного: экрану нужны последние мысли, а не журнал
+        await self._exec("DELETE FROM kb_thoughts WHERE project_id=? AND id NOT IN "
+                         "(SELECT id FROM kb_thoughts WHERE project_id=? ORDER BY at DESC LIMIT 200)", (pid, pid))
+
+    async def recent_thoughts(self, pid: str, runs: int = 5) -> list[dict]:
+        """Последние «мысли»: поиски агента, сгруппированные по запуску (самые новые первыми), внутри — по порядку."""
+        rows = await self._all("SELECT * FROM kb_thoughts WHERE project_id=? ORDER BY at DESC LIMIT 200", (pid,))
+        order: list[str] = []
+        by: dict[str, list[dict]] = {}
+        for r in rows:
+            key = r["run_id"] or f"t{r['id']}"
+            if key not in by:
+                if len(order) >= runs:
+                    continue
+                order.append(key)
+                by[key] = []
+            by[key].append({**r, "found": json.loads(r["found"]), "linked": json.loads(r["linked"])})
+        return [{"run_id": k, "agent": by[k][0]["agent"], "at": by[k][0]["at"], "searches": sorted(by[k], key=lambda x: x["at"])}
+                for k in order]
 
     async def record_note_uses(self, ids: list[int], run_id: str) -> None:
         """Агент прочитал заметки в запуске: они снова «свежие», а связи между ними становятся сильнее."""

@@ -63,6 +63,9 @@ export type SponsorInfo = {
   limit_usd: number | null;
   until: number | null;
   spent_usd: number;
+  /** Лимит на участника в день из подписанного разрешения (сутки UTC) и мой расход за сегодня в этом чате. */
+  per_member_usd_day?: number;
+  my_today_usd?: number;
   blocked: string | null;
   grant_id?: string | null;
   proposal_id?: string | null;

@@ -105,6 +105,11 @@ export function TeamModel({ sid, cid, api, state, model, meId, canWrite, onChang
             Потрачено около {money(sponsor.spent_usd)} из {money(sponsor.limit_usd)}
             {sponsor.until ? ` · до ${new Date(sponsor.until * 1000).toLocaleDateString()}` : ""}
           </Txt>
+          {sponsor.per_member_usd_day ? (
+            <Txt kind="small" color={(sponsor.my_today_usd ?? 0) >= sponsor.per_member_usd_day ? p.warn : undefined}>
+              Ваш лимит в этом чате — {money(sponsor.per_member_usd_day)} в день (сутки по UTC), сегодня потрачено около {money(sponsor.my_today_usd ?? 0)}
+            </Txt>
+          ) : null}
           {sponsor.blocked ? <Notice kind="warn" text={sponsor.blocked} /> : null}
           {state.by_member?.length ? (
             <Txt kind="small">Расход по участникам: {state.by_member.map((m) => `${m.name} ${money(m.usd)}`).join(" · ")}</Txt>

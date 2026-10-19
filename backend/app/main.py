@@ -447,6 +447,7 @@ async def config(u: dict = Me):
         "models": settings.model_list,
         "default_model": settings.model_list[0] if settings.model_list else "",
         "pricing": settings.pricing,
+        "pricing_long": settings.pricing_long,
         "providers": providers,
         "approval_mode": settings.approval_mode,
         "llm_configured": bool(llm_ready),
@@ -615,6 +616,7 @@ class ProjectPatch(BaseModel):
     skills: list[str] | None = None
     color: str | None = None
     repos: list[RepoRef] | None = Field(None, max_length=100)
+    kb_review: bool | None = None  # заметки агента — только после проверки человеком (очередь предложений)
 
 
 @app.get("/api/projects")
@@ -784,7 +786,7 @@ async def knowledge_base(pid: str, u: dict = Me):
     """База знаний проекта для экрана (мозг / паутина / Иггдрасиль): заметки, области, группы, связи, источники."""
     await need(u, pid)
     p = await db().get_project(pid)
-    return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid))
+    return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid), thoughts=await db().recent_thoughts(pid))
 
 
 @app.get("/api/projects/{pid}/kb/obsidian")
@@ -872,6 +874,40 @@ async def patch_memory(mid: int, body: MemoryPatch, u: dict = Me):
     nm = await db().get_memory(mid)
     await broker().publish("memory", m["project_id"], action="updated", memory=nm, by=u["display_name"])
     return nm
+
+
+@app.get("/api/projects/{pid}/kb/proposals")
+async def list_note_proposals(pid: str, u: dict = Me):
+    await need(u, pid)
+    return await db().list_proposals(pid)
+
+
+async def _proposal_for_edit(nid: int, u: dict) -> dict:
+    pr = await db().get_proposal(nid)
+    if not pr:
+        raise HTTPException(404, "Предложение не найдено")
+    await need(u, pr["project_id"], "editor")
+    return pr
+
+
+@app.post("/api/kb/proposals/{nid}/accept")
+async def accept_note_proposal(nid: int, u: dict = Me):
+    """Принять предложение агента: заметка попадает в базу знаний такой, какой её предложил агент."""
+    pr = await _proposal_for_edit(nid, u)
+    f = dict(pr["fields"])
+    m = await db().add_memory(pr["project_id"], pr["content"], f.pop("tags", ""), "agent", "Fugu", pr["conversation_id"],
+                              bool(f.pop("pinned", False)), **f)
+    await db().delete_proposal(nid)
+    await broker().publish("memory", pr["project_id"], action="added", memory=m, by=u["display_name"])
+    return m
+
+
+@app.delete("/api/kb/proposals/{nid}")
+async def reject_note_proposal(nid: int, u: dict = Me):
+    pr = await _proposal_for_edit(nid, u)
+    await db().delete_proposal(nid)
+    await broker().publish("memory", pr["project_id"], action="rejected", proposal_id=nid, by=u["display_name"])
+    return {"ok": True}
 
 
 @app.delete("/api/memory/{mid}")
@@ -1579,6 +1615,11 @@ async def chat_model_state(c: dict, u: dict) -> dict:
                           "until": c.get("sponsor_until"), "since": c.get("sponsor_since"),
                           "spent_usd": round(used["usd"], 4), "spent_tokens": used["tokens"],
                           "blocked": await sponsor_blocker(c)}
+        if c.get("sponsor_member_day"):
+            # дневной лимит на участника keyguard считает по суткам UTC — так же считаем и здесь
+            day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            out["sponsor"]["per_member_usd_day"] = c["sponsor_member_day"]
+            out["sponsor"]["my_today_usd"] = round(await db().member_usage_since(c["id"], u["id"], day), 4)
     else:
         out["sponsor"] = None
     await expire_due()
@@ -1816,7 +1857,8 @@ async def _finish_with_grant(p: dict, c: dict, u: dict, why: str) -> str:
             pass
     until = datetime.fromisoformat(g["until"].replace("Z", "+00:00")).timestamp() if g.get("until") else None
     await db().decide_proposal(p["id"], "approved", u["id"])
-    await db().set_sponsor(c["id"], p["model"], p["proposer_id"], g.get("limit_usd"), None, None, until)
+    await db().set_sponsor(c["id"], p["model"], p["proposer_id"], g.get("limit_usd"), None, None, until,
+                           member_day=g.get("per_member_usd_day") or None)
     await db().set_conversation_grant(c["id"], p["grant_id"])
     await _note(c, f"{why}: чат переходит на {_title(p['model'])}, платит {p.get('proposer_name') or p['proposer_id']} "
                    f"({_terms(g.get('limit_usd'), None, None, until)})")

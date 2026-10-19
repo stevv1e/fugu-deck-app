@@ -43,3 +43,9 @@ test("страница собрана из kb/kb.html, самодостаточ�
   assert.doesNotMatch(KB_HTML, /(src|href)\s*=\s*["']https?:/i, "страница не подгружает ничего из сети");
   assert.doesNotMatch(KB_HTML, /fetch\(|XMLHttpRequest|WebSocket|import\(/, "и сама никуда не ходит");
 });
+
+test("свёртка сотен заметок: страница просит показать все, приложение передаёт флаг", () => {
+  assert.deepEqual(parseKbMessage(JSON.stringify({ type: "all", extra: "<x>" })), { type: "all" });
+  assert.match(kbInjection({ notes: [] }, "tree", true), /window\.KB_ALL=true;/);
+  assert.match(kbInjection({ notes: [] }, "tree"), /window\.KB_ALL=false;/);
+});
