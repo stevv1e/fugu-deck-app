@@ -786,7 +786,7 @@ async def knowledge_base(pid: str, u: dict = Me):
     """База знаний проекта для экрана (мозг / паутина / Иггдрасиль): заметки, области, группы, связи, источники."""
     await need(u, pid)
     p = await db().get_project(pid)
-    return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid))
+    return kb.graph(p, await db().list_memories(pid, 2000), await db().note_links(pid), thoughts=await db().recent_thoughts(pid))
 
 
 @app.get("/api/projects/{pid}/kb/obsidian")

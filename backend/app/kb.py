@@ -115,7 +115,29 @@ def effective_strength(strength: float, last_used: float | None, created: float,
     return round(max(0.12, min(1.0, strength) * 0.5 ** (idle_days / 90)), 3)
 
 
-def graph(project: dict, memories: list[dict], links: list[dict], now: float | None = None) -> dict:
+def thoughts_view(thoughts: list[dict], ids: set[str]) -> list[dict]:
+    """«Мысль агента» для экрана: путь светлячка по настоящим заметкам — сначала найденные по словам, потом связанные."""
+    out = []
+    for t in thoughts:
+        steps, seen = [], set()
+        for s in t["searches"]:
+            for mid in s["found"]:
+                nid = f"n{mid}"
+                if nid in ids and nid not in seen:
+                    seen.add(nid)
+                    steps.append([nid, f"нашлась по запросу «{s['query']}»"])
+            for mid, frm in s["linked"]:
+                nid = f"n{mid}"
+                if nid in ids and nid not in seen:
+                    seen.add(nid)
+                    steps.append([nid, "связана с найденной заметкой"])
+        if steps:
+            out.append({"agent": t["agent"], "q": t["searches"][0]["query"], "at": t["at"], "steps": steps})
+    return out
+
+
+def graph(project: dict, memories: list[dict], links: list[dict], now: float | None = None,
+          thoughts: list[dict] | None = None) -> dict:
     """Данные экрана базы знаний. Тексты отдаются как есть: экран обязан выводить их как текст, а не как разметку."""
     now = now or time.time()
     hub = f"p:{project['id']}"
@@ -148,4 +170,5 @@ def graph(project: dict, memories: list[dict], links: list[dict], now: float | N
         "project": {"id": project["id"], "name": project.get("name") or project["id"]}, "hub": hub,
         "areas": {a: {"name": name, "groups": [[g, sorted(v)] for g, v in sorted(groups[a].items())]} for a, name in AREAS.items()},
         "sources": ORIGINS, "link_types": LINK_TYPES, "notes": notes, "edges": edges, "generated_at": now,
+        "thoughts": thoughts_view(thoughts or [], ids),
     }

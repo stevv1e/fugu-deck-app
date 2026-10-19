@@ -60,6 +60,12 @@ async def memory_search(ctx, a):
             f["linked_to"] = m["link_from"]
             f["link"] = kb.LINK_TYPES.get(m["link_type"], m["link_type"])
             out.append(f)
+    # «Мысль агента» для экрана базы знаний: что искал и что прочитал (только заметки этого проекта)
+    own = [m["id"] for m in rows if m["project_id"] == ctx.project_id]
+    near_own = [(m["id"], m["link_from"]) for m in near if m["project_id"] == ctx.project_id]
+    if own or near_own:
+        await ctx.db.add_thought(ctx.project_id, ctx.run_id, (getattr(ctx, "agent", None) or {}).get("name") or "Fugu",
+                                 a["query"], own, near_own)
     # Прочитанные заметки снова «свежие», связи между использованными вместе — сильнее.
     await ctx.db.record_note_uses([m["id"] for m in [*rows, *near] if m["project_id"] == ctx.project_id], ctx.run_id)
     return out

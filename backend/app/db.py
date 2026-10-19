@@ -312,6 +312,20 @@ SCHEMA = [
     );
     CREATE INDEX IF NOT EXISTS note_proposals_project ON note_proposals(project_id);
     """,
+    # v20: «мысль агента» — что агент искал в базе знаний и какие заметки прочитал (экран базы знаний)
+    """
+    CREATE TABLE IF NOT EXISTS kb_thoughts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL DEFAULT '',
+        agent TEXT NOT NULL DEFAULT '',
+        query TEXT NOT NULL,
+        found TEXT NOT NULL DEFAULT '[]',
+        linked TEXT NOT NULL DEFAULT '[]',
+        at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS kb_thoughts_project ON kb_thoughts(project_id, at);
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -1074,6 +1088,31 @@ class Database:
                 seen.add(r["id"])
                 out.append(r)
         return out[:limit]
+
+    async def add_thought(self, pid: str, run_id: str, agent: str, query: str, found: list[int],
+                          linked: list[tuple[int, int]]) -> None:
+        """Поиск агента в базе знаний: запрос, найденные по словам и связанные с ними заметки — по порядку."""
+        await self._exec("INSERT INTO kb_thoughts (project_id,run_id,agent,query,found,linked,at) VALUES (?,?,?,?,?,?,?)",
+                         (pid, run_id or "", agent, query[:200], json.dumps(found), json.dumps(linked), time.time()))
+        # хранится немного: экрану нужны последние мысли, а не журнал
+        await self._exec("DELETE FROM kb_thoughts WHERE project_id=? AND id NOT IN "
+                         "(SELECT id FROM kb_thoughts WHERE project_id=? ORDER BY at DESC LIMIT 200)", (pid, pid))
+
+    async def recent_thoughts(self, pid: str, runs: int = 5) -> list[dict]:
+        """Последние «мысли»: поиски агента, сгруппированные по запуску (самые новые первыми), внутри — по порядку."""
+        rows = await self._all("SELECT * FROM kb_thoughts WHERE project_id=? ORDER BY at DESC LIMIT 200", (pid,))
+        order: list[str] = []
+        by: dict[str, list[dict]] = {}
+        for r in rows:
+            key = r["run_id"] or f"t{r['id']}"
+            if key not in by:
+                if len(order) >= runs:
+                    continue
+                order.append(key)
+                by[key] = []
+            by[key].append({**r, "found": json.loads(r["found"]), "linked": json.loads(r["linked"])})
+        return [{"run_id": k, "agent": by[k][0]["agent"], "at": by[k][0]["at"], "searches": sorted(by[k], key=lambda x: x["at"])}
+                for k in order]
 
     async def record_note_uses(self, ids: list[int], run_id: str) -> None:
         """Агент прочитал заметки в запуске: они снова «свежие», а связи между ними становятся сильнее."""

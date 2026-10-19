@@ -117,3 +117,29 @@ async def test_agent_search_returns_neighbors_and_strengthens(tmp_path):
                 pass
     finally:
         await db.close()
+
+
+async def test_agent_thought_for_kb_screen(tmp_path):
+    """«Мысль агента»: поиски запуска — путь по настоящим заметкам, сначала найденные, потом связанные."""
+    db = Database(str(tmp_path / "kb.sqlite3"))
+    await db.connect()
+    try:
+        a = await db.add_memory(DEFAULT_PROJECT, "Инцидент 12.09: 502 на checkout", "инциденты")
+        b = await db.add_memory(DEFAULT_PROJECT, "nginx: таймаут upstream 30 секунд", "prod-1")
+        await db.add_memory(DEFAULT_PROJECT, "Постороннее про отпуск", "люди")
+        await db.add_note_link(a["id"], b["id"], "ref", 0.5)
+        ctx = SimpleNamespace(db=db, project_id=DEFAULT_PROJECT, project={}, readable_projects={DEFAULT_PROJECT: "general"},
+                              run_id="r1", conversation_id="c1", broker=None, agent={"name": "Дежурный"})
+        await memory_tools.memory_search(ctx, {"query": "checkout 502"})
+        await memory_tools.memory_search(ctx, {"query": "нет такого слова"})  # пустой поиск мыслью не считается
+        ctx.run_id = "r2"
+        await memory_tools.memory_search(ctx, {"query": "nginx"})
+        t = await db.recent_thoughts(DEFAULT_PROJECT)
+        assert [x["run_id"] for x in t] == ["r2", "r1"] and t[1]["agent"] == "Дежурный" and len(t[1]["searches"]) == 1
+        g = kb.graph(await db.get_project(DEFAULT_PROJECT), await db.list_memories(DEFAULT_PROJECT),
+                     await db.note_links(DEFAULT_PROJECT), thoughts=t)
+        r1 = g["thoughts"][1]
+        assert r1["q"] == "checkout 502" and r1["steps"] == [[f"n{a['id']}", "нашлась по запросу «checkout 502»"],
+                                                            [f"n{b['id']}", "связана с найденной заметкой"]], r1
+    finally:
+        await db.close()

@@ -233,6 +233,7 @@ let STRENGTH0 = { "o2|i9": .85, "o3|o2": .8, "p5|i8": .9, "o1|i9": .7, "c3|o2": 
 // Приложение кладёт в window.KB_DATA ответ агента (GET /api/projects/<id>/kb). Тексты заметок приходят как есть и
 // выводятся ТОЛЬКО как текст: заметку мог написать агент по чужим данным, разметке в ней доверять нельзя.
 const LIVE = typeof window.KB_DATA === "object" && window.KB_DATA !== null && Array.isArray(window.KB_DATA.notes);
+let THOUGHTS = []; // настоящие «мысли агента»: его поиски в базе знаний (последние запуски)
 if (LIVE) {
   const D = window.KB_DATA, COL = { dec: "--a-dec", inf: "--a-inf", code: "--a-code", ppl: "--a-ppl", ops: "--a-ops" };
   const str = (v) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -246,6 +247,9 @@ if (LIVE) {
   STALE = new Set(D.notes.filter(n => n.stale).map(n => str(n.id))); EXT = new Set(D.notes.filter(n => n.ext).map(n => str(n.id)));
   STRENGTH0 = {};
   E = (D.edges || []).filter(e => known.has(str(e[0])) && known.has(str(e[1])) && ETYPES[e[2]] && e[0] !== e[1]).map(e => { STRENGTH0[e[0] + "|" + e[1]] = Math.min(1, Math.max(.05, +e[3] || .35)); return [str(e[0]), str(e[1]), e[2]]; });
+  // тексты мыслей — от агента: только как текст
+  THOUGHTS = (Array.isArray(D.thoughts) ? D.thoughts : []).map(t => ({ agent: "Агент «" + esc(str(t.agent) || "Fugu") + "»", q: esc(str(t.q)), at: +t.at || 0,
+    steps: (Array.isArray(t.steps) ? t.steps : []).filter(s => Array.isArray(s) && known.has(str(s[0]))).map(s => [str(s[0]), esc(str(s[1]))]) })).filter(t => t.steps.length).slice(0, 5);
 }
 const toApp = (msg) => { try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg)); } catch (e) {} };
 const nodes = N.map(([id, area, title, body, days, source, src]) => ({ id, area, title, body, days, source, src, hub: id === HUB, stale: STALE.has(id), ext: EXT.has(id), deg: 0, act: 0, x: 0, y: 0, r: 5, rv: {} }));
@@ -820,7 +824,8 @@ function overview() {
       <h2>${R.name}: ${nodes.length} заметок, ${edges.length} связей</h2>
       <p class="muted">${R.about}</p>
     </div>
-    ${LIVE ? (nodes.length <= 1 ? `<div class="section"><p class="muted">Заметок пока нет. Добавьте первую — или попросите агента запомнить важное: он сохраняет факты и решения сам.</p></div>` : "") : `<div class="section">
+    ${LIVE ? (nodes.length <= 1 ? `<div class="section"><p class="muted">Заметок пока нет. Добавьте первую — или попросите агента запомнить важное: он сохраняет факты и решения сам.</p></div>` :
+      THOUGHTS.length ? `<div class="section"><p class="eyebrow">Мысль агента · последние поиски</p>${THOUGHTS.map((t, i) => `<button class="btn primary" data-think="t:${i}"><span>${t.q}</span><span class="k">${t.agent} · ${ago(Math.max(0, Math.floor((Date.now() / 1000 - t.at) / 86400)))}</span></button>`).join("")}</div>` : "") : `<div class="section">
       <p class="eyebrow">Мысль агента</p>
       <button class="btn primary" data-think="incident"><span>Почему на checkout снова 502?</span><span class="k">Дежурный</span></button>
       <button class="btn primary" data-think="deploy"><span>Можно выкатить фикс оплаты в пятницу?</span><span class="k">Ревьюер</span></button>
@@ -871,7 +876,7 @@ const SCEN = {
 };
 function think(key) {
   if (thinking) return;
-  const S = SCEN[key]; thinking = true; renderViews(); selected = null; focusArea = null; query = ""; qi.value = ""; renderChips(); glide(fitView);
+  const S = key.startsWith("t:") ? THOUGHTS[+key.slice(2)] : SCEN[key]; if (!S) return; thinking = true; renderViews(); selected = null; focusArea = null; query = ""; qi.value = ""; renderChips(); glide(fitView);
   panel.innerHTML = `<div class="section"><p class="eyebrow">${S.agent} · мысль</p><h2>${S.q}</h2></div><ol class="log" id="log"></ol><div id="ans"></div>`;
   const log = document.getElementById("log"); let i = 0, prev = null; const used = [];
   const next = () => {
@@ -888,10 +893,10 @@ function think(key) {
     let grown = 0;
     for (let a = 0; a < used.length; a++) for (let b = a + 1; b < used.length; b++) { const e = edgeBetween(used[a], used[b]); if (e) { e.gain = Math.min(.4, e.gain + .12); e.pulse = .8; grown++; } }
     used.forEach(n => n.days = 0);
-    const [tok, raw] = S.tokens;
-    document.getElementById("ans").innerHTML = `<div class="answer"><p class="eyebrow">Ответ</p><p>${S.answer}</p>
-      <span class="saving">прочитано заметок: ${used.length} · ≈ ${tok.toLocaleString("ru-RU")} токенов вместо ≈ ${raw.toLocaleString("ru-RU")} по исходникам (оценка макета)</span>
-      <span class="saving">усилено связей: ${grown} · использованные заметки снова свежие</span></div><button class="btn back" id="done" style="margin-top:12px">← обзор</button>`;
+    const [tok, raw] = S.tokens || [];
+    document.getElementById("ans").innerHTML = `<div class="answer">${S.answer ? `<p class="eyebrow">Ответ</p><p>${S.answer}</p>` : `<p class="eyebrow">Итог</p>`}
+      <span class="saving">прочитано заметок: ${used.length}${tok ? ` · ≈ ${tok.toLocaleString("ru-RU")} токенов вместо ≈ ${raw.toLocaleString("ru-RU")} по исходникам (оценка макета)` : ""}</span>
+      <span class="saving">${LIVE ? "так агент шёл по базе знаний в этом запуске" : `усилено связей: ${grown} · использованные заметки снова свежие`}</span></div><button class="btn back" id="done" style="margin-top:12px">← обзор</button>`;
     panel.scrollTop = panel.scrollHeight; document.getElementById("done").onclick = overview; thinking = false; renderViews();
   };
   setTimeout(next, 350);
