@@ -435,7 +435,7 @@ export default function Chat() {
       setText("");
       setAtts([]);
       setItems((prev) => [...prev, { kind: "user", key: "u" + Date.now(), content: msg, mine: true, attachments: sent }]);
-      toEnd(true);
+      toEnd(false);
       follow(r.run_id);
     } catch (e) {
       setError(errText(e));
@@ -566,12 +566,14 @@ export default function Chat() {
           data={items}
           keyExtractor={(i) => i.key}
           contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
-          onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: true }); }}
+          // Пока агент пишет, размер списка растёт десятки раз в секунду. Прокрутка с анимацией на каждый прирост
+          // наслаивается сама на себя и дёргает список вверх-вниз — поэтому держим низ мгновенно (animated: false).
+          onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
           onLayout={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
-          scrollEventThrottle={100}
+          scrollEventThrottle={16}
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const end = contentSize.height - contentOffset.y - layoutMeasurement.height < 80;
+            const end = contentSize.height - contentOffset.y - layoutMeasurement.height < 120;
             atEnd.current = end;
             setShowDown((v) => (v === !end ? v : !end));
           }}
