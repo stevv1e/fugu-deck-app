@@ -234,9 +234,22 @@ let STRENGTH0 = { "o2|i9": .85, "o3|o2": .8, "p5|i8": .9, "o1|i9": .7, "c3|o2": 
 // выводятся ТОЛЬКО как текст: заметку мог написать агент по чужим данным, разметке в ней доверять нельзя.
 const LIVE = typeof window.KB_DATA === "object" && window.KB_DATA !== null && Array.isArray(window.KB_DATA.notes);
 let THOUGHTS = []; // настоящие «мысли агента»: его поиски в базе знаний (последние запуски)
+// Сотни заметок не читаются ни деревом, ни паутиной: показываем FOLD_LIMIT самых нужных, остальное — свёрнуто
+// (сколько — на ветках и в обзоре; «Показать все» просит приложение перерисовать страницу со всеми).
+const FOLD_LIMIT = 150;
+let FOLDED = 0, FOLDED_BY = {};
 if (LIVE) {
   const D = window.KB_DATA, COL = { dec: "--a-dec", inf: "--a-inf", code: "--a-code", ppl: "--a-ppl", ops: "--a-ops" };
   const str = (v) => (typeof v === "string" ? v : v == null ? "" : String(v));
+  if (window.KB_ALL !== true && D.notes.length > FOLD_LIMIT + 1) {
+    // нужнее — закреплённые, связанные с проектом и другими заметками, недавно использованные, устаревшие (их надо
+    // проверить); мысли агента и связи — только по оставшимся
+    const deg = {}; (D.edges || []).forEach(e => { deg[e[0]] = (deg[e[0]] || 0) + 1; deg[e[1]] = (deg[e[1]] || 0) + 1; });
+    const score = (n) => (n.hub ? 1e9 : 0) + (n.pinned ? 1e6 : 0) + (n.stale ? 5e3 : 0) + (deg[n.id] || 0) * 100 - Math.min(365, n.days | 0);
+    const keep = new Set(D.notes.slice().sort((a, b) => score(b) - score(a)).slice(0, FOLD_LIMIT + 1).map(n => str(n.id)));
+    D.notes.forEach(n => { if (!keep.has(str(n.id))) { FOLDED++; FOLDED_BY[n.area] = (FOLDED_BY[n.area] || 0) + 1; } });
+    D.notes = D.notes.filter(n => keep.has(str(n.id)));
+  }
   const known = new Set(D.notes.map(n => str(n.id)));
   AREAS = {};
   Object.keys(COL).forEach(k => { const A = (D.areas || {})[k] || {};
@@ -830,11 +843,13 @@ function overview() {
       <button class="btn primary" data-think="incident"><span>Почему на checkout снова 502?</span><span class="k">Дежурный</span></button>
       <button class="btn primary" data-think="deploy"><span>Можно выкатить фикс оплаты в пятницу?</span><span class="k">Ревьюер</span></button>
     </div>`}
+    ${FOLDED ? `<div class="section"><p class="muted">Показаны ${nodes.length - 1} самых нужных заметок; ещё ${FOLDED} свёрнуты (закреплённые, связанные и недавние — впереди).</p><button class="btn" id="all">Показать все заметки</button></div>` : ""}
     <div class="divider"></div>
     <div class="section"><p class="eyebrow">Как устроено</p><div class="map">${R.map.map(([b, s]) => `<b>${b}</b><span>${s}</span>`).join("")}</div></div>
     <div class="section"><p class="eyebrow">Состояние заметки</p><div class="legend">${R.legend().map(([icon, text]) => `<span>${icon}${text}</span>`).join("")}${edgeLegend()}</div></div>
     <p class="muted" style="font-size:12.5px">Вид можно сменить вверху: мозг, паутина или Иггдрасиль. Данные одни и те же.</p>`;
   panel.querySelectorAll("[data-think]").forEach(b => b.onclick = () => think(b.dataset.think));
+  const ab = document.getElementById("all"); if (ab) ab.onclick = () => toApp({ type: "all" });
 }
 function showNote(n) {
   const A = AREAS[n.area], ls = linksOf(n).sort((a, b) => (b.s + b.gain) - (a.s + a.gain));
@@ -908,7 +923,7 @@ qi.addEventListener("input", () => { query = qi.value.trim(); });
 qi.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { const n = nodes.find(matches); if (n) { select(n); focusOn(n.x, n.y, Math.max(view.s, 1.5)); } } if (ev.key === "Escape") { qi.value = ""; query = ""; } });
 const chipsEl = document.getElementById("chips");
 function renderChips() {
-  chipsEl.innerHTML = Object.entries(AREAS).map(([k, A]) => `<button class="chip" data-a="${k}" aria-pressed="${focusArea === k}" style="--c:${C(A.c)}"><i></i><b>${A.name}</b><small>${nodes.filter(n => n.area === k && !n.hub).length}</small></button>`).join("");
+  chipsEl.innerHTML = Object.entries(AREAS).map(([k, A]) => `<button class="chip" data-a="${k}" aria-pressed="${focusArea === k}" style="--c:${C(A.c)}"><i></i><b>${A.name}</b><small>${nodes.filter(n => n.area === k && !n.hub).length}${FOLDED_BY[k] ? ` +${FOLDED_BY[k]}` : ""}</small></button>`).join("");
   chipsEl.querySelectorAll(".chip").forEach(b => b.onclick = () => {
     const k = b.dataset.a;
     if (focusArea === k) { focusArea = null; glide(fitView); }

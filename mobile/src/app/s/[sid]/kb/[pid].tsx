@@ -62,13 +62,18 @@ export default function KnowledgeBase() {
     void load();
   }, [load]);
 
-  const injected = useMemo(() => (graph ? kbInjection(graph, view) : ""), [graph, view, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [showAll, setShowAll] = useState(false); // сотни заметок: страница свернула менее нужные, человек попросил все
+  const injected = useMemo(() => (graph ? kbInjection(graph, view, showAll) : ""), [graph, view, version, showAll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onMessage = (raw: string) => {
     const m = parseKbMessage(raw);
     if (!m) return;
     if (m.type === "view") void prefs.set(VIEW_KEY, m.key);
     if (m.type === "error") setErr("Страница базы знаний сообщила об ошибке: " + m.message);
+    if (m.type === "all") {
+      setShowAll(true);
+      setVersion((x) => x + 1); // перерисовать страницу со всеми заметками
+    }
     if (m.type === "edit") {
       const n = graph?.notes.find((x: KbNote) => x.mid === m.mid);
       if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
