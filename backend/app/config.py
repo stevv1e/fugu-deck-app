@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     summary_model: str = ""
     compact_history_chars: int = 60000
     compact_keep_chars: int = 20000
+    # оркестратор (под-агенты по под-задачам): модель планировщика ("" — модель чата; планирование — один вызов
+    # на задачу, туда стоит ставить модель поумнее) и потолок под-задач за один вызов delegate
+    planner_model: str = ""
+    max_subtasks: int = 6
 
     # --- Режим работы ---
     #   standalone — одиночный сервер (пароль владельца, ключи из .env)

@@ -539,3 +539,82 @@ async def test_agent_approvals(client):
     run.approvals[aid].set_result((False, ""))
     await task
     assert client.delete("/api/agents/auto").status_code == 200
+
+
+# ---------------------------------------------------------------- оркестрация под-агентов (фаза A)
+async def test_orchestration_tools_and_depth(client):
+    from app.agent import ORCHESTRATION_HINT, Run
+
+    login(client)
+    ag = main.agent()
+    owner = {"id": "u1", "role": "owner", "space_role": "owner"}
+    cid = client.post("/api/projects/general/conversations", json={}).json()["id"]
+    root = Run(id="r1", conversation_id=cid, model="sakana:x", project_id="general", user=owner, git_status={})
+    assert {"plan_task", "delegate"} <= {t.name for t in ag.tools_for(root)}
+    root.sub = True  # под-прогон — делегировать дальше нельзя (глубина 1)
+    assert not ({"plan_task", "delegate"} & {t.name for t in ag.tools_for(root)})
+    root.sub = False
+    other = Run(id="r2", conversation_id=cid, model="sakana:x", project_id="general",
+                user={"id": "u2"}, git_status={})  # не владелец — тоже нет
+    assert not ({"plan_task", "delegate"} & {t.name for t in ag.tools_for(other)})
+    msgs = await ag._build_messages(cid, await ag.context(cid, owner, root))
+    assert "Оркестрация под-агентов" in "\n".join(str(m.get("content")) for m in msgs)
+    assert ORCHESTRATION_HINT  # константа существует
+
+
+async def test_plan_task(client, monkeypatch):
+    import app.agent as agentmod
+    from app.agent import Run
+
+    login(client)
+    ag = main.agent()
+
+    class _Res:
+        text = ('{"subtasks":[{"role":"бэк","task":"поднять api","model":"","access":["git"]},'
+                '{"role":"фронт","task":"сверстать","model":"anthropic:claude","access":[]}]}')
+        usage = None
+
+    class _Prov:
+        async def stream(self, *a, **k):
+            return _Res()
+
+    monkeypatch.setattr(agentmod, "get_provider", lambda *a, **k: _Prov())
+    run = Run(id="rp", conversation_id="c", model="sakana:x", project_id="general", user={"id": "u1"}, llm_key="k")
+    out = await ag.plan(run, "сделать сайт")
+    assert len(out["subtasks"]) == 2
+    assert out["subtasks"][0]["role"] == "бэк" and out["subtasks"][1]["model"] == "anthropic:claude"
+
+
+async def test_delegate(client, monkeypatch):
+    import asyncio as aio
+
+    import pytest
+
+    from app.agent import Run
+
+    login(client)
+    db = main.db()
+    ag = main.agent()
+    await db.put_agent("back", name="Бэк", instructions="делай бэк", tools=["git"], model="")
+    cid = client.post("/api/projects/general/conversations", json={}).json()["id"]
+
+    async def fake_start(scid, model, user=None, project_id="", keys=None, llm_key=None, budget=None, payer_id=None):
+        await db.add_message(scid, "assistant", "сделал бэк")
+        done = aio.get_running_loop().create_future()
+        done.set_result(None)
+        return Run(id="s1", conversation_id=scid, model=model, status="done", task=done)
+
+    monkeypatch.setattr(ag, "start", fake_start)
+    run = Run(id="rd", conversation_id=cid, model="sakana:x", project_id="general", user={"id": "u1"})
+    out = await ag.delegate(run, [{"agent_id": "back", "task": "поднять api"}], parallel=False)
+    r = out["results"][0]
+    assert r["agent_id"] == "back" and r["status"] == "done" and "сделал бэк" in r["result"]
+    sub = await db.get_conversation(r["conversation_id"])
+    assert sub["parent_id"] == cid and sub["agent_id"] == "back"  # под-чат связан с родителем и назначен агенту
+
+    run.sub = True
+    with pytest.raises(ValueError, match="глубина"):
+        await ag.delegate(run, [{"agent_id": "back", "task": "x"}])
+    run.sub = False
+    with pytest.raises(ValueError, match="нет агента"):
+        await ag.delegate(run, [{"agent_id": "ghost", "task": "x"}])

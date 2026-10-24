@@ -332,6 +332,11 @@ SCHEMA = [
     ALTER TABLE conversations ADD COLUMN compact_summary TEXT;
     ALTER TABLE conversations ADD COLUMN compact_through INTEGER;
     """,
+    # v22: под-чат оркестратора — ссылка на родительский чат, из которого под-агента запустили (под-задача).
+    # Нужна, чтобы отличать под-прогон (ему запрещено делегировать — глубина 1) и позже сгруппировать под-чаты в UI.
+    """
+    ALTER TABLE conversations ADD COLUMN parent_id TEXT;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -416,11 +421,13 @@ class Database:
         return await self._one("SELECT * FROM conversations WHERE id=?", (cid,))
 
     async def create_conversation(self, model: str, project_id: str, created_by: str | None,
-                                  title: str = "Новый чат") -> dict:
+                                  title: str = "Новый чат", agent_id: str = DEFAULT_AGENT,
+                                  parent_id: str | None = None) -> dict:
         cid, now = new_id(), time.time()
         await self._exec(
-            "INSERT INTO conversations (id,title,model,project_id,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-            (cid, title, model, project_id, created_by, now, now),
+            "INSERT INTO conversations (id,title,model,project_id,created_by,agent_id,parent_id,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (cid, title, model, project_id, created_by, agent_id, parent_id, now, now),
         )
         return await self.get_conversation(cid)  # type: ignore[return-value]
 
