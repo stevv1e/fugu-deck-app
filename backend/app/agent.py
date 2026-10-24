@@ -281,9 +281,10 @@ class Agent:
             return [{"type": "text", "text": full}, *images]
         return full
 
-    async def _system_prompt(self, ctx: ToolContext) -> str:
+    async def _system_prompt(self, ctx: ToolContext) -> tuple[str, str]:
+        """Стабильная часть и снимок памяти — отдельно: см. _build_messages (кэш промпта)."""
         if ctx.talk:
-            return TALK_PROMPT
+            return TALK_PROMPT, ""
         status = ctx.git_status if ctx.git_status is not None else await self.git_status(ctx.providers)
         who = [f"{name} (пользователь {login})" if login else f"{name} (ключ не задан или не работает)"
                for name, login in status.items()]
@@ -309,8 +310,16 @@ class Agent:
                 sk = [s for s in self.skills.list() if enabled(ctx, s["name"])]
                 if sk:
                     parts.append("\n### Доступные скилы\n" + "\n".join(f"- {s['name']}: {s['description']}" for s in sk))
-            # память (агенту без доступа к памяти — не показываем)
-            mem = await self.db.list_memories(p["id"], 200) if "memory" in ((ctx.agent or {}).get("tools") or AGENT_TOOLS) else []
+            others = [n for i, n in ctx.readable_projects.items() if i != p["id"]]
+            if others:
+                parts.append("\n### Память связанных проектов (только чтение, через memory_search)\n"
+                             + ", ".join(others))
+        # Снимок памяти — отдельным блоком после стабильной части: он меняется, когда агент сохраняет заметку,
+        # и рвал бы кэшируемый префикс (система + схемы инструментов), будь он внутри него. См. _build_messages.
+        # Агенту без доступа к памяти — не показываем.
+        mem_text = ""
+        if p and "memory" in ((ctx.agent or {}).get("tools") or AGENT_TOOLS):
+            mem = await self.db.list_memories(p["id"], 200)
             lines, used = [], 0
             for m in mem:
                 line = f"- [#{m['id']}{' 📌' if m['pinned'] else ''}] {m['content']}"
@@ -319,16 +328,17 @@ class Agent:
                     break
                 lines.append(line)
                 used += len(line)
-            parts.append("\n### Память проекта\n" + ("\n".join(lines) if lines else "(пусто)"))
-            others = [n for i, n in ctx.readable_projects.items() if i != p["id"]]
-            if others:
-                parts.append("\n### Память связанных проектов (только чтение, через memory_search)\n"
-                             + ", ".join(others))
-        return "\n".join(parts)
+            mem_text = "### Память проекта\n" + ("\n".join(lines) if lines else "(пусто)")
+        return "\n".join(parts), mem_text
 
     async def _build_messages(self, cid: str, ctx: ToolContext | None = None, provider: str = "") -> list[dict]:
         ctx = ctx or await self.context(cid)
-        msgs: list[dict] = [{"role": "system", "content": await self._system_prompt(ctx)}]
+        stable, memory = await self._system_prompt(ctx)
+        # Стабильная часть помечена _cache: провайдер ставит на ней точку кэширования (Anthropic), а снимок памяти
+        # идёт отдельным системным блоком после неё — так его изменения не сбрасывают кэш системы и схем инструментов.
+        msgs: list[dict] = [{"role": "system", "content": stable, "_cache": True}]
+        if memory:
+            msgs.append({"role": "system", "content": memory})
         rows = await self.db.get_messages(cid)
         user_idx = [i for i, r in enumerate(rows) if r["role"] == "user"]
         cutoff = user_idx[-3] if len(user_idx) >= 3 else -1
