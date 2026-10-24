@@ -50,6 +50,51 @@ async def test_github_error_message_is_readable():
         await p.whoami()
 
 
+@pytest.mark.asyncio
+@respx.mock
+async def test_github_search_code():
+    p = GitHubProvider("t")
+    route = respx.get("https://api.github.com/search/code").mock(return_value=httpx.Response(200, json={
+        "items": [{"path": "app/a.py", "text_matches": [{"fragment": "def foo():"}, {"fragment": "foo()"}]}]}))
+    res = await p.search_code("me/repo", "foo", 20)
+    assert res == {"matches": [{"path": "app/a.py", "lines": ["def foo():", "foo()"]}]}
+    assert route.calls[0].request.url.params["q"] == "foo repo:me/repo"  # запрос ограничен репозиторием
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gitlab_search_code():
+    p = GitLabProvider("t", "https://gitlab.example.com")
+    respx.get(f"{GL}/projects/grp%2Fapp/search").mock(return_value=httpx.Response(200, json=[
+        {"path": "x.py", "data": "строка со словом", "startline": 10}]))
+    res = await p.search_code("grp/app", "слово", 20)
+    assert res == {"matches": [{"path": "x.py", "lines": ["строка со словом"]}]}
+
+
+@pytest.mark.asyncio
+async def test_search_code_tool_truncates():
+    from types import SimpleNamespace
+
+    from app.tools.repo_tools import search_code
+
+    class Stub:
+        async def search_code(self, repo, query, limit):
+            return {"matches": [{"path": f"f{i}.py", "lines": ["x" * 1000, "y", "z", "w"]} for i in range(40)]}
+
+    ctx = SimpleNamespace(providers={"github": Stub()})
+    out = await search_code(ctx, {"provider": "github", "repo": "me/r", "query": "x", "limit": 5})
+    assert len(out["matches"]) == 5                 # не больше limit
+    assert len(out["matches"][0]["lines"]) == 3     # не больше трёх фрагментов
+    assert len(out["matches"][0]["lines"][0]) == 600  # длинная строка усечена
+    empty = await search_code(SimpleNamespace(providers={"github": _Empty()}), {"provider": "github", "repo": "me/r", "query": "zzz"})
+    assert empty["matches"] == [] and "hint" in empty
+
+
+class _Empty:
+    async def search_code(self, repo, query, limit):
+        return {"matches": []}
+
+
 def test_repair_tool_pairs():
     from app.agent import _repair_tool_pairs
     msgs = [{"role": "user", "content": "x"},

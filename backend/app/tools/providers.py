@@ -76,6 +76,8 @@ class GitProvider(ABC):
     async def create_pull_request(self, repo: str, source: str, target: str | None, title: str, body: str) -> dict: ...
     @abstractmethod
     async def ci_status(self, repo: str, ref: str | None) -> list[dict]: ...
+    @abstractmethod
+    async def search_code(self, repo: str, query: str, limit: int) -> dict: ...
 
 
 # ---------------------------------------------------------------- GitHub
@@ -164,6 +166,14 @@ class GitHubProvider(GitProvider):
         r = await self._req("GET", f"/repos/{repo}/contents/{quote(path)}", params=params,
                             headers={"Accept": "application/vnd.github.raw+json"})
         return r.content
+
+    async def search_code(self, repo, query, limit):
+        # Code Search API: индекс основной ветки, с фрагментами совпадений (text-match). repo: ограничивает поиск.
+        r = await self._req("GET", "/search/code", params={"q": f"{query} repo:{repo}", "per_page": min(limit, 30)},
+                            headers={"Accept": "application/vnd.github.text-match+json"})
+        matches = [{"path": it["path"], "lines": [m["fragment"] for m in it.get("text_matches", [])][:3]}
+                   for it in r.json().get("items", [])]
+        return {"matches": matches}
 
     async def _branch_sha(self, repo: str, branch: str) -> str | None:
         r = await self.http.get(f"/repos/{repo}/git/ref/heads/{quote(branch, safe='/')}")
@@ -319,6 +329,14 @@ class GitLabProvider(GitProvider):
         r = await self._req("GET", f"/projects/{self._pid(repo)}/repository/files/{quote(path, safe='')}/raw",
                             params={"ref": ref})
         return r.content
+
+    async def search_code(self, repo, query, limit):
+        # Поиск по блобам проекта (основная ветка): каждый результат — путь и фрагмент с совпадением.
+        r = await self._req("GET", f"/projects/{self._pid(repo)}/search",
+                            params={"scope": "blobs", "search": query, "per_page": min(limit, 30)})
+        matches = [{"path": it.get("path") or it.get("filename"), "lines": [it.get("data") or ""]}
+                   for it in r.json()]
+        return {"matches": matches}
 
     async def _file_exists(self, repo: str, path: str, ref: str) -> bool:
         r = await self.http.head(f"/projects/{self._pid(repo)}/repository/files/{quote(path, safe='')}",

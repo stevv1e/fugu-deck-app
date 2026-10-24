@@ -85,6 +85,28 @@ async def read_file(ctx, a):
     return out
 
 
+@tool("search_code",
+      "Поиск по коду репозитория: находит файлы и строки с совпадением, не скачивая файлы целиком. Бери его вместо "
+      "чтения больших файлов, чтобы найти нужное место (функцию, строку, импорт), а потом при необходимости дочитай "
+      "read_file с start_line/end_line. Ищет по основной ветке.",
+      obj({"provider": PROVIDER, "repo": REPO,
+           "query": {"type": "string", "description": "Что искать: слово, фраза или идентификатор"},
+           "limit": {"type": "integer", "minimum": 1, "maximum": 30, "default": 20}},
+          ["provider", "repo", "query"]),
+      group="git", title="Поиск по коду")
+async def search_code(ctx, a):
+    limit = a.get("limit", 20)
+    res = await _provider(ctx, a["provider"]).search_code(a["repo"], a["query"], limit)
+    # ограничиваем объём, чтобы сам поиск не превратился в стену текста
+    matches = res.get("matches", [])[:limit]
+    for m in matches:
+        m["lines"] = [s[:600] for s in (m.get("lines") or []) if s][:3]
+    out = {"matches": matches}
+    if not matches:
+        out["hint"] = "Ничего не найдено. Попробуй другое слово или посмотри структуру через list_files."
+    return out
+
+
 @tool("ci_status", "Последние запуски CI (GitHub Actions / GitLab pipelines).",
       obj({"provider": PROVIDER, "repo": REPO, "ref": {"type": "string"}}, ["provider", "repo"]),
       group="git", title="Статус CI")
