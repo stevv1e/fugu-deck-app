@@ -1,7 +1,7 @@
 /** Чаты проекта. Удержание чата — меню: переименовать, перенести в другой проект, удалить. */
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import { RefreshControl, ScrollView } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { Conversation } from "@/core/types";
@@ -35,6 +35,7 @@ export default function ProjectChats() {
   const [title, setTitle] = useState("");
   const [working, setWorking] = useState<string | null>(null);
   const [transfer, setTransfer] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // свёрнутые группы под-чатов (по id родителя)
 
   const act = async (tag: string, fn: () => Promise<unknown>) => {
     if (!api) return;
@@ -124,6 +125,46 @@ export default function ProjectChats() {
     }
   };
 
+  // Под-чаты оркестратора (parent_id) группируем под родителем. «Сирота» (родитель не в этом проекте) — как корневой.
+  const convs = data ?? [];
+  const inList = new Set(convs.map((c) => c.id));
+  const kids = new Map<string, Conversation[]>();
+  for (const c of convs) {
+    if (c.parent_id && inList.has(c.parent_id)) {
+      const arr = kids.get(c.parent_id) ?? [];
+      arr.push(c);
+      kids.set(c.parent_id, arr);
+    }
+  }
+  const roots = convs.filter((c) => !c.parent_id || !inList.has(c.parent_id));
+  const agentName = (id?: string) => agents.data?.find((a) => a.id === id)?.name;
+  const toggle = (id: string) =>
+    setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const card = (c: Conversation, isSub = false) => (
+    <Card
+      key={c.id}
+      style={isSub ? { marginLeft: 16, borderLeftWidth: 2, borderLeftColor: p.dim } : undefined}
+      onPress={() => (sel?.id === c.id ? setSel(null) : router.push(`/s/${sid}/c/${c.id}`))}
+      onLongPress={canWrite ? () => setSel({ id: c.id, mode: "menu" }) : undefined}
+      accent={sel?.id === c.id ? p.accent2 : c.running ? p.ok : undefined}
+    >
+      <Row style={{ justifyContent: "space-between" }}>
+        <Txt kind="body" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+          {isSub ? "↳ " : ""}{c.title}
+        </Txt>
+        {c.running ? <Chip text="работает" color={p.ok} /> : null}
+      </Row>
+      <Row style={{ justifyContent: "space-between" }}>
+        <Txt kind="mono" color={p.dim} numberOfLines={1} style={{ flex: 1, fontSize: 12 }}>
+          {isSub && agentName(c.agent_id) ? `${agentName(c.agent_id)} · ` : ""}{c.model}
+        </Txt>
+        <Txt kind="small">{ago(c.updated_at as number | undefined)}</Txt>
+      </Row>
+      {menu(c)}
+    </Card>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }}>
       <TopBar title={proj?.name || "Проект"} back />
@@ -151,29 +192,23 @@ export default function ProjectChats() {
         ) : null}
         {!data && !error && !apiError ? <Loading /> : null}
         {data && data.length === 0 ? <Empty title="Чатов нет" text="Начните новый чат с агентом." /> : null}
-        {data?.map((c) => (
-          <Card
-            key={c.id}
-            onPress={() => (sel?.id === c.id ? setSel(null) : router.push(`/s/${sid}/c/${c.id}`))}
-            onLongPress={canWrite ? () => setSel({ id: c.id, mode: "menu" }) : undefined}
-            accent={sel?.id === c.id ? p.accent2 : c.running ? p.ok : undefined}
-          >
-            <Row style={{ justifyContent: "space-between" }}>
-              <Txt kind="body" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
-                {c.title}
-              </Txt>
-              {c.running ? <Chip text="работает" color={p.ok} /> : null}
-            </Row>
-            <Row style={{ justifyContent: "space-between" }}>
-              <Txt kind="mono" color={p.dim} numberOfLines={1} style={{ flex: 1, fontSize: 12 }}>
-                {c.model}
-              </Txt>
-              <Txt kind="small">{ago(c.updated_at as number | undefined)}</Txt>
-            </Row>
-            {menu(c)}
-          </Card>
-        ))}
-        {canWrite && data && data.length > 0 ? <Txt kind="small">Удерживайте чат, чтобы переименовать, перенести или удалить его.</Txt> : null}
+        {roots.map((c) => {
+          const children = kids.get(c.id) ?? [];
+          const open = !collapsed.has(c.id);
+          return (
+            <View key={c.id} style={{ gap: 12 }}>
+              {card(c)}
+              {children.length ? (
+                <>
+                  <Btn small kind="ghost" title={`${open ? "▾" : "▸"} под-агенты (${children.length})`}
+                    onPress={() => toggle(c.id)} style={{ alignSelf: "flex-start", marginLeft: 16 }} />
+                  {open ? children.map((k) => card(k, true)) : null}
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+        {canWrite && data && data.length > 0 ? <Txt kind="small">Удерживайте чат, чтобы переименовать, перенести или удалить его. Под-чаты под-агентов сгруппированы под своим заданием.</Txt> : null}
         {api && proj && canWrite ? (
           transfer ? <ProjectTransfer sid={sid} pid={pid} name={proj.name} api={api} />
             : <Btn title="Перенос проекта…" kind="ghost" small onPress={() => setTransfer(true)} style={{ alignSelf: "flex-start" }} />
