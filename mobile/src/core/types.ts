@@ -66,6 +66,8 @@ export type Conversation = {
   model: string;
   updated_at?: number;
   running?: boolean;
+  agent_id?: string;
+  parent_id?: string | null; // под-чат оркестратора: id родительского чата, из которого его запустили
   [k: string]: unknown;
 };
 
