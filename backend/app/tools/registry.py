@@ -30,6 +30,8 @@ class ToolContext:
     agent: dict = field(default_factory=lambda: {"id": "fugu", "name": "Fugu", "tools": ["git", "ssh", "memory", "files", "skills"], "skills": ["*"]})
     ssh_preview: dict | None = None  # вывод пробного прогона команды (от шлюза) — показать при подтверждении
     git_status: dict | None = None  # проверенные Git-провайдеры запуска (agent.git_status)
+    orchestrator: Any = None  # ссылка на Agent — для инструментов оркестратора (plan_task, delegate)
+    run: Any = None  # текущий Run — из него под-прогоны берут ключи/бюджет/плательщика
 
     @property
     def project_id(self) -> str:
