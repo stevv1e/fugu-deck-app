@@ -618,3 +618,74 @@ async def test_delegate(client, monkeypatch):
     run.sub = False
     with pytest.raises(ValueError, match="нет агента"):
         await ag.delegate(run, [{"agent_id": "ghost", "task": "x"}])
+
+
+async def test_delegate_repair_rounds(client, monkeypatch):
+    import asyncio as aio
+
+    import pytest
+
+    from app.agent import Run
+
+    login(client)
+    db = main.db()
+    ag = main.agent()
+    monkeypatch.setattr(main.settings, "max_repair_rounds", 2)
+    await db.put_agent("worker", name="Воркер", instructions="делай", tools=["git"], model="")
+    cid = client.post("/api/projects/general/conversations", json={}).json()["id"]
+    runs: list = []
+
+    async def fake_start(scid, model, user=None, project_id="", keys=None, llm_key=None, budget=None, payer_id=None):
+        await db.add_message(scid, "assistant", "готово")
+        done = aio.get_running_loop().create_future()
+        done.set_result(None)
+        r = Run(id=f"s{len(runs)}", conversation_id=scid, model=model, status="done", task=done)
+        runs.append(r)
+        return r
+
+    monkeypatch.setattr(ag, "start", fake_start)
+    run = Run(id="rd", conversation_id=cid, model="sakana:x", project_id="general", user={"id": "u1"})
+    first = await ag.delegate(run, [{"agent_id": "worker", "task": "сделать"}])
+    scid = first["results"][0]["conversation_id"]
+
+    # починка в тот же под-чат: дослано сообщение и перезапуск, в пределах потолка
+    for _ in range(2):
+        out = await ag.delegate(run, [{"conversation_id": scid, "task": "почини 503"}])
+        assert out["results"][0]["conversation_id"] == scid
+    assert run.repairs[scid] == 2
+    msgs = await db.get_messages(scid)
+    assert sum(1 for m in msgs if m["role"] == "user" and "почини" in (m["content"] or "")) == 2
+
+    # третий раунд — потолок (max_repair_rounds=2) превышен
+    with pytest.raises(ValueError, match="раунда починки"):
+        await ag.delegate(run, [{"conversation_id": scid, "task": "ещё раз"}])
+
+    # conversation_id не из этого задания — отказ
+    alien = client.post("/api/projects/general/conversations", json={}).json()["id"]
+    with pytest.raises(ValueError, match="не под-чат этого задания"):
+        await ag.delegate(run, [{"conversation_id": alien, "task": "x"}])
+
+    # ни agent_id, ни conversation_id
+    with pytest.raises(ValueError, match="agent_id.*conversation_id|conversation_id"):
+        await ag.delegate(run, [{"task": "x"}])
+
+
+async def test_plan_includes_check(client, monkeypatch):
+    import app.agent as agentmod
+    from app.agent import Run
+
+    login(client)
+    ag = main.agent()
+
+    class _Res:
+        text = '{"subtasks":[{"role":"бэк","task":"api","access":["ssh"],"check":"curl :80 → 200"}]}'
+        usage = None
+
+    class _Prov:
+        async def stream(self, *a, **k):
+            return _Res()
+
+    monkeypatch.setattr(agentmod, "get_provider", lambda *a, **k: _Prov())
+    run = Run(id="rp", conversation_id="c", model="sakana:x", project_id="general", user={"id": "u1"}, llm_key="k")
+    out = await ag.plan(run, "сайт")
+    assert out["subtasks"][0]["check"] == "curl :80 → 200"  # план несёт проверку для тестера
