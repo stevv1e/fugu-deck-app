@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     ssh_gateway_token_path: str = "/var/run/secrets/ssh-gateway/token"
     llm_timeout_seconds: int = 900  # Ultra может думать несколько минут
     max_agent_steps: int = 30
+    # свёртка истории длинного чата (экономия токенов): модель-сводчик ("" — модель чата; дешёвая экономит больше),
+    # порог объёма живой истории (символы) для свёртки и сколько последних символов оставить дословно
+    summary_model: str = ""
+    compact_history_chars: int = 60000
+    compact_keep_chars: int = 20000
 
     # --- Режим работы ---
     #   standalone — одиночный сервер (пароль владельца, ключи из .env)

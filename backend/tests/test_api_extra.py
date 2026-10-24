@@ -143,6 +143,61 @@ async def test_talk_agent_tools_and_prompt(client):
     assert msgs[0]["content"] == TALK_PROMPT
 
 
+async def test_history_compaction(client, monkeypatch):
+    from app.agent import COMPACT_PREFIX, Run
+
+    login(client)
+    db = main.db()
+    ag = main.agent()
+    cid = client.post("/api/projects/general/conversations", json={}).json()["id"]
+    await db.add_message(cid, "user", "ПЕРВАЯ задача: сделать X")
+    await db.add_message(cid, "assistant", "", tool_calls=[{"id": "t1", "type": "function",
+                         "function": {"name": "read_file", "arguments": '{"path":"a"}'}}])
+    await db.add_message(cid, "tool", "содержимое файла a", tool_call_id="t1", name="read_file")
+    await db.add_message(cid, "user", "ВТОРАЯ задача: сделать Y")
+    await db.add_message(cid, "assistant", "готово")
+    monkeypatch.setattr(main.settings, "compact_history_chars", 10)  # порог низкий — свернётся всё, кроме последнего хода
+    monkeypatch.setattr(main.settings, "compact_keep_chars", 5)
+
+    async def fake_sum(run, prev, folded):
+        assert prev == "" and any("ПЕРВАЯ" in (m.get("content") or "") for m in folded)  # свёрнут первый ход
+        return "СВОДКА первой части"
+
+    monkeypatch.setattr(ag, "_summarize", fake_sum)
+    run = Run(id="rc", conversation_id=cid, model="sakana:x", project_id="general", git_status={})
+    await ag._maybe_compact(run)
+    conv = await db.get_conversation(cid)
+    assert conv["compact_summary"] == "СВОДКА первой части" and conv["compact_through"] is not None
+
+    msgs = await ag._build_messages(cid, await ag.context(cid, run=run))
+    joined = "\n".join(str(m.get("content")) for m in msgs)
+    assert COMPACT_PREFIX.strip() in joined and "СВОДКА первой части" in joined
+    assert "ПЕРВАЯ задача" not in joined and "ВТОРАЯ задача" in joined  # старое свёрнуто, последний ход дословно
+    assert "t1" not in [m.get("tool_call_id") for m in msgs]  # висячего результата инструмента в хвосте нет
+
+    called = 0
+    async def once(run, prev, folded):
+        nonlocal called
+        called += 1
+        return "ещё"
+
+    monkeypatch.setattr(ag, "_summarize", once)
+    await ag._maybe_compact(run)  # хвост мал — повторно не сворачивает
+    assert called == 0
+
+
+def test_render_for_summary():
+    from app.agent import _render_for_summary
+
+    s = _render_for_summary([
+        {"role": "user", "content": "привет"},
+        {"role": "assistant", "content": "думаю", "tool_calls": [{"function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "name": "read_file", "content": "x" * 2000},
+    ])
+    assert "[Пользователь] привет" in s and "[Агент вызвал read_file]" in s and "[Результат read_file]" in s
+    assert len(s) < 2000 + 200  # длинный результат инструмента усечён
+
+
 def test_vision_downscales_big_photo(tmp_path):
     import io
 

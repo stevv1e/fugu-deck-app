@@ -326,6 +326,12 @@ SCHEMA = [
     );
     CREATE INDEX IF NOT EXISTS kb_thoughts_project ON kb_thoughts(project_id, at);
     """,
+    # v21: свёртка истории длинного чата — сводка старых сообщений и граница (id), до которой они свёрнуты.
+    # Старые сообщения не удаляются (видны на телефоне), но модели вместо них уходит краткая сводка (экономия токенов).
+    """
+    ALTER TABLE conversations ADD COLUMN compact_summary TEXT;
+    ALTER TABLE conversations ADD COLUMN compact_through INTEGER;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
