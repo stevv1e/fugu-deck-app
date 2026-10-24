@@ -4,7 +4,7 @@
 - история хранится в формате OpenAI и переводится в блоки Anthropic;
 - thinking-блоки (с подписью) сохраняются и возвращаются без изменений на следующем шаге
   цикла инструментов — этого требует API;
-- кэширование промпта включено (cache_control на уровне запроса).
+- кэш промпта: точка на стабильной части системы (вместе со схемами инструментов) и точка на конце истории.
 """
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ def _user_blocks(content) -> list[dict]:
 def convert_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]:
     system: list[dict] = []
     out: list[dict] = []
+    stable_sys = -1  # индекс последнего стабильного системного блока — на нём точка кэширования
 
     def push(role: str, blocks: list[dict]):
         if out and out[-1]["role"] == role:
@@ -61,6 +62,8 @@ def convert_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]:
         role = m["role"]
         if role == "system":
             system.append({"type": "text", "text": m["content"]})
+            if m.get("_cache"):
+                stable_sys = len(system) - 1
         elif role == "user":
             push("user", _user_blocks(m["content"]))
         elif role == "assistant":
@@ -86,6 +89,13 @@ def convert_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]:
     # API требует, чтобы диалог начинался с user
     if out and out[0]["role"] != "user":
         out.insert(0, {"role": "user", "content": [{"type": "text", "text": "(продолжение)"}]})
+    # Кэш промпта (prefix match, порядок tools → system → messages). Точка на стабильной части системы кэширует её
+    # вместе со всеми схемами инструментов — она не зависит ни от памяти, ни от растущей истории. Вторая точка на
+    # конце диалога доращивает кэш историей, пока память не менялась. Volatile-блок памяти идёт после первой точки.
+    if stable_sys >= 0:
+        system[stable_sys]["cache_control"] = {"type": "ephemeral"}
+        if out:
+            out[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
     return system, out
 
 
@@ -120,7 +130,7 @@ class AnthropicProvider:
                      on_text: OnText, on_tool: OnTool, headers: dict | None = None) -> LLMResult:
         client = _client(key, self.base_url, self.timeout)
         system, msgs = convert_messages(messages)
-        kwargs: dict = dict(model=model, max_tokens=self.max_tokens, messages=msgs, cache_control={"type": "ephemeral"})
+        kwargs: dict = dict(model=model, max_tokens=self.max_tokens, messages=msgs)  # точки кэша расставлены в convert_messages
         if tools:
             kwargs["tools"] = convert_tools(tools)
         if system:

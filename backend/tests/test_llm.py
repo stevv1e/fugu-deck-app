@@ -36,6 +36,38 @@ def test_convert_history_with_tools_and_thinking():
     assert kinds == ["tool_result", "text", "image"]
 
 
+def test_cache_breakpoints_prefix_stable():
+    """Anthropic: точка кэша на стабильной части системы (с ней и схемы инструментов) и на конце истории;
+    volatile-блок памяти идёт после первой точки и её не несёт."""
+    msgs = [
+        {"role": "system", "content": "STABLE", "_cache": True},
+        {"role": "system", "content": "### Память проекта\n- [#1] заметка"},  # volatile — без _cache
+        {"role": "user", "content": "привет"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "[]"},
+    ]
+    system, out = convert_messages(msgs)
+    assert system[0]["text"] == "STABLE" and system[0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in system[1]  # снимок памяти не кэшируется в этой точке
+    assert out[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}  # конец истории
+    # без пометки _cache точек кэша нет (проверка команды, общение)
+    s2, o2 = convert_messages([{"role": "system", "content": "S"}, {"role": "user", "content": "x"}])
+    assert "cache_control" not in s2[0] and "cache_control" not in o2[-1]["content"][-1]
+
+
+def test_openai_compat_merges_system():
+    """Sakana/DeepSeek: два системных блока склеиваются в одно сообщение, _cache снимается."""
+    from app.llm.openai_compat import _strip_meta
+    out = _strip_meta([
+        {"role": "system", "content": "STABLE", "_cache": True},
+        {"role": "system", "content": "MEM"},
+        {"role": "user", "content": "x"},
+    ])
+    assert [m["role"] for m in out] == ["system", "user"]
+    assert out[0]["content"] == "STABLE\n\nMEM" and "_cache" not in out[0]
+
+
 def test_convert_tools():
     t = [{"type": "function", "function": {"name": "a", "description": "d", "parameters": {"type": "object"}}}]
     assert convert_tools(t) == [{"name": "a", "description": "d", "input_schema": {"type": "object"}}]

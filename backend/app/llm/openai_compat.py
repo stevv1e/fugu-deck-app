@@ -108,11 +108,17 @@ class OpenAICompatProvider:
 
 
 def _strip_meta(messages: list[dict]) -> list[dict]:
-    out = []
+    out: list[dict] = []
     for m in messages:
         c = {k: v for k, v in m.items() if not k.startswith("_")}
         for b in m.get("_provider_blocks") or []:  # размышления DeepSeek возвращаются в том же сообщении
             if isinstance(b, dict) and b.get("reasoning_content"):
                 c["reasoning_content"] = b["reasoning_content"]
-        out.append(c)
+        # Систему шлём одним сообщением (стабильная часть + снимок памяти): префикс стабилен, авто-кэш провайдера
+        # (Sakana/DeepSeek) совпадает по нему сам. Точек cache_control тут нет — они только у Anthropic.
+        if out and out[-1].get("role") == "system" == c.get("role") \
+                and isinstance(out[-1].get("content"), str) and isinstance(c.get("content"), str):
+            out[-1]["content"] += "\n\n" + c["content"]
+        else:
+            out.append(c)
     return out
