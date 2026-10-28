@@ -16,6 +16,15 @@ import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, Empty, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
+const fmtLeft = (ms: number) => {
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)} ч${m % 60 ? ` ${m % 60} мин` : ""}` : `${m} мин`;
+};
+// Текущее время нужно вне рендера (react-compiler запрещает Date.now() в теле компонента) — держим в модульных функциях.
+const writeAutoLeftMs = (r: { write_without_confirm?: boolean; write_auto_until?: number }) =>
+  r.write_without_confirm && r.write_auto_until && r.write_auto_until * 1000 > Date.now() ? r.write_auto_until * 1000 - Date.now() : 0;
+const untilFromHours = (hours: number) => Math.floor(Date.now() / 1000) + Math.round(hours * 3600);
+
 export default function Servers() {
   const { cid, team: teamParam } = useLocalSearchParams<{ cid: string; team?: string }>();
   const team = teamParam || null;
@@ -75,6 +84,7 @@ export default function Servers() {
   };
 
   const rights = st?.rights.find((x) => x.agent === agent) ?? { agent, servers: [], read_without_confirm: false };
+  const writeAutoLeft = writeAutoLeftMs(rights);
   const input = { id: f.id.trim(), host: f.host.trim(), port: Number(f.port), user: f.user.trim(), hostKey: f.hostKey.trim() };
   const bad = f.id || f.host || f.hostKey ? serverProblem(input) : null;
 
@@ -82,9 +92,19 @@ export default function Servers() {
     await addServer(await openClusterSession(r, r.api), await keysOf(r), r.user, input, team);
     setF({ id: "", host: "", port: "22", user: "deck-agent", hostKey: "" });
   });
-  const grant = (servers: string[], read: boolean, done: string) => run("rights", done, async (r) => {
-    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read, team, agent);
+  // Любое изменение прав переподписывает их целиком — поэтому текущее разрешение на write-авто (и его срок) несём сквозь,
+  // пока явно не меняем его здесь. writeUntil=0 — выключить.
+  const grant = (
+    servers: string[], read: boolean, done: string,
+    writeUntil: number | undefined = writeAutoLeft ? rights.write_auto_until : undefined,
+  ) => run("rights", done, async (r) => {
+    await setRights(await openClusterSession(r, r.api), await keysOf(r), r.user, servers, read, team, agent, !!writeUntil, writeUntil || undefined);
   });
+  const grantWrite = (hours: number) => {
+    const until = untilFromHours(hours);
+    const human = hours >= 24 ? `${Math.round(hours / 24)} сут` : `${hours} ч`;
+    grant(rights.servers, rights.read_without_confirm, `Изменения без подписи разрешены на ${human}`, until);
+  };
   const drop = (id: string) => run(`rm:${id}`, `Сервер ${id} убран`, async (r) => {
     await removeServer(await openClusterSession(r, r.api), id, team);
   });
@@ -188,6 +208,31 @@ export default function Servers() {
             </Card>
           ) : null}
 
+          {rights.servers.length > 0 ? (
+            <Card accent={writeAutoLeft ? p.warn : undefined}>
+              <Txt kind="h2">Изменения без подписи</Txt>
+              <Txt kind="dim">
+                Обычно каждое изменение на сервере вы подтверждаете подписью. Можно на время разрешить агенту менять
+                без подписи — тогда и вы, и под-агенты не подтверждают каждую команду. Опасное (удаление, очистка диска,
+                смена доступа, фаервол) всё равно только по вашей подписи. Разрешение подписываете вы, оно само истекает,
+                и в журнале видно, что команда прошла без подписи.
+              </Txt>
+              {writeAutoLeft ? (
+                <Row>
+                  <Chip text={`разрешено ещё ${fmtLeft(writeAutoLeft)}`} color={p.warn} />
+                  <Btn small kind="ghost" disabled={!!busy} busy={busy === "rights"} title="Отключить ⌁"
+                    onPress={() => grant(rights.servers, rights.read_without_confirm, "Изменения снова только по подписи", 0)} />
+                </Row>
+              ) : (
+                <Row gap={6} style={{ flexWrap: "wrap" }}>
+                  <Btn small disabled={!!busy} busy={busy === "rights"} title="На 1 час ⌁" onPress={() => grantWrite(1)} />
+                  <Btn small disabled={!!busy} busy={busy === "rights"} title="На 8 часов ⌁" onPress={() => grantWrite(8)} />
+                  <Btn small disabled={!!busy} busy={busy === "rights"} title="На сутки ⌁" onPress={() => grantWrite(24)} />
+                </Row>
+              )}
+            </Card>
+          ) : null}
+
           <Card>
             <Row style={{ justifyContent: "space-between" }}>
               <Txt kind="h2">Журнал команд</Txt>
@@ -204,7 +249,7 @@ export default function Servers() {
                   <Chip text={e.stopped ? "оборвана" : e.error ? "не выполнена" : e.preview ? "пробный прогон" : `код ${e.exit_code}`} />
                 </Row>
                 <Txt kind="mono" numberOfLines={openEntry === i ? undefined : 2} selectable style={{ fontSize: 12.5 }}>{e.command}</Txt>
-                <Txt kind="small">{e.signer ? `подтвердил ${e.signer}` : "чтение без подтверждения"}{e.duration_ms ? ` · ${(e.duration_ms / 1000).toFixed(1)} с` : ""}</Txt>
+                <Txt kind="small">{e.signer ? `подтвердил ${e.signer}` : e.auto ? "изменение без подписи (разрешено вами)" : "чтение без подтверждения"}{e.duration_ms ? ` · ${(e.duration_ms / 1000).toFixed(1)} с` : ""}</Txt>
                 {openEntry === i ? (
                   <Txt kind="mono" selectable style={{ fontSize: 11.5 }}>{e.error || [e.stdout, e.stderr].filter(Boolean).join("\n") || "(вывода нет)"}</Txt>
                 ) : null}
