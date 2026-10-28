@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { validateEnvelope } from "../src/core/actions";
+import { validateAction, validateEnvelope } from "../src/core/actions";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
 import { makeKey, type DeviceKeys } from "../src/core/keys";
 import { ClusterSession } from "../src/core/session";
@@ -47,6 +47,31 @@ test("добавление сервера и права агента — под�
   validateEnvelope(rights);
   await assert.rejects(addServer(s, keys, "anna", { id: "x", host: "h", port: 22, user: "root", hostKey: FP }), /root/);
   assert.equal(calls.length, 2);
+});
+
+test("права агента: изменения без подписи — срок подписывается, новые поля не «лишние»", async () => {
+  const keys = softKeys();
+  const calls: { path: string; body: any }[] = [];
+  const s: ApiSession = { request: async (_m, path, body) => { calls.push({ path, body }); return {} as any; } };
+  const until = Math.floor(Date.now() / 1000) + 3600;
+  await setRights(s, keys, "anna", ["prod-1"], false, null, AGENT, true, until);
+  const r = payload(calls[0].body);
+  assert.deepEqual([r.type, r.write_without_confirm, r.write_auto_until], ["agent_rights", true, until]);
+  validateEnvelope(r);
+});
+
+test("права агента: схема телефона знает write-авто, но требует срок и не терпит лишнего", () => {
+  const base = { type: "agent_rights", agent: AGENT, servers: ["prod-1"], read_without_confirm: false, limit_usd_month: null };
+  // старое приложение без новых полей — по-прежнему годится
+  assert.doesNotThrow(() => validateAction({ ...base }));
+  // с корректным сроком — годится
+  assert.doesNotThrow(() => validateAction({ ...base, write_without_confirm: true, write_auto_until: 1_800_000_000 }));
+  // включили без срока — отклоняется ещё на телефоне (бессрочное разрешение запрещено)
+  assert.throws(() => validateAction({ ...base, write_without_confirm: true }), /срок/);
+  // срок не число — отклоняется
+  assert.throws(() => validateAction({ ...base, write_without_confirm: true, write_auto_until: "скоро" }), /write_auto_until/);
+  // неизвестное поле всё так же «лишнее»
+  assert.throws(() => validateAction({ ...base, bogus: 1 }), /лишнее/);
 });
 
 test("подтверждение команды: подписывается сама команда; для опасной — с введённым именем сервера", async () => {
