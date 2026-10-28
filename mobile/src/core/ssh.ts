@@ -12,11 +12,16 @@ export type ApiSession = { request<T = any>(method: string, path: string, body?:
 export const AGENT = "fugu";
 
 export type SshServer = { id: string; host: string; port: number; user: string; host_key: string; added_by?: string; added?: string };
-export type SshRights = { agent: string; servers: string[]; read_without_confirm: boolean };
+export type SshRights = {
+  agent: string; servers: string[]; read_without_confirm: boolean;
+  // Изменения (write) без подписи каждой команды — до срока write_auto_until (unix-секунды). Danger — никогда.
+  write_without_confirm?: boolean; write_auto_until?: number;
+};
 export type SshState = { servers: SshServer[]; rights: SshRights[]; ca_public_key: string; principal_prefix: string; paused?: boolean };
 /** Запись журнала команд (шлюз хранит 30 дней). */
 export type JournalEntry = {
   time: string; agent: string; server: string; command: string; level: "read" | "write" | "danger"; signer?: string;
+  auto?: boolean; // изменение выполнено без подписи по стоячему разрешению владельца
   exit_code: number; duration_ms: number; stdout?: string; stderr?: string; error?: string; stopped?: boolean; preview?: boolean; timed_out?: boolean;
 };
 
@@ -54,9 +59,23 @@ export async function addServer(s: ApiSession, keys: DeviceKeys, user: string, v
 export const removeServer = (s: ApiSession, id: string, team?: string | null) =>
   s.request("POST", "/v1/ssh/servers/remove", { server: id, ...(team ? { space: team } : {}) });
 
-/** Права агента: полный список серверов и разрешение читать без подтверждения. Подписывается целиком. */
-export async function setRights(s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean, team?: string | null, agent = AGENT): Promise<SshRights> {
-  const signed = await signClusterAction(keys, { type: "agent_rights", agent, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null }, { space: spaceKey(user, team) });
+/**
+ * Права агента: список серверов, чтение без подтверждения и (опционально) изменения без подписи до срока.
+ * Подписывается целиком. write_auto_until — unix-секунды; при включённом write-авто срок обязателен (шлюз/keyguard
+ * это проверяют). Danger всегда с подписью. Поля write-авто кладём только когда включаем — старый бэкенд их игнорирует.
+ */
+export async function setRights(
+  s: ApiSession, keys: DeviceKeys, user: string, servers: string[], readWithoutConfirm: boolean,
+  team?: string | null, agent = AGENT, writeWithoutConfirm = false, writeAutoUntil?: number,
+): Promise<SshRights> {
+  const action: Record<string, unknown> = {
+    type: "agent_rights", agent, servers: [...servers].sort(), read_without_confirm: readWithoutConfirm, limit_usd_month: null,
+  };
+  if (writeWithoutConfirm && writeAutoUntil) {
+    action.write_without_confirm = true;
+    action.write_auto_until = writeAutoUntil;
+  }
+  const signed = await signClusterAction(keys, action, { space: spaceKey(user, team) });
   return s.request<SshRights>("POST", "/v1/ssh/rights", signed);
 }
 
