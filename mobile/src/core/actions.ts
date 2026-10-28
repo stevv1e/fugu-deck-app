@@ -46,7 +46,17 @@ export type ActionBody =
     }
   | { type: 'grant_revoke'; chat: string; proposal: string }
   | { type: 'server_add'; server: string; host: string; port: number; user: string; host_key: string }
-  | { type: 'agent_rights'; agent: string; servers: string[]; read_without_confirm: boolean; limit_usd_month: number | null }
+  | {
+      type: 'agent_rights';
+      agent: string;
+      servers: string[];
+      read_without_confirm: boolean;
+      limit_usd_month: number | null;
+      // Изменения (write) без подписи каждой команды — до срока write_auto_until (unix-секунды). Поля
+      // необязательные: старые приложения их не шлют. Danger — никогда без подписи.
+      write_without_confirm?: boolean;
+      write_auto_until?: number | null;
+    }
   | { type: 'ssh_write'; agent: string; server: string; command: string }
   | { type: 'ssh_danger'; agent: string; server: string; command: string; typed_server: string }
   | { type: 'role_change'; member: string; role: Role }
@@ -154,7 +164,10 @@ export const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 const PROVIDERS = ['anthropic', 'sakana', 'deepseek', 'github', 'gitlab'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
-const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { type: T }>, 'type'>, Check> } = {
+// Обязательные ключи типа (необязательные, с «?», живут в OPTIONAL и в обязательную схему не входят).
+type RequiredKeys<T> = { [K in keyof T]-?: Record<never, never> extends Pick<T, K> ? never : K }[keyof T];
+
+const SCHEMAS: { [T in ActionType]: Record<Exclude<RequiredKeys<Extract<ActionBody, { type: T }>>, 'type'>, Check> } = {
   key_put: {
     provider: oneOf(...PROVIDERS),
     key_hint: str(4, /^[A-Za-z0-9_-]{4}$/),
@@ -218,20 +231,36 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<keyof Extract<ActionBody, { t
   },
 };
 
+// Необязательные поля действия: старые приложения их не шлют, новый бэкенд их принимает. Если поле
+// присутствует — проверяется той же проверкой; отсутствует — не ошибка. Должно совпадать со схемой keyguard.
+const OPTIONAL: Partial<Record<ActionType, Record<string, Check>>> = {
+  agent_rights: {
+    write_without_confirm: bool,
+    write_auto_until: nullable(int(0, 4_102_444_800)), // до ~2100 года, в секундах
+  },
+};
+
 export function validateAction(input: unknown): ActionBody {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw bad('action', 'нужен объект');
   const o = input as Record<string, unknown>;
   const type = o.type;
   if (typeof type !== 'string' || !(type in SCHEMAS)) throw bad('type', 'неизвестный тип действия');
   const schema = SCHEMAS[type as ActionType] as Record<string, Check>;
+  const optional = (OPTIONAL[type as ActionType] ?? {}) as Record<string, Check>;
   for (const k of Object.keys(o)) {
-    if (k !== 'type' && !(k in schema)) throw bad(k, 'лишнее поле');
+    if (k !== 'type' && !(k in schema) && !(k in optional)) throw bad(k, 'лишнее поле');
   }
   for (const [k, check] of Object.entries(schema)) {
     if (!(k in o)) throw bad(k, 'отсутствует');
     check(o[k], k);
   }
+  for (const [k, check] of Object.entries(optional)) {
+    if (k in o) check(o[k], k);
+  }
   const a = o as unknown as ActionBody;
+  // write-авто включается только вместе со сроком — иначе разрешение бессрочно (запрещено)
+  if (a.type === 'agent_rights' && a.write_without_confirm && typeof a.write_auto_until !== 'number')
+    throw bad('write_auto_until', 'при изменениях без подписи нужен срок окончания');
   if (a.type === 'grant' && a.key_until > a.until) throw bad('key_until', 'позже срока спонсорства');
   if (a.type === 'grant' && (a.provider === 'github' || a.provider === 'gitlab') !== (a.model === 'git'))
     throw bad('model', 'для GitHub/GitLab модель — «git», для остальных провайдеров — имя модели');
@@ -309,18 +338,24 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
         lines: [where, `Имя: ${a.server}`, `Вход: ${a.user}@${a.host}:${a.port}`, `Ключ сервера: ${a.host_key}`],
         danger: false,
       };
-    case 'agent_rights':
+    case 'agent_rights': {
+      const auto = a.write_without_confirm && typeof a.write_auto_until === 'number';
       return {
-        title: 'Изменить права агента',
+        title: auto ? 'Разрешить агенту изменения на серверах БЕЗ подписи' : 'Изменить права агента',
         lines: [
           where,
+          auto
+            ? `Изменения без подписи до ${new Date((a.write_auto_until as number) * 1000).toLocaleString('ru-RU')} — опасное всё равно по подписи`
+            : a.read_without_confirm
+              ? 'Команды чтения — без подтверждения'
+              : 'Каждая команда — с подтверждением',
           `Агент: ${a.agent}`,
           `Серверы: ${a.servers.length ? a.servers.join(', ') : 'нет'}`,
-          a.read_without_confirm ? 'Команды чтения — без подтверждения' : 'Каждая команда — с подтверждением',
           `Лимит: ${a.limit_usd_month !== null ? `${usd(a.limit_usd_month)} в месяц` : 'без отдельного лимита'}`,
         ],
-        danger: a.read_without_confirm,
+        danger: auto || a.read_without_confirm,
       };
+    }
     case 'ssh_write':
       return {
         title: 'Выполнить команду на сервере',
