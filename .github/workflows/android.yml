@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   apk:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, deck]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
