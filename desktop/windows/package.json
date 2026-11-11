@@ -1,0 +1,20 @@
+{
+  "name": "fugu-deck-desktop",
+  "version": "0.6.29",
+  "private": true,
+  "description": "Fugu Deck desktop client (Electron over Expo web export)",
+  "main": "main.js",
+  "author": "Fugu Deck",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "io.ghostixel.fugudeck",
+    "productName": "Fugu Deck",
+    "directories": { "output": "release" },
+    "files": ["main.js", "dist/**/*"],
+    "win": { "target": "nsis", "icon": "icon.png" },
+    "nsis": { "oneClick": false, "perMachine": false }
+  }
+}
