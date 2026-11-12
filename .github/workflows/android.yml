@@ -53,7 +53,7 @@ jobs:
         run: >-
           ./gradlew assembleRelease --no-daemon --stacktrace --build-cache
           -PreactNativeArchitectures=arm64-v8a
-          -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+          -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=768m" --max-workers=2
           -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x lintVitalRelease
       - name: Подпись APK своим keystore
         working-directory: mobile/android
