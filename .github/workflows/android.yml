@@ -18,6 +18,8 @@ jobs:
   apk:
     runs-on: [self-hosted, deck]
     timeout-minutes: 45
+    env:
+      ANDROID_HOME: /opt/android-sdk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
