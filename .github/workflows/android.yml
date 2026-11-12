@@ -17,7 +17,7 @@ concurrency:
 jobs:
   apk:
     runs-on: [self-hosted, deck]
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       ANDROID_HOME: /opt/android-sdk
     steps:
