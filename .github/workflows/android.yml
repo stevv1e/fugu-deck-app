@@ -16,10 +16,8 @@ concurrency:
 
 jobs:
   apk:
-    runs-on: [self-hosted, deck]
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      ANDROID_HOME: /opt/android-sdk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
