@@ -95,7 +95,7 @@ export function ModelCatalogPanel({ api, config, onChanged }: {
       <Card>
         <Txt kind="label">поиск и избранное</Txt>
         <ModelPicker models={config.models} ready={config.llm_ready} providerTitles={config.provider_titles} selected={config.default_model}
-          onSelect={(model) => { setAssign("code"); void patch({ ...preferences, roles: { ...preferences.roles, code: model } }); }} />
+          onSelect={(model) => { void patch({ ...preferences, roles: { ...preferences.roles, code: model } }); }} />
       </Card>
       {error ? <Notice text={error} /> : null}
       {note ? <Notice kind="ok" text={note} /> : null}
