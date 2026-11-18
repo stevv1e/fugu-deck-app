@@ -11,7 +11,7 @@ permissions: {contents: read}
 
 jobs:
   exe:
-    runs-on: [self-hosted, deck]
+    runs-on: windows-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,7 @@ jobs:
         run: npx expo export --platform web
       - name: Сборка NSIS (.exe)
         working-directory: desktop/windows
+        shell: bash
         run: |
           rm -rf dist && cp -r ../../mobile/dist ./dist
           npm ci
