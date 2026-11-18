@@ -1,7 +1,7 @@
 # Fugu Local
 
 Второе приложение Fugu Deck — **без сервера**. Сообщения и ключ уходят с устройства прямо провайдеру модели
-(Sakana, Claude, DeepSeek, OpenAI); история чатов хранится только на устройстве.
+(Sakana, Claude, OpenAI, Grok, Gemini, Kimi, Qwen, Mistral, MiniMax, Z.AI, DeepSeek); история чатов хранится только на устройстве.
 
 | | Fugu Deck (`../mobile`) | Fugu Local (этот каталог) |
 |---|---|---|

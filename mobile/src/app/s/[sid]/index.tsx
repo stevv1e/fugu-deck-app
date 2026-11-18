@@ -12,6 +12,7 @@ import { clusterOfSid, parseSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Empty, errText, Field, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { ModeSwitch, TalkChats, useMode } from "@/ui/Modes";
+import { SectionHeading } from "@/ui/SectionHeading";
 import { useTheme } from "@/ui/theme";
 
 export default function Projects() {
@@ -124,10 +125,12 @@ export default function Projects() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={p.accent} />}
       >
-        <Row style={{ justifyContent: "space-between" }}>
-          <Txt kind="label">проекты</Txt>
-          <Txt kind="small">{rec.device.user.display_name || rec.device.user.username}</Txt>
-        </Row>
+        <SectionHeading
+          eyebrow="пространство"
+          title="Проекты"
+          text="Отдельные чаты, память, репозитории и автоматизация для каждой задачи."
+          right={<Chip text={rec.device.user.display_name || rec.device.user.username} color={p.ok} />}
+        />
         {apiError ? <Notice text={apiError} /> : null}
         {error ? <Notice text={error} /> : null}
         {!data && !error && !apiError ? <Loading /> : null}
@@ -193,7 +196,7 @@ export default function Projects() {
           </View>
         ) : data && rec.device.user.role === "owner" ? (
           <Row gap={8}>
-            <Btn title="＋ Проект" kind="ghost" onPress={() => setCreating(true)} style={{ flex: 1 }} />
+            <Btn title="+ Проект" kind="ghost" onPress={() => setCreating(true)} style={{ flex: 1 }} />
             <Btn title="Из файла" kind="ghost" onPress={importFile} busy={busy} style={{ flex: 1 }} />
           </Row>
         ) : null}

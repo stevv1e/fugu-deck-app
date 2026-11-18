@@ -4,10 +4,12 @@ import * as Notifications from "expo-notifications";
 import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef } from "react";
+import { Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { routeFor, startPush } from "@/platform/push";
 import { ServersProvider } from "@/state/servers";
+import { DesktopShell } from "@/ui/DesktopShell";
 import { ThemeProvider, useTheme } from "@/ui/theme";
 
 function Themed() {
@@ -15,7 +17,9 @@ function Themed() {
   return (
     <>
       <StatusBar style={p.dark ? "light" : "dark"} />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.bg }, animation: "slide_from_right" }} />
+      <DesktopShell>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.bg }, animation: "slide_from_right" }} />
+      </DesktopShell>
     </>
   );
 }
@@ -47,7 +51,7 @@ export default function RootLayout() {
       <ThemeProvider>
         <ServersProvider>
           <Themed />
-          <PushRouter />
+          {Platform.OS === "web" ? null : <PushRouter />}
         </ServersProvider>
       </ThemeProvider>
     </SafeAreaProvider>

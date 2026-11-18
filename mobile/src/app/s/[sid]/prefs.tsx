@@ -8,9 +8,13 @@ import { clusterOfSid } from "@/state/cluster";
 import { useApi, useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, Empty, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { AgentsEditor } from "@/ui/AgentsEditor";
+import { SectionHeading } from "@/ui/SectionHeading";
 import { useTheme } from "@/ui/theme";
 
-const PROVIDERS: Record<string, string> = { sakana: "Sakana", anthropic: "Claude (Anthropic)", deepseek: "DeepSeek", openai: "OpenAI" };
+const PROVIDERS: Record<string, string> = {
+  sakana: "Sakana", anthropic: "Claude (Anthropic)", openai: "OpenAI", xai: "Grok (xAI)", google: "Google Gemini",
+  moonshot: "Kimi (Moonshot AI)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM", deepseek: "DeepSeek",
+};
 const GIT: Record<string, string> = { github: "GitHub", gitlab: "GitLab" };
 
 export default function SpacePrefs() {
@@ -38,6 +42,7 @@ export default function SpacePrefs() {
 
   return (
     <Screen title="Модели, репозитории, агенты">
+      {tab === "models" ? <SectionHeading eyebrow="облачные API" title="Модели и провайдеры" text={`${models.length} моделей · ${groups.length} провайдеров. Выбирайте модель под задачу и контролируйте доступ по ключам.`} /> : null}
       {apiError ? <Notice text={apiError} /> : null}
       <Row gap={8}>
         <Btn title="Модели" kind={tab === "models" ? "primary" : "ghost"} onPress={() => setTab("models")} style={{ flex: 1 }} />

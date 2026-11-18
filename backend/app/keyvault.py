@@ -9,7 +9,9 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-ALLOWED = {"anthropic", "sakana", "openai", "xai", "github", "gitlab", "gitlab_url"}
+from .llm.catalog import PROVIDER_TITLES
+
+ALLOWED = {*PROVIDER_TITLES, "github", "gitlab", "gitlab_url"}
 
 
 @dataclass

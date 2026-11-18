@@ -14,6 +14,7 @@ import time
 import httpx
 
 from .config import get_settings
+from .llm.catalog import KEYGUARD_PREFIXES
 
 
 @functools.lru_cache(maxsize=1)
@@ -37,10 +38,8 @@ def llm_base(provider: str) -> str:
     base = _s().keyguard_url.rstrip("/")
     if provider == "anthropic":
         return f"{base}/llm/anthropic"          # SDK добавит /v1/messages
-    if provider == "sakana":
-        return f"{base}/llm/sakana/v1"          # SDK добавит /chat/completions
-    if provider == "deepseek":
-        return f"{base}/llm/deepseek"           # SDK добавит /chat/completions (у DeepSeek путь без /v1)
+    if provider in KEYGUARD_PREFIXES:
+        return f"{base}/llm/{provider}{KEYGUARD_PREFIXES[provider]}"  # SDK добавит /chat/completions
     raise ValueError(f"провайдер {provider} через keyguard не поддерживается")
 
 

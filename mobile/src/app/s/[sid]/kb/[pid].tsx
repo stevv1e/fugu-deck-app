@@ -173,7 +173,7 @@ export default function KnowledgeBase() {
       <TopBar title="База знаний" back right={draft ? undefined : (
         <Row gap={4}>
           <IconBtn glyph="⌕" label="Поиск и Obsidian" onPress={() => setTools(!tools)} />
-          <IconBtn glyph="＋" label="Новая заметка" onPress={() => { setArmed(false); setDraft({ ...EMPTY }); }} />
+          <IconBtn glyph="+" label="Новая заметка" onPress={() => { setArmed(false); setDraft({ ...EMPTY }); }} />
         </Row>
       )} />
       {apiError || err ? <View style={{ padding: 12 }}><Notice text={(apiError || err)!} /></View> : null}

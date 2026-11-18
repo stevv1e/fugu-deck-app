@@ -1,4 +1,4 @@
-"""OpenAI-совместимые API: Sakana (сейчас), OpenAI и xAI (задел)."""
+"""OpenAI-совместимые API моделей из общего каталога."""
 from __future__ import annotations
 
 import hashlib
@@ -8,8 +8,7 @@ import asyncio
 from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, InternalServerError, RateLimitError
 
 from . import LLMError, LLMResult, OnText, OnTool, Usage
-
-BASE_URLS = {"openai": "https://api.openai.com/v1", "xai": "https://api.x.ai/v1"}
+from .catalog import BASE_URLS
 _clients: dict[str, AsyncOpenAI] = {}
 _no_stream_usage: set[str] = set()
 
@@ -30,7 +29,7 @@ class OpenAICompatProvider:
         self.name = name
         from .. import keyguard_client as kgc
         if kgc.enabled():
-            self.base_url = kgc.llm_base(name)   # только sakana; openai/xai keyguard не проксирует
+            self.base_url = kgc.llm_base(name)
         else:
             self.base_url = {"sakana": settings.sakana_base_url, "deepseek": settings.deepseek_base_url}.get(name) or BASE_URLS[name]
         self.max_tokens = settings.sakana_max_tokens

@@ -103,7 +103,7 @@ export default function Skills() {
           </Row>
         </Card>
       ) : canEdit ? (
-        <Btn title="＋ Новый скил" kind="ghost" onPress={() => setDraft({ name: "", description: "", body: "" })} />
+        <Btn title="+ Новый скил" kind="ghost" onPress={() => setDraft({ name: "", description: "", body: "" })} />
       ) : null}
 
       {data && data.items.length === 0 ? <Empty title="Скилов нет" text={canEdit ? "Создайте первый — например, порядок выкатки." : undefined} /> : null}

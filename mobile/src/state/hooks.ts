@@ -7,9 +7,10 @@ import { useServers } from "./servers";
 
 /** API сервера: создаёт сессию (проверяет закреплённый ключ, загружает ключи устройства). */
 export function useApi(sid: string) {
-  const { api } = useServers();
+  const { api, ready } = useServers();
   const [state, setState] = useState<{ api: DeckApi | null; error: string | null }>({ api: null, error: null });
   useEffect(() => {
+    if (!ready) return;
     let alive = true;
     api(sid).then(
       (a) => alive && setState({ api: a, error: null }),
@@ -18,7 +19,7 @@ export function useApi(sid: string) {
     return () => {
       alive = false;
     };
-  }, [api, sid]);
+  }, [api, ready, sid]);
   return state;
 }
 

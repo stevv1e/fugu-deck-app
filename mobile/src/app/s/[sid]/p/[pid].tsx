@@ -180,7 +180,7 @@ export default function ProjectChats() {
           <Btn title="Расписание" kind="ghost" onPress={() => router.push(`/s/${sid}/sched/${pid}`)} style={{ flex: 1 }} />
         </Row>
         {api && proj ? <ProjectRepos pid={pid} repos={proj.repos ?? []} api={api} canWrite={canWrite} onChanged={projects.reload} /> : null}
-        {canWrite && data ? <Btn title="＋ Новый чат" onPress={() => create()} busy={busy} /> : null}
+        {canWrite && data ? <Btn title="+ Новый чат" onPress={() => create()} busy={busy} /> : null}
         {pickAgent ? (
           <Card accent={p.accent}>
             <Txt kind="label">кто ведёт чат</Txt>

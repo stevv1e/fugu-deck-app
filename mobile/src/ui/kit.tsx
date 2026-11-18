@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { formatFp } from "@/core/invite";
 
 import { alpha, MONO, useTheme } from "./theme";
+import { useDesktopLayout } from "./useDesktopLayout";
 
 type TxtKind = "body" | "title" | "h2" | "label" | "dim" | "mono" | "small";
 
@@ -34,13 +35,13 @@ export function Txt({ kind = "body", color, style, children, numberOfLines, sele
 }) {
   const { p } = useTheme();
   const base: TextStyle = {
-    body: { fontSize: 15, lineHeight: 21, color: p.text },
-    title: { fontSize: 26, fontWeight: "700", letterSpacing: 0.5, color: p.text },
-    h2: { fontSize: 18, fontWeight: "700", color: p.text },
-    label: { fontSize: 11, letterSpacing: 1.6, textTransform: "uppercase", color: p.dim, fontFamily: MONO },
-    dim: { fontSize: 14, lineHeight: 20, color: p.dim },
+    body: { fontSize: 15, lineHeight: 23, color: p.text },
+    title: { fontSize: 29, lineHeight: 35, fontWeight: "700", letterSpacing: -0.7, color: p.text },
+    h2: { fontSize: 18, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: p.text },
+    label: { fontSize: 10, fontWeight: "600", letterSpacing: 1.5, textTransform: "uppercase", color: p.dim, fontFamily: MONO },
+    dim: { fontSize: 14, lineHeight: 21, color: p.dim },
     mono: { fontSize: 13, fontFamily: MONO, color: p.text },
-    small: { fontSize: 12, lineHeight: 17, color: p.dim },
+    small: { fontSize: 12, lineHeight: 18, color: p.dim },
   }[kind] as TextStyle;
   const mono = p.monoText && kind !== "label" && kind !== "mono" ? { fontFamily: MONO } : null;
   return (
@@ -59,17 +60,17 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
   footer?: ReactNode;
 }) {
   const { p } = useTheme();
+  const desktop = useDesktopLayout();
   const body = scroll ? (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ padding: desktop ? 30 : 18, paddingBottom: desktop ? 54 : 42, gap: desktop ? 18 : 15, width: "100%", maxWidth: desktop ? 1380 : 680, alignSelf: "center" }} keyboardShouldPersistTaps="handled">
       {children}
     </ScrollView>
   ) : (
     <View style={{ flex: 1 }}>{children}</View>
   );
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={desktop ? [] : ["top", "left", "right", "bottom"]}>
       {title !== undefined && <TopBar title={title} back={back} right={right} />}
-      {/* Клавиатура не должна закрывать поле, в которое печатают (на Android окно под неё само не сжимается). */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         {body}
         {footer}
@@ -80,19 +81,23 @@ export function Screen({ children, scroll = true, title, back = true, right, foo
 
 export function TopBar({ title, back, right }: { title: string; back?: boolean; right?: ReactNode }) {
   const { p } = useTheme();
+  const desktop = useDesktopLayout();
   return (
-    <View style={[s.top, { borderBottomColor: p.line, backgroundColor: p.bg }]}>
+    <View style={[s.top, desktop ? s.topDesktop : null, { borderBottomColor: p.line, backgroundColor: p.bg }]}>
       {back && router.canGoBack() ? (
-        <Pressable onPress={() => router.back()} hitSlop={12} style={s.topBtn} accessibilityLabel="Назад">
-          <Text style={{ color: p.accent, fontSize: 26, lineHeight: 28 }}>‹</Text>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={[s.topBtn, desktop ? s.topBtnDesktop : null, { borderColor: p.line2 }]} accessibilityLabel="Назад">
+          <Text style={{ color: p.accent, fontSize: 24, lineHeight: 26 }}>‹</Text>
         </Pressable>
       ) : (
-        <View style={s.topBtn} />
+        <View style={[s.topBtn, desktop ? s.topBtnDesktop : null]} />
       )}
-      <Txt kind="h2" numberOfLines={1} style={{ flex: 1, textAlign: "center", fontSize: 16 }}>
-        {title}
-      </Txt>
-      <View style={[s.topBtn, { alignItems: "flex-end", width: undefined, minWidth: 36 }]}>{right}</View>
+      <View style={{ flex: 1, paddingHorizontal: 12 }}>
+        <Txt kind={desktop ? "title" : "h2"} numberOfLines={1} style={desktop ? { fontSize: 23, lineHeight: 29 } : { textAlign: "center", fontSize: 17 }}>
+          {title}
+        </Txt>
+        {desktop ? <Txt kind="small">Пространство Fugu Deck</Txt> : null}
+      </View>
+      <View style={[s.topBtn, desktop ? s.topBtnDesktop : null, { alignItems: "flex-end", width: undefined, minWidth: 36 }]}>{right}</View>
     </View>
   );
 }
@@ -116,8 +121,8 @@ export function Btn({ title, onPress, kind = "primary", busy, disabled, style, s
   small?: boolean;
 }) {
   const { p } = useTheme();
-  const bg = { primary: p.accent, danger: p.accent2, ok: p.ok, ghost: "transparent" }[kind];
-  const fg = { primary: p.onAccent, danger: p.onAccent2, ok: p.onAccent, ghost: p.accent }[kind];
+  const bg = { primary: p.accent, danger: p.accent2, ok: p.ok, ghost: p.panel }[kind];
+  const fg = { primary: p.onAccent, danger: p.onAccent2, ok: p.onAccent, ghost: p.text }[kind];
   const off = disabled || busy;
   return (
     <Pressable
@@ -126,23 +131,24 @@ export function Btn({ title, onPress, kind = "primary", busy, disabled, style, s
       accessibilityState={{ disabled: !!off, busy: !!busy }}
       style={({ pressed }) => [
         {
-          backgroundColor: bg,
+          backgroundColor: pressed && !off ? p.panel2 : bg,
           borderColor: kind === "ghost" ? p.line2 : bg,
           borderWidth: 1,
-          borderRadius: p.radius,
-          paddingVertical: small ? 8 : 13,
-          paddingHorizontal: small ? 12 : 18,
+          borderRadius: Math.max(8, p.radius),
+          minHeight: small ? 34 : 46,
+          paddingVertical: small ? 7 : 11,
+          paddingHorizontal: small ? 12 : 17,
           alignItems: "center",
           justifyContent: "center",
           flexDirection: "row",
           gap: 8,
-          opacity: off ? 0.5 : pressed ? 0.75 : 1,
+          opacity: off ? 0.45 : pressed ? 0.82 : 1,
         },
         style,
       ]}
     >
       {busy && <ActivityIndicator size="small" color={fg} />}
-      <Text style={{ color: fg, fontWeight: "700", fontSize: small ? 13 : 15, letterSpacing: 0.6, fontFamily: p.monoText ? MONO : undefined, flexShrink: 1, textAlign: "center" }}>
+      <Text style={{ color: fg, fontWeight: "600", fontSize: small ? 12 : 14, letterSpacing: 0.1, fontFamily: p.monoText ? MONO : undefined, flexShrink: 1, textAlign: "center" }}>
         {title}
       </Text>
     </Pressable>
@@ -152,7 +158,7 @@ export function Btn({ title, onPress, kind = "primary", busy, disabled, style, s
 export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
   const { p } = useTheme();
   return (
-    <View style={{ gap: 6 }}>
+    <View style={{ gap: 7 }}>
       <Txt kind="label">{label}</Txt>
       <TextInput
         placeholderTextColor={p.faint}
@@ -165,9 +171,9 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
             borderColor: p.line2,
             backgroundColor: p.bg2,
             color: p.text,
-            borderRadius: p.radius,
-            paddingHorizontal: 12,
-            paddingVertical: 11,
+            borderRadius: Math.max(8, p.radius),
+            paddingHorizontal: 14,
+            paddingVertical: 12,
             fontSize: 15,
             fontFamily: p.monoText ? MONO : undefined,
           },
@@ -185,17 +191,17 @@ export function Card({ children, accent, style, onPress, onLongPress }: {
   const { p } = useTheme();
   const box: ViewStyle = {
     backgroundColor: p.panel,
-    borderColor: p.line,
+    borderColor: accent ? alpha(accent, 0.5) : p.line,
     borderWidth: 1,
-    borderLeftWidth: accent ? 3 : 1,
+    borderLeftWidth: accent ? 2 : 1,
     borderLeftColor: accent || p.line,
-    borderRadius: p.radius,
-    padding: 14,
-    gap: 8,
+    borderRadius: Math.max(10, p.radius),
+    padding: 16,
+    gap: 10,
   };
   if (!onPress) return <View style={[box, style]}>{children}</View>;
   return (
-    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [box, { backgroundColor: pressed ? p.panel2 : p.panel }, style]}>
+    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [box, { backgroundColor: pressed ? p.panel2 : p.panel, borderColor: pressed ? p.line2 : box.borderColor }, style]}>
       {children}
     </Pressable>
   );
@@ -209,8 +215,8 @@ export function Chip({ text, color }: { text: string; color?: string }) {
   const { p } = useTheme();
   const c = color || p.dim;
   return (
-    <View style={{ borderWidth: 1, borderColor: alpha(c, 0.5), backgroundColor: alpha(c, 0.1), paddingHorizontal: 7, paddingVertical: 2, borderRadius: p.radius ? 99 : 0 }}>
-      <Text style={{ color: c, fontSize: 10.5, fontFamily: MONO, letterSpacing: 0.8, textTransform: "uppercase" }}>{text}</Text>
+    <View style={{ borderWidth: 1, borderColor: alpha(c, 0.32), backgroundColor: alpha(c, 0.07), paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+      <Text style={{ color: c, fontSize: 9.5, fontWeight: "600", fontFamily: MONO, letterSpacing: 0.45, textTransform: "uppercase" }}>{text}</Text>
     </View>
   );
 }
@@ -314,6 +320,8 @@ export function errText(e: unknown): string {
 }
 
 const s = StyleSheet.create({
-  top: { height: 52, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1 },
-  topBtn: { width: 36, justifyContent: "center" },
+  top: { height: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, borderBottomWidth: 1 },
+  topDesktop: { height: 82, paddingHorizontal: 28 },
+  topBtn: { width: 36, minHeight: 36, justifyContent: "center" },
+  topBtnDesktop: { width: 38, minHeight: 38, borderWidth: 1, borderRadius: 9, alignItems: "center" },
 });

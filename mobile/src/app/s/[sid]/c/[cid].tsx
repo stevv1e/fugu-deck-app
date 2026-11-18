@@ -265,9 +265,9 @@ function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | n
   if (item.kind === "user") {
     return (
       <Pressable onLongPress={() => copyText(item.content, onCopied)} delayLongPress={350}
-        style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 4 }}>
-        {!item.mine && item.author ? <Txt kind="small" style={{ textAlign: "right" }}>{item.author}</Txt> : null}
-        <View style={{ backgroundColor: alpha(p.accent, 0.12), borderColor: alpha(p.accent, 0.45), borderWidth: 1, padding: 11, borderRadius: p.radius }}>
+        style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 5 }}>
+        <Txt kind="small" style={{ textAlign: "right", paddingRight: 4 }}>{!item.mine && item.author ? item.author : "Вы"}</Txt>
+        <View style={{ backgroundColor: alpha(p.accent, 0.1), borderColor: alpha(p.accent, 0.32), borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderBottomRightRadius: 5 }}>
           {item.content ? <Txt selectable>{item.content}</Txt> : null}
           {item.attachments?.length ? <AttachmentList items={item.attachments} api={api} /> : null}
         </View>
@@ -276,8 +276,14 @@ function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | n
   }
   if (item.kind === "assistant") {
     return (
-      <Pressable onLongPress={() => !item.streaming && copyText(item.content, onCopied)} delayLongPress={350} style={{ gap: 4 }}>
-        <RichText text={item.content + (item.streaming ? " ▍" : "")} color={p.text} />
+      <Pressable onLongPress={() => !item.streaming && copyText(item.content, onCopied)} delayLongPress={350} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start", maxWidth: "96%" }}>
+        <View style={{ width: 30, height: 30, borderRadius: 9, borderWidth: 1, borderColor: alpha(p.accent, 0.35), backgroundColor: alpha(p.accent, 0.08), alignItems: "center", justifyContent: "center", marginTop: 2 }}>
+          <Text style={{ color: p.accent, fontFamily: MONO, fontWeight: "700", fontSize: 10 }}>FD</Text>
+        </View>
+        <View style={{ flex: 1, gap: 7, backgroundColor: p.panel, borderWidth: 1, borderColor: p.line, borderRadius: 16, borderTopLeftRadius: 5, padding: 13 }}>
+          <Txt kind="small" color={p.accent}>Fugu Agent{item.streaming ? " · отвечает" : ""}</Txt>
+          <RichText text={item.content + (item.streaming ? " ▍" : "")} color={p.text} />
+        </View>
       </Pressable>
     );
   }
@@ -629,27 +635,27 @@ export default function Chat() {
           </View>
         ) : null}
         {canWrite ? (
-          <View style={{ flexDirection: "row", gap: 8, padding: 10, borderTopWidth: atts.length || uploading || attachMenu ? 0 : 1, borderTopColor: p.line, backgroundColor: p.bg, alignItems: "flex-end" }}>
+          <View style={{ flexDirection: "row", gap: 9, padding: 12, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg2, alignItems: "flex-end" }}>
             {!runId ? (
-              <Btn title="📎" kind="ghost" onPress={() => setAttachMenu(!attachMenu)} disabled={!!uploading || sending} style={{ minWidth: 44, paddingHorizontal: 0 }} />
+              <Btn title="+" kind="ghost" onPress={() => setAttachMenu(!attachMenu)} disabled={!!uploading || sending} style={{ minWidth: 46, paddingHorizontal: 0, backgroundColor: p.panel }} />
             ) : null}
             <TextInput
               value={text}
               onChangeText={setText}
-              placeholder={runId ? "Агент работает…" : "Сообщение агенту"}
+              placeholder={runId ? "Агент работает…" : "Сообщение агенту…"}
               placeholderTextColor={p.faint}
               multiline
               style={{
                 flex: 1,
                 maxHeight: 140,
-                minHeight: 44,
+                minHeight: 46,
                 color: p.text,
-                backgroundColor: p.bg2,
+                backgroundColor: p.panel,
                 borderWidth: 1,
                 borderColor: p.line2,
-                borderRadius: p.radius,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
+                borderRadius: 13,
+                paddingHorizontal: 14,
+                paddingVertical: 11,
                 fontSize: 15,
                 fontFamily: p.monoText ? MONO : undefined,
               }}
@@ -657,7 +663,7 @@ export default function Chat() {
             {runId ? (
               <Btn title="Стоп" kind="danger" onPress={() => api?.cancel(runId).catch((e) => setError(errText(e)))} />
             ) : (
-              <Btn title="↑" onPress={send} busy={sending} disabled={(!text.trim() && atts.length === 0) || !!uploading} style={{ minWidth: 52 }} />
+              <Btn title="↑" onPress={send} busy={sending} disabled={(!text.trim() && atts.length === 0) || !!uploading} style={{ minWidth: 48, paddingHorizontal: 0 }} />
             )}
           </View>
         ) : null}

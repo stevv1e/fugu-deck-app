@@ -170,8 +170,7 @@ class Agent:
         if keys.get(provider):
             return keys[provider]
         if not self.settings.is_space:  # одиночный режим: ключи из .env
-            return {"sakana": self.settings.sakana_api_key, "anthropic": self.settings.anthropic_api_key,
-                    "deepseek": self.settings.deepseek_api_key}.get(provider) or None
+            return getattr(self.settings, f"{provider}_api_key", "") or None
         return None
 
     async def git_status(self, providers: dict) -> dict[str, str | None]:

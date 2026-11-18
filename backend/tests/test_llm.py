@@ -129,6 +129,29 @@ def test_deepseek_reasoning_roundtrip():
     assert "deepseek:deepseek-flash" in s.model_list and s.pricing["deepseek:deepseek-v4-pro"][1] == 3.96
 
 
+def test_model_catalog_complete():
+    from app.config import Settings
+    from app.llm import get_provider
+    from app.llm.catalog import BASE_URLS, DEFAULT_MODELS, PRICING, PROVIDER_TITLES
+
+    s = Settings()
+    assert len(DEFAULT_MODELS) >= 40
+    assert set(DEFAULT_MODELS) == set(s.model_list)
+    for full in DEFAULT_MODELS:
+        provider, model = split_model(full)
+        assert provider in PROVIDER_TITLES
+        assert full in PRICING and len(PRICING[full]) >= 2
+        p = get_provider(provider, s)
+        if provider == "anthropic":
+            assert p.base_url is None  # SDK использует официальный адрес
+        else:
+            assert p.base_url
+        if provider not in ("anthropic", "sakana", "deepseek"):
+            assert p.base_url == BASE_URLS[provider]
+    assert get_provider("moonshot", s).base_url == "https://api.moonshot.ai/v1"
+    assert get_provider("google", s).base_url.endswith("/v1beta/openai")
+
+
 def test_long_context_price():
     """Ultra: вход больше 272K — весь запрос по длинному тарифу ($10/$45, кэш $1); у других моделей тариф один."""
     from app.agent import Agent

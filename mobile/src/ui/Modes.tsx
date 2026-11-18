@@ -38,19 +38,20 @@ export function useMode(sid: string): [Mode | null, (m: Mode) => void] {
 /** Рубильник вверху экрана пространства. */
 export function ModeSwitch({ mode, onChange }: { mode: Mode; onChange(m: Mode): void }) {
   const { p } = useTheme();
-  const item = (m: Mode, title: string) => {
+  const item = (m: Mode, title: string, subtitle: string) => {
     const on = mode === m;
     return (
       <Pressable key={m} onPress={() => onChange(m)} accessibilityRole="button" accessibilityState={{ selected: on }}
-        style={{ flex: 1, paddingVertical: 9, alignItems: "center", backgroundColor: on ? p.accent : "transparent", borderRadius: p.radius }}>
-        <Txt style={{ fontWeight: "700", color: on ? p.bg : p.dim }}>{title}</Txt>
+        style={{ flex: 1, paddingVertical: 10, paddingHorizontal: 8, alignItems: "center", backgroundColor: on ? p.panel2 : "transparent", borderRadius: 9, borderWidth: 1, borderColor: on ? p.accent : "transparent" }}>
+        <Txt style={{ fontWeight: "600", color: on ? p.accent : p.text, fontSize: 13 }}>{title}</Txt>
+        <Txt kind="small" style={{ fontSize: 10, color: on ? p.dim : p.faint }}>{subtitle}</Txt>
       </Pressable>
     );
   };
   return (
-    <View style={{ flexDirection: "row", margin: 12, marginBottom: 0, padding: 3, gap: 3, borderWidth: 1, borderColor: p.line2, borderRadius: p.radius, backgroundColor: p.bg2 }}>
-      {item("eng", "Инжиниринг")}
-      {item("talk", "Общение")}
+    <View style={{ flexDirection: "row", margin: 16, marginBottom: 0, padding: 4, gap: 4, borderWidth: 1, borderColor: p.line, borderRadius: 12, backgroundColor: p.bg2 }}>
+      {item("eng", "Инжиниринг", "код и инфраструктура")}
+      {item("talk", "Общение", "быстрые ответы")}
     </View>
   );
 }
@@ -98,7 +99,7 @@ export function TalkChats({ sid, api, apiError }: { sid: string; api: DeckApi | 
       {apiError || error ? <Notice text={(apiError || error)!} /> : null}
       {err ? <Notice text={err} /> : null}
       <Txt kind="small">Разговор с моделью: вопросы, тексты, переводы, фото и документы. Без репозиториев, серверов и памяти проектов — поэтому каждый ответ дешевле.</Txt>
-      {data ? <Btn title="＋ Новый разговор" onPress={create} busy={busy === "new"} /> : null}
+      {data ? <Btn title="+ Новый разговор" onPress={create} busy={busy === "new"} /> : null}
       {!data && !error && !apiError ? <Loading /> : null}
       {data && data.length === 0 ? <Empty title="Разговоров нет" text="Начните новый — например, пришлите фото и спросите, что на нём." /> : null}
       {data?.map((c) => (

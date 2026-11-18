@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ask, titleOf, type StreamFetch } from "../src/core/chat";
-import { buildRequest, costUsd, errorText, parseEvent, splitModel, SseParser, Utf8Stream, validModel } from "../src/core/providers";
+import { buildRequest, costUsd, DEFAULT_MODELS, errorText, parseEvent, PRICES, PROVIDER_IDS, splitModel, SseParser, Utf8Stream, validModel } from "../src/core/providers";
 
 test("splitModel и validModel", () => {
   assert.deepEqual(splitModel("anthropic:claude-opus-5-5"), ["anthropic", "claude-opus-5-5"]);
@@ -11,6 +11,21 @@ test("splitModel и validModel", () => {
   assert.ok(validModel("foo:bar"));
   assert.ok(validModel("nocolon"));
   assert.ok(validModel("sakana:bad name"));
+});
+
+test("каталог: все модели имеют провайдера и цену", () => {
+  assert.ok(DEFAULT_MODELS.length >= 40);
+  assert.equal(new Set(DEFAULT_MODELS).size, DEFAULT_MODELS.length);
+  for (const model of DEFAULT_MODELS) {
+    const [provider, name] = splitModel(model);
+    assert.ok(PROVIDER_IDS.includes(provider), model);
+    assert.ok(name.length > 0, model);
+    assert.ok(PRICES[model]?.length === 2, model);
+    assert.equal(validModel(model), null, model);
+  }
+  assert.equal(buildRequest("moonshot:kimi-k3.1-pro", [], "", "k").url, "https://api.moonshot.ai/v1/chat/completions");
+  assert.equal(buildRequest("xai:grok-4.7", [], "", "k").url, "https://api.x.ai/v1/chat/completions");
+  assert.equal(buildRequest("google:gemini-4-carbon", [], "", "k").url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
 });
 
 test("запрос: OpenAI-совместимый и Anthropic", () => {

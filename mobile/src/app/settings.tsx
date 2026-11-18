@@ -5,6 +5,7 @@ import { Pressable, View } from "react-native";
 import { versionLabel } from "@/core/version";
 import { useServers } from "@/state/servers";
 import { Card, Chip, Row, Screen, Txt } from "@/ui/kit";
+import { SectionHeading } from "@/ui/SectionHeading";
 import { THEMES, useTheme } from "@/ui/theme";
 
 const STORAGE: Record<string, string> = {
@@ -19,6 +20,7 @@ export default function AppSettings() {
   const { caps } = useServers();
   return (
     <Screen title="Настройки">
+      <SectionHeading eyebrow="приложение" title="Ваш Fugu Deck" text="Оформление, защита ключей и сведения о текущей сборке." />
       <Txt kind="label">оформление</Txt>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         {THEMES.map((t) => {

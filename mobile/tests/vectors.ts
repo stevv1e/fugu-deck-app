@@ -40,6 +40,7 @@ const GRANT = {
 const valid: [string, string | null, Record<string, unknown>][] = [
   ["key_put", null, { type: "key_put", provider: "anthropic", key_hint: "6789", ct_sha256: CT }],
   ["key_delete", null, { type: "key_delete", provider: "sakana" }],
+  ["key_delete Kimi", null, { type: "key_delete", provider: "moonshot" }],
   ["mcp_put с токеном", null, { type: "mcp_put", id: "docs", name: "Документация", url: "https://mcp.example.com/mcp", token_hint: "ab_9", ct_sha256: CT }],
   ["mcp_put без токена", null, { type: "mcp_put", id: "weather", name: "Погода", url: "https://weather.example.org/v1/mcp?x=1", token_hint: null, ct_sha256: null }],
   ["mcp_delete", null, { type: "mcp_delete", id: "docs" }],
@@ -85,7 +86,7 @@ const invalid: [string, Record<string, unknown>][] = [
   ["пробел по краям", env({ type: "device_enroll", session_jkt: JKT, confirm_jkt: JKT, name: " iPhone" })],
   ["строка длиннее лимита", env({ type: "device_enroll", session_jkt: JKT, confirm_jkt: JKT, name: "я".repeat(81) })],
   ["key_hint из 5 символов", env({ type: "key_put", provider: "anthropic", key_hint: "56789", ct_sha256: CT })],
-  ["неизвестный провайдер", env({ type: "key_delete", provider: "openai" })],
+  ["неизвестный провайдер", env({ type: "key_delete", provider: "unknown" })],
   ["egress_set: заглавные буквы", env({ type: "egress_set", domains: ["Docs.Python.org"] })],
   ["egress_set: звёздочка", env({ type: "egress_set", domains: ["*.python.org"] })],
   ["egress_set: IP-адрес", env({ type: "egress_set", domains: ["10.0.0.1"] })],

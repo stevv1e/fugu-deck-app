@@ -93,7 +93,7 @@ export function AgentsEditor({ api, canEdit, models }: { api: DeckApi; canEdit: 
             <Btn title="Отмена" kind="ghost" onPress={() => setDraft(null)} style={{ flex: 1 }} />
           </Row>
         </Card>
-      ) : canEdit ? <Btn title="＋ Агент" kind="ghost" onPress={() => edit()} /> : null}
+      ) : canEdit ? <Btn title="+ Агент" kind="ghost" onPress={() => edit()} /> : null}
       {data?.map((a) => (
         <Card key={a.id} onPress={canEdit ? () => edit(a) : undefined}>
           <Row style={{ justifyContent: "space-between" }}>

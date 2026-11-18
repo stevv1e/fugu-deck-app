@@ -13,10 +13,22 @@ import { openClusterSession } from "@/state/clusterSession";
 import { Btn, Card, Chip, errText, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
-const KEY_TITLES: Record<KeyProvider, string> = { anthropic: "Claude (Anthropic)", sakana: "Sakana", deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab" };
+const KEY_TITLES: Record<KeyProvider, string> = {
+  sakana: "Sakana", anthropic: "Claude (Anthropic)", openai: "OpenAI", xai: "Grok (xAI)", google: "Google Gemini",
+  moonshot: "Kimi (Moonshot AI)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM",
+  deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab",
+};
 const HINTS: Partial<Record<KeyProvider, string>> = {
   sakana: "console.sakana.ai → API Keys",
   anthropic: "console.anthropic.com → API Keys",
+  openai: "platform.openai.com → API Keys",
+  xai: "console.x.ai → API Keys",
+  google: "aistudio.google.com → Get API key",
+  moonshot: "platform.moonshot.ai → API Keys",
+  qwen: "Alibaba Cloud Model Studio → API Key (международный регион)",
+  mistral: "console.mistral.ai → API Keys",
+  minimax: "platform.minimax.io → API Keys",
+  zai: "z.ai → API Keys",
   deepseek: "platform.deepseek.com → API Keys",
   github: "github.com → Settings → Developer settings → токен с доступом к нужным репозиториям",
   gitlab: "gitlab.com → Preferences → Access tokens (api, read_repository, write_repository)",

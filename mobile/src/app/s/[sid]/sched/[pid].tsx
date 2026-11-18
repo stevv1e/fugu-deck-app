@@ -131,7 +131,7 @@ export default function Schedules() {
           </Row>
         </Card>
       ) : (
-        <Btn title="＋ Задание" kind="ghost" onPress={() => setForm({ f: emptyForm(cfg.data?.default_model || models[0] || "") })} />
+        <Btn title="+ Задание" kind="ghost" onPress={() => setForm({ f: emptyForm(cfg.data?.default_model || models[0] || "") })} />
       )}
 
       {data && data.length === 0 && !form ? <Empty title="Заданий нет" text="Например: каждое утро — сводка по открытым PR." /> : null}

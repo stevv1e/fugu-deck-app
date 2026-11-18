@@ -30,7 +30,7 @@ export default function Chats() {
   return (
     <Screen title="Fugu Local" back={false} right={<IconBtn glyph="⚙" label="Настройки" onPress={() => router.push("/settings")} />}>
       {noKeys ? (
-        <Notice kind="warn" text="Ключей моделей нет. Добавьте ключ Sakana, Claude или DeepSeek в настройках — запросы пойдут с этого устройства напрямую провайдеру." />
+        <Notice kind="warn" text="Ключей моделей нет. Добавьте ключ нужного провайдера в настройках — запросы пойдут с этого устройства напрямую провайдеру." />
       ) : null}
       <Btn title="＋ Новый чат" onPress={() => router.push({ pathname: "/c/[id]", params: { id: "new" } })} />
       {chats && chats.length === 0 ? <Empty title="Чатов пока нет" text="История хранится только на этом устройстве." /> : null}

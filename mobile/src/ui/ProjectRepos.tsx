@@ -65,7 +65,7 @@ export function ProjectRepos({ pid, repos, api, canWrite, onChanged }: {
       ))}
       {!repos.length ? <Txt kind="small">Агент работает с любым вашим репозиторием, но эти держит в голове. Он добавляет сюда и созданные им.</Txt> : null}
       {err ? <Notice text={err} /> : null}
-      {canWrite && !picking ? <Btn small kind="ghost" title="＋ Добавить репозиторий" onPress={open} style={{ alignSelf: "flex-start" }} /> : null}
+      {canWrite && !picking ? <Btn small kind="ghost" title="+ Добавить репозиторий" onPress={open} style={{ alignSelf: "flex-start" }} /> : null}
       {picking ? (
         <View style={{ gap: 8 }}>
           <Field label="Найти" value={q} onChangeText={setQ} placeholder="имя репозитория" />

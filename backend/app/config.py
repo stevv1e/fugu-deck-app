@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .llm.catalog import DEFAULT_MODELS, PRICING
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -16,37 +18,30 @@ class Settings(BaseSettings):
     # --- Sakana / LLM ---
     sakana_api_key: str = ""
     sakana_base_url: str = "https://api.sakana.ai/v1"
-    # Модели через запятую; первая — модель по умолчанию
-    # провайдер:модель через запятую; первая — по умолчанию
-    # Sakana — все модели с console.sakana.ai/models (версии и псевдонимы текущих версий)
-    models: str = ("sakana:fugu-max-v1.0,sakana:fugu-ultra-v2.0,sakana:sakana-namazu-v1.0,sakana:fugu,"
-                   "sakana:fugu-ultra-v1.1,sakana:fugu-ultra-v1.0,sakana:fugu-cyber-v1.0,"
-                   "sakana:fugu-max,sakana:fugu-ultra,sakana:sakana-namazu,sakana:fugu-cyber,"
-                   "anthropic:claude-sonnet-5,anthropic:claude-opus-5-5,anthropic:claude-haiku-4-5,"
-                   "deepseek:deepseek-flash,deepseek:deepseek-v4-pro")
-    # Цена за 1M токенов: {"модель": [input, output, cached_input]}
-    pricing_json: str = (
-        '{"sakana:fugu-max-v1.0": [2, 6, 0.25], "sakana:fugu-ultra-v2.0": [5, 30, 0.5], "sakana:sakana-namazu-v1.0": [0.95, 4, 0.15],'
-        ' "sakana:fugu-max": [2, 6, 0.25], "sakana:fugu-ultra": [5, 30, 0.5], "sakana:sakana-namazu": [0.95, 4, 0.15],'
-        ' "sakana:fugu-ultra-v1.0": [5, 30, 0.5], "sakana:fugu-ultra-v1.1": [5, 30, 0.5],'
-        # у этих моделей опубликованной цены нет: расход показывается по верхней известной ставке Sakana (оценка сверху)
-        ' "sakana:fugu": [10, 45, 1], "sakana:fugu-cyber": [10, 45, 1], "sakana:fugu-cyber-v1.0": [10, 45, 1],'
-        ' "anthropic:claude-sonnet-5": [2, 10, 0.2, 2.5], "anthropic:claude-opus-5-5": [4, 20, 0.2, 5],'
-        ' "anthropic:claude-haiku-4-5": [1, 5, 0.1, 1.25], "anthropic:claude-fable-5-1": [10, 50, 0.25, 12.5],'
-        # DeepSeek: днём вдвое дороже, чем ночью, — показываем по дневной цене (оценка сверху)
-        ' "deepseek:deepseek-flash": [0.3, 1.2, 0.006], "deepseek:deepseek-v4-pro": [1.32, 3.96, 0.044]}'
-    )
+    # провайдер:модель через запятую; первая — по умолчанию. Каталог — llm/catalog.py.
+    models: str = ",".join(DEFAULT_MODELS)
+    # Цена за 1M токенов: {"модель": [input, output, cached_input, cache_write]}
+    pricing_json: str = json.dumps(PRICING)
     # Тариф длинного контекста: {"модель": [порог токенов входа, input, output, cached_input]} — запрос со входом
     # длиннее порога считается целиком по этим ставкам (Sakana Ultra: больше 272K — $10/$45, кэш $1)
     pricing_long_json: str = (
         '{"sakana:fugu-ultra-v2.0": [272000, 10, 45, 1], "sakana:fugu-ultra": [272000, 10, 45, 1],'
-        ' "sakana:fugu-ultra-v1.0": [272000, 10, 45, 1], "sakana:fugu-ultra-v1.1": [272000, 10, 45, 1]}'
+        ' "sakana:fugu-ultra-v1.0": [272000, 10, 45, 1], "sakana:fugu-ultra-v1.1": [272000, 10, 45, 1],'
+        ' "minimax:MiniMax-M3": [512000, 0.6, 2.4, 0.12]}'
     )
     deepseek_api_key: str = ""   # только для одиночного режима
     deepseek_base_url: str = "https://api.deepseek.com"
     anthropic_api_key: str = ""  # только для одиночного режима; в кластере ключи приходят с телефона
     anthropic_base_url: str = ""
     anthropic_max_tokens: int = 32000
+    openai_api_key: str = ""
+    xai_api_key: str = ""
+    google_api_key: str = ""
+    moonshot_api_key: str = ""
+    qwen_api_key: str = ""
+    mistral_api_key: str = ""
+    minimax_api_key: str = ""
+    zai_api_key: str = ""
     # модель для независимой проверки команд на серверах ("" — та же, что у агента в этом чате)
     review_model: str = ""
     sakana_max_tokens: int = 16000          # keyguard требует max_tokens: без него расход не ограничить

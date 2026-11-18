@@ -5,29 +5,60 @@
  * platform/net.ts, ключи — в platform/secrets.ts. Ключ уходит только провайдеру, которому принадлежит.
  */
 
-export type Provider = "sakana" | "anthropic" | "deepseek" | "openai";
+export type Provider = "sakana" | "anthropic" | "deepseek" | "openai" | "xai" | "google" | "moonshot" | "qwen" | "mistral" | "minimax" | "zai";
 
 export const PROVIDERS: Record<Provider, { title: string; base: string; style: "openai" | "anthropic"; keyUrl: string; keyPrefix?: string }> = {
   sakana: { title: "Sakana", base: "https://api.sakana.ai/v1", style: "openai", keyUrl: "https://console.sakana.ai" },
   anthropic: { title: "Claude", base: "https://api.anthropic.com/v1", style: "anthropic", keyUrl: "https://console.anthropic.com/settings/keys", keyPrefix: "sk-ant-" },
   deepseek: { title: "DeepSeek", base: "https://api.deepseek.com", style: "openai", keyUrl: "https://platform.deepseek.com/api_keys", keyPrefix: "sk-" },
   openai: { title: "OpenAI", base: "https://api.openai.com/v1", style: "openai", keyUrl: "https://platform.openai.com/api-keys", keyPrefix: "sk-" },
+  xai: { title: "Grok (xAI)", base: "https://api.x.ai/v1", style: "openai", keyUrl: "https://console.x.ai/" },
+  google: { title: "Google Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", style: "openai", keyUrl: "https://aistudio.google.com/apikey" },
+  moonshot: { title: "Kimi (Moonshot AI)", base: "https://api.moonshot.ai/v1", style: "openai", keyUrl: "https://platform.moonshot.ai/console/api-keys" },
+  qwen: { title: "Qwen (Alibaba Cloud)", base: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", style: "openai", keyUrl: "https://modelstudio.console.alibabacloud.com/" },
+  mistral: { title: "Mistral AI", base: "https://api.mistral.ai/v1", style: "openai", keyUrl: "https://console.mistral.ai/api-keys" },
+  minimax: { title: "MiniMax", base: "https://api.minimax.io/v1", style: "openai", keyUrl: "https://platform.minimax.io/user-center/basic-information/interface-key" },
+  zai: { title: "Z.AI GLM", base: "https://api.z.ai/api/paas/v4", style: "openai", keyUrl: "https://z.ai/manage-apikey/apikey-list" },
 };
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS) as Provider[];
 
-/** Модели по умолчанию — те же, что на сервере Fugu Deck (backend/app/config.py). Первая — модель нового чата. */
+/** Модели по умолчанию — те же, что на сервере Fugu Deck (backend/app/llm/catalog.py). Первая — модель нового чата. */
 export const DEFAULT_MODELS = [
   "sakana:fugu-max-v1.0", "sakana:fugu-ultra-v2.0", "sakana:sakana-namazu-v1.0", "sakana:fugu",
-  "anthropic:claude-sonnet-5", "anthropic:claude-opus-5-5", "anthropic:claude-haiku-4-5",
+  "sakana:fugu-ultra-v1.1", "sakana:fugu-ultra-v1.0", "sakana:fugu-cyber-v1.0", "sakana:fugu-max",
+  "sakana:fugu-ultra", "sakana:sakana-namazu", "sakana:fugu-cyber",
+  "anthropic:claude-fable-5-2", "anthropic:claude-opus-5-5", "anthropic:claude-sonnet-5-5", "anthropic:claude-haiku-5-5",
+  "anthropic:claude-sonnet-5", "anthropic:claude-haiku-4-5",
+  "openai:gpt-6.2-astra", "openai:gpt-6.2-sol", "openai:gpt-6.1-terra", "openai:gpt-6-luna",
+  "xai:grok-4.7",
+  "google:gemini-4-carbon", "google:gemini-4-argon", "google:gemini-4-hydrogen", "google:gemini-3.8-flash", "google:gemini-3.5-flash-lite",
+  "moonshot:kimi-k3.1-pro", "moonshot:kimi-k3.1-pro-highspeed", "moonshot:kimi-k3",
+  "qwen:qwen4-max", "qwen:qwen3.8-max", "qwen:qwen3.8-flash",
+  "mistral:mistral-large-4", "mistral:mistral-medium-3.5", "mistral:mistral-small-latest",
+  "minimax:MiniMax-M3.1-Flash", "minimax:MiniMax-M3",
+  "zai:glm-5.3", "zai:glm-5.3-flash", "zai:glm-5.3-flashx", "zai:glm-4.7",
   "deepseek:deepseek-flash", "deepseek:deepseek-v4-pro",
 ];
 
 /** Цена за 1M токенов [вход, выход] — для оценки расхода на экране; счёт выставляет провайдер. */
 export const PRICES: Record<string, [number, number]> = {
   "sakana:fugu-max-v1.0": [2, 6], "sakana:fugu-ultra-v2.0": [5, 30], "sakana:sakana-namazu-v1.0": [0.95, 4],
-  "sakana:fugu": [10, 45],
-  "anthropic:claude-sonnet-5": [2, 10], "anthropic:claude-opus-5-5": [4, 20], "anthropic:claude-haiku-4-5": [1, 5],
+  "sakana:fugu-max": [2, 6], "sakana:fugu-ultra": [5, 30], "sakana:sakana-namazu": [0.95, 4],
+  "sakana:fugu-ultra-v1.1": [5, 30], "sakana:fugu-ultra-v1.0": [5, 30],
+  "sakana:fugu": [10, 45], "sakana:fugu-cyber-v1.0": [10, 45], "sakana:fugu-cyber": [10, 45],
+  "anthropic:claude-fable-5-2": [8, 40], "anthropic:claude-opus-5-5": [4, 20],
+  "anthropic:claude-sonnet-5-5": [2, 10], "anthropic:claude-haiku-5-5": [0.1, 0.5],
+  "anthropic:claude-sonnet-5": [2, 10], "anthropic:claude-haiku-4-5": [1, 5],
+  "openai:gpt-6.2-astra": [8, 40], "openai:gpt-6.2-sol": [2, 10], "openai:gpt-6.1-terra": [1, 5], "openai:gpt-6-luna": [0.1, 0.5],
+  "xai:grok-4.7": [2, 6],
+  "google:gemini-4-carbon": [4, 20], "google:gemini-4-argon": [4, 20], "google:gemini-4-hydrogen": [1.5, 7.5],
+  "google:gemini-3.8-flash": [0.75, 3.75], "google:gemini-3.5-flash-lite": [0.3, 2.5],
+  "moonshot:kimi-k3.1-pro": [2, 10], "moonshot:kimi-k3.1-pro-highspeed": [4, 20], "moonshot:kimi-k3": [3, 15],
+  "qwen:qwen4-max": [1.5, 4.5], "qwen:qwen3.8-max": [2, 6], "qwen:qwen3.8-flash": [0.16, 0.47],
+  "mistral:mistral-large-4": [0.7, 2.1], "mistral:mistral-medium-3.5": [1.5, 7.5], "mistral:mistral-small-latest": [0.15, 0.6],
+  "minimax:MiniMax-M3.1-Flash": [0.15, 0.6], "minimax:MiniMax-M3": [0.3, 1.2],
+  "zai:glm-5.3": [1.4, 4.4], "zai:glm-5.3-flash": [0.15, 0.5], "zai:glm-5.3-flashx": [0.37, 1.25], "zai:glm-4.7": [0.6, 2.2],
   "deepseek:deepseek-flash": [0.3, 1.2], "deepseek:deepseek-v4-pro": [1.32, 3.96],
 };
 
