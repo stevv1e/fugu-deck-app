@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
+import { clusterJoinParams } from "@/core/cluster";
 import { parseInvite } from "@/core/invite";
 import { Btn, errText, Notice, Screen, Txt } from "@/ui/kit";
 import { alpha, useTheme } from "@/ui/theme";
@@ -17,9 +18,10 @@ export default function Scan() {
   const onScan = (r: BarcodeScanningResult) => {
     if (handled.current) return;
     try {
-      if (r.data.startsWith("fugudeck://join")) { // приглашение в кластер v2
+      const cluster = clusterJoinParams(r.data);
+      if (cluster) {
         handled.current = true;
-        router.replace({ pathname: "/join", params: Object.fromEntries(new URL(r.data).searchParams) });
+        router.replace({ pathname: "/join", params: cluster });
         return;
       }
       const inv = parseInvite(r.data);

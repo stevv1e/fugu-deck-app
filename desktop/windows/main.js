@@ -18,6 +18,25 @@ function serveBundle(request) {
 }
 
 let mainWindow = null;
+let pendingInvite = null;
+
+function openInvite(raw) {
+  if (typeof raw !== "string" || !/^fugudeck:\/\/join\/?\?/i.test(raw)) return;
+  if (!mainWindow) {
+    pendingInvite = raw;
+    return;
+  }
+  mainWindow.loadURL("fugu-app://bundle/join" + raw.slice(raw.indexOf("?")));
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on("second-instance", (_event, argv) => openInvite(argv.find((arg) => arg.startsWith("fugudeck://"))));
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  openInvite(url);
+});
 
 function createWindow() {
   const headless = process.env.FUGU_HEADLESS === "1";
@@ -38,7 +57,9 @@ function createWindow() {
     },
   });
   mainWindow.on("closed", () => { mainWindow = null; });
-  mainWindow.loadURL("fugu-app://bundle/");
+  const target = pendingInvite ? "fugu-app://bundle/join" + pendingInvite.slice(pendingInvite.indexOf("?")) : "fugu-app://bundle/";
+  pendingInvite = null;
+  mainWindow.loadURL(target);
 }
 
 ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
@@ -78,6 +99,8 @@ app.whenReady().then(() => {
     ] },
   ]);
   if (menu) Menu.setApplicationMenu(menu);
+  app.setAsDefaultProtocolClient("fugudeck");
+  pendingInvite = pendingInvite || process.argv.find((arg) => arg.startsWith("fugudeck://"));
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

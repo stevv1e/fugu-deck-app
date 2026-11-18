@@ -1,6 +1,6 @@
 {
   "name": "fugu-deck-desktop",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Fugu Deck desktop client (Electron over Expo web export)",
   "main": "main.js",
@@ -12,6 +12,7 @@
   "build": {
     "appId": "io.ghostixel.fugudeck",
     "productName": "Fugu Deck",
+    "protocols": [{ "name": "Fugu Deck invitation", "schemes": ["fugudeck"] }],
     "directories": { "output": "release" },
     "files": ["main.js", "preload.js", "dist/**/*"],
     "win": { "target": "nsis", "icon": "icon.png" },

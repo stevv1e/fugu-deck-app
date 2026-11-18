@@ -6,6 +6,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 
+import { clusterJoinParams } from "@/core/cluster";
 import { isInsecure, parseInvite, type Invite } from "@/core/invite";
 import { TrustError } from "@/core/server";
 import type { ServerInfo } from "@/core/types";
@@ -67,6 +68,11 @@ export default function AddServer() {
 
   const submit = () => {
     try {
+      const cluster = clusterJoinParams(text);
+      if (cluster) {
+        router.replace({ pathname: "/join", params: cluster });
+        return;
+      }
       check(parseInvite(text));
     } catch (e) {
       setError({ text: errText(e), hard: false });
@@ -96,17 +102,17 @@ export default function AddServer() {
       {!inv || (!info && !busy && !error?.hard) ? (
         <>
           <Field
-            label="Адрес сервера"
-            placeholder="deck.example.com"
+            label="Адрес сервера или приглашение"
+            placeholder="deck.example.com или fugudeck://join?…"
             value={text}
             onChangeText={setText}
             keyboardType="url"
             returnKeyType="go"
             onSubmitEditing={submit}
-            hint="Можно вставить и ссылку-приглашение fugudeck://… Без HTTPS — только серверы в локальной сети."
+            hint="Вставьте ссылку кластера fugudeck://join?…, приглашение standalone-сервера или его адрес. Камера не нужна."
           />
           {error ? <Notice text={error.text} /> : null}
-          <Btn title="Проверить сервер" onPress={submit} busy={busy} disabled={!text.trim()} />
+          <Btn title="Продолжить" onPress={submit} busy={busy} disabled={!text.trim()} />
           <Btn title="Сканировать QR" kind="ghost" onPress={() => router.replace("/scan")} />
           <Card>
             <Txt kind="label">как это работает</Txt>

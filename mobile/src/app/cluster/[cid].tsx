@@ -10,7 +10,7 @@ import { fetchStatus, type ClusterInvite } from "@/core/cluster";
 import { nativeMtlsAvailable, plainHttp } from "@/platform/http";
 import { enablePush, pushStatus, type PushStatus } from "@/platform/push";
 import { keyProvider } from "@/platform/keys";
-import { getCluster, saveCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
+import { getCluster, removeCluster, removeRefresh, saveCluster, spaceSid, type ClusterRecord } from "@/state/cluster";
 import { requestAccountDelete, requestSpaceDelete, restoreSpace, spaceState, type SpaceState } from "@/state/clusterSession";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, errText, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
@@ -26,6 +26,7 @@ export default function ClusterDevice() {
   const [spaceBusy, setSpaceBusy] = useState(false);
   const [armDelete, setArmDelete] = useState(false); // удаление — в два нажатия, затем биометрия
   const [armAccount, setArmAccount] = useState(false);
+  const [armReset, setArmReset] = useState(false);
   const [push, setPush] = useState<PushStatus | null>(null);
   useEffect(() => { pushStatus().then(setPush, () => setPush("unavailable")); }, []);
   const turnOnPush = async () => {
@@ -182,6 +183,22 @@ export default function ClusterDevice() {
     }
   };
 
+  const resetDevice = async () => {
+    if (!rec) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await (await keyProvider()).remove(rec.alias);
+      await removeRefresh(rec.id);
+      await removeCluster(rec.id);
+      await reloadClusters();
+      router.replace("/");
+    } catch (e) {
+      setBusy(false);
+      setMsg({ kind: "error", text: errText(e) });
+    }
+  };
+
   if (!rec) return <Screen title="Кластер"><Loading /></Screen>;
   // Сертификат для mTLS приходит отдельным запросом статуса. У первого устройства администратора статус «активно»
   // приходит сразу в ответе на регистрацию, и без этой проверки сертификат не был бы получен никогда.
@@ -268,6 +285,18 @@ export default function ClusterDevice() {
           ) : null}
           {!nativeMtlsAvailable() ? <Notice kind="warn" text="Сборка без модуля fd-secure: mTLS недоступен, сервер с обязательным mTLS запрос не примет." /> : null}
         </>
+      )}
+      {armReset ? (
+        <Card accent={p.accent2}>
+          <Txt kind="h2">Сбросить привязку этого устройства?</Txt>
+          <Txt kind="dim">Локальные ключи, сертификат и сессия будут удалены. Аккаунт и пространство на сервере останутся. Для повторного входа понадобится новое приглашение.</Txt>
+          <Row>
+            <Btn title="Да, сбросить" small kind="danger" onPress={resetDevice} disabled={busy} />
+            <Btn title="Отмена" small kind="ghost" onPress={() => setArmReset(false)} />
+          </Row>
+        </Card>
+      ) : (
+        <Btn title="Сбросить это устройство" small kind="ghost" onPress={() => setArmReset(true)} disabled={busy} style={{ alignSelf: "flex-start" }} />
       )}
       {msg ? <Notice kind={msg.kind} text={msg.text} /> : null}
     </Screen>

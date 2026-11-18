@@ -60,6 +60,12 @@ export function parseClusterInvite(link: string): ClusterInvite {
 }
 const isLocalHost = (h: string) => ["localhost", "127.0.0.1", "[::1]"].includes(h);
 
+export function clusterJoinParams(text: string): Record<string, string> | null {
+  if (!/^fugudeck:\/\/join\/?\?/i.test(text.trim())) return null;
+  const c = parseClusterInvite(text);
+  return { api: c.api, iss: c.issuer, join: c.join, hpke: c.hpke, invite: c.invite };
+}
+
 export type Pkce = { verifier: string; challenge: string; state: string };
 
 export function newPkce(): Pkce {

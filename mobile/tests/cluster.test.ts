@@ -12,7 +12,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { buildKeyPut } from "../src/core/apikeys";
 import { b64u, randomId } from "../src/core/bytes";
 import {
-  authorizeUrl, buildEnroll, claims, clusterDeviceId, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, statusRequest,
+  authorizeUrl, buildEnroll, claims, clusterDeviceId, clusterJoinParams, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, statusRequest,
   type ClusterInvite,
 } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
@@ -35,6 +35,10 @@ const HPKE = b64u(p256.getPublicKey(p256.utils.randomSecretKey(), false));
 test("приглашение: только https, один домен, валидный токен, ключ keyguard на кривой", () => {
   const ok = parseClusterInvite("fugudeck://join?api=https://api.deck.acme.kz&iss=https://id.deck.acme.kz/realms/deck&join=https://join.deck.acme.kz&hpke=" + HPKE + "&invite=" + "a".repeat(32));
   assert.equal(ok.issuer, "https://id.deck.acme.kz/realms/deck");
+  assert.deepEqual(clusterJoinParams("fugudeck://join?api=https://api.deck.acme.kz&iss=https://id.deck.acme.kz/realms/deck&join=https://join.deck.acme.kz&hpke=" + HPKE + "&invite=" + "a".repeat(32)), {
+    api: ok.api, iss: ok.issuer, join: ok.join, hpke: ok.hpke, invite: ok.invite,
+  });
+  assert.equal(clusterJoinParams("fugudeck://add?url=https%3A%2F%2Fa.b"), null);
   const base = "fugudeck://join?api=https://api.deck.acme.kz&join=https://join.deck.acme.kz&hpke=" + HPKE + "&invite=" + "a".repeat(32);
   const notOnCurve = b64u(Uint8Array.from([4, ...new Uint8Array(63), 1]));
   assert.throws(() => parseClusterInvite(base.replace(HPKE, notOnCurve) + "&iss=https://id.deck.acme.kz/realms/deck"), /ключа keyguard/, "ключ HPKE не на кривой");

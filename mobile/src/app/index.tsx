@@ -88,7 +88,7 @@ function ConnectActions({ desktop = false }: { desktop?: boolean }) {
   return (
     <Row gap={9} style={{ flexWrap: "wrap" }}>
       <Btn title="+  Сканировать QR" onPress={() => router.push("/scan")} style={desktop ? undefined : { flex: 1, minWidth: 155 }} />
-      <Btn title="Ввести адрес" kind="ghost" onPress={() => router.push("/add")} style={desktop ? undefined : { flex: 1, minWidth: 130 }} />
+      <Btn title="Вставить приглашение" kind="ghost" onPress={() => router.push("/add")} style={desktop ? undefined : { flex: 1, minWidth: 130 }} />
     </Row>
   );
 }
