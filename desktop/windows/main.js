@@ -1,6 +1,9 @@
-const { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
+const { registerNetwork } = require("./net");
+
+registerNetwork(ipcMain);
 
 const dist = path.join(__dirname, "dist");
 
@@ -19,8 +22,17 @@ function serveBundle(request) {
 
 let mainWindow = null;
 let pendingInvite = null;
+const authPending = new Map();
 
-function openInvite(raw) {
+function openLink(raw) {
+  if (typeof raw === "string" && /^fugudeck:\/\/oauth\/?\?/i.test(raw)) {
+    const resolve = mainWindow && authPending.get(mainWindow.webContents.id);
+    if (resolve) {
+      authPending.delete(mainWindow.webContents.id);
+      resolve(raw);
+    }
+    return;
+  }
   if (typeof raw !== "string" || !/^fugudeck:\/\/join\/?\?/i.test(raw)) return;
   if (!mainWindow) {
     pendingInvite = raw;
@@ -32,10 +44,10 @@ function openInvite(raw) {
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on("second-instance", (_event, argv) => openInvite(argv.find((arg) => arg.startsWith("fugudeck://"))));
+app.on("second-instance", (_event, argv) => openLink(argv.find((arg) => arg.startsWith("fugudeck://"))));
 app.on("open-url", (event, url) => {
   event.preventDefault();
-  openInvite(url);
+  openLink(url);
 });
 
 function createWindow() {
@@ -70,6 +82,22 @@ ipcMain.handle("window:maximize", (event) => {
   else win.maximize();
 });
 ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+ipcMain.handle("auth:open", async (event, raw) => {
+  const url = new URL(raw);
+  if (url.protocol !== "https:") throw new Error("Для входа нужен HTTPS");
+  await shell.openExternal(url);
+  return new Promise((resolve, reject) => {
+    const id = event.sender.id;
+    authPending.set(id, resolve);
+    event.sender.once("destroyed", () => {
+      authPending.delete(id);
+      reject(new Error("Окно закрыто"));
+    });
+    setTimeout(() => {
+      if (authPending.delete(id)) reject(new Error("Время входа истекло"));
+    }, 10 * 60 * 1000).unref();
+  });
+});
 ipcMain.handle("run:notify", (event, title, body) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isFocused() || !Notification.isSupported()) return;

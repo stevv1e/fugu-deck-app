@@ -59,7 +59,7 @@ const http0 = plainHttp();
 
 function httpFor(rec: ServerRecord): Http {
   const d = rec.device;
-  if (d?.certPem && rec.mtls !== "off" && nativeMtlsAvailable()) return mtlsHttp(d.keyAlias + ".s");
+  if (d?.certPem && rec.mtls !== "off" && nativeMtlsAvailable()) return mtlsHttp(d.keyAlias + ".s", d.certPem);
   return http0;
 }
 

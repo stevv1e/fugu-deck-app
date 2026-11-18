@@ -8,6 +8,8 @@ import { FdSecure } from "fd-secure";
 import { randomId } from "@/core/bytes";
 import { ApiError, errorFrom, fetchHttp, type Http } from "@/core/http";
 
+import { desktopAvailable, desktopHttp } from "./desktop";
+
 function xhrStream(): Http["stream"] {
   return (req, on) => {
     const xhr = new XMLHttpRequest();
@@ -58,12 +60,14 @@ function xhrStream(): Http["stream"] {
 }
 
 export function plainHttp(): Http {
+  if (desktopAvailable()) return desktopHttp();
   const base = fetchHttp((...a) => fetch(...a));
   return { request: base.request, stream: xhrStream() };
 }
 
-/** Транспорт с клиентским сертификатом: certAlias — псевдоним ключа сессии в чипе. */
-export function mtlsHttp(certAlias: string): Http {
+/** Транспорт с клиентским сертификатом: certAlias — псевдоним ключа сессии в чипе или Desktop-хранилище. */
+export function mtlsHttp(certAlias: string, certPem?: string): Http {
+  if (desktopAvailable()) return desktopHttp(certAlias, certPem);
   const mod = FdSecure;
   if (!mod) throw new Error("mTLS доступен только в сборке с модулем fd-secure");
   return {
@@ -109,4 +113,4 @@ export function mtlsHttp(certAlias: string): Http {
   };
 }
 
-export const nativeMtlsAvailable = () => !!FdSecure;
+export const nativeMtlsAvailable = () => !!FdSecure || desktopAvailable();

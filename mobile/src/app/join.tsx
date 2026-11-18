@@ -11,6 +11,7 @@ import {
   browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
+import { desktopAvailable, desktopAuth } from "@/platform/desktop";
 import { keyProvider } from "@/platform/keys";
 import { plainHttp } from "@/platform/http";
 import { clusterId, getCluster, loadRefresh, removeCluster, saveCluster, saveRefresh } from "@/state/cluster";
@@ -61,7 +62,9 @@ export default function Join() {
       newAlias = alias;
       const pkce = newPkce();
       setStep("Вход в браузере…");
-      const res = await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
+      const res = desktopAvailable()
+        ? await desktopAuth(browserStartUrl(inv, pkce))
+        : await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
       if (res.type !== "success") throw new Error("Вход отменён");
       const code = parseRedirect(res.url, pkce);
       setStep("Получаю токен, привязанный к ключу устройства…");

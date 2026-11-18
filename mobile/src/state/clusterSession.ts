@@ -61,7 +61,7 @@ export async function openClusterSession(c: ClusterRecord, baseUrl: string): Pro
   // Подписи действий в пространстве (разрешение агенту) — для того пространства, с которым сессия работает.
   const name = baseUrl.startsWith(`${c.api}/s/`) ? baseUrl.slice(`${c.api}/s/`.length) : null;
   const space = name === null ? undefined : name === c.user ? `u-${c.user}` : name;
-  return new ClusterSession(mtlsHttp(c.alias + ".s"), server, keys, { deviceId: c.deviceId, space, token: (now) => clusterToken(c, now) });
+  return new ClusterSession(mtlsHttp(c.alias + ".s", c.certPem), server, keys, { deviceId: c.deviceId, space, token: (now) => clusterToken(c, now) });
 }
 
 export type SpaceState = {

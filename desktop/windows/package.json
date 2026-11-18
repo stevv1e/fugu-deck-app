@@ -1,10 +1,11 @@
 {
   "name": "fugu-deck-desktop",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Fugu Deck desktop client (Electron over Expo web export)",
   "main": "main.js",
   "author": "Fugu Deck",
+  "scripts": { "test": "node --test net.test.js" },
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
@@ -14,7 +15,7 @@
     "productName": "Fugu Deck",
     "protocols": [{ "name": "Fugu Deck invitation", "schemes": ["fugudeck"] }],
     "directories": { "output": "release" },
-    "files": ["main.js", "preload.js", "dist/**/*"],
+    "files": ["main.js", "net.js", "preload.js", "dist/**/*"],
     "win": { "target": "nsis", "icon": "icon.png" },
     "nsis": { "oneClick": false, "perMachine": false }
   }
