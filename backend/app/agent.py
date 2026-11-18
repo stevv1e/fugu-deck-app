@@ -123,6 +123,9 @@ class Run:
     sub: bool = False  # это под-прогон оркестратора (у чата есть parent_id): делегировать дальше запрещено
     repairs: dict = field(default_factory=dict)  # под-чат → сколько раз уже отправляли на починку (потолок раундов)
     mcp_tools: dict = field(default_factory=dict, repr=False)  # инструменты MCP-серверов владельца на этот запуск
+    fallback_models: list[str] = field(default_factory=list)
+    scenario: dict | None = None
+    children: list[Run] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
     status: str = "running"
     started_at: float = field(default_factory=time.time)
@@ -169,6 +172,10 @@ class Agent:
             return kgc.token()
         if keys.get(provider):
             return keys[provider]
+        if provider.startswith("custom-"):
+            endpoint = self.settings.custom_llm.get(provider.removeprefix("custom-"))
+            if endpoint:
+                return None if endpoint.get("auth_required") else "not-required"
         if not self.settings.is_space:  # одиночный режим: ключи из .env
             return getattr(self.settings, f"{provider}_api_key", "") or None
         return None
@@ -207,14 +214,16 @@ class Agent:
 
     async def start(self, cid: str, model: str, user: dict | None = None, project_id: str = "",
                     keys: dict | None = None, llm_key: str | None = None, budget=None,
-                    payer_id: str | None = None) -> Run:
+                    payer_id: str | None = None, fallback_models: list[str] | None = None,
+                    scenario: dict | None = None, agent_override: dict | None = None) -> Run:
         if (r := self.active_run(cid)) and r.status == "running":
             raise RuntimeError("В этом чате уже идёт выполнение")
         self._gc()
         keys = dict(keys or {})
         run = Run(id=new_id(), conversation_id=cid, model=model, project_id=project_id, user=user or {},
                   keys=keys, git=self._git_for(keys, cid, (user or {}).get("id", "")), llm_key=llm_key, budget=budget,
-                  payer_id=payer_id or (user or {}).get("id"))
+                  payer_id=payer_id or (user or {}).get("id"), fallback_models=list(fallback_models or []),
+                  scenario=scenario, agent=agent_override)
         self.runs[run.id] = run
         self.active[cid] = run.id
         run.task = asyncio.create_task(self._run(run))
@@ -247,6 +256,9 @@ class Agent:
                            orchestrator=self, run=run)
 
     async def cancel(self, run: Run) -> None:
+        for child in run.children:
+            if child.task and not child.task.done():
+                child.task.cancel()
         if run.task and not run.task.done():
             run.task.cancel()
 
@@ -462,24 +474,43 @@ class Agent:
 
     # ------------------------------------------------------------ вызов модели
     async def _stream(self, run: Run, messages: list[dict]):
-        pname, model = split_model(run.model)
-        key = run.llm_key or self.llm_key(pname, run.keys)
-        if not key:
-            raise LLMError(f"Нет ключа {PROVIDER_TITLES.get(pname, pname)} — разблокируйте ключи в приложении")
-        provider = get_provider(pname, self.settings)
+        candidates = list(dict.fromkeys([run.model, *run.fallback_models]))
+        last: LLMError | None = None
+        for index, full in enumerate(candidates):
+            pname, model = split_model(full)
+            key = run.llm_key or self.llm_key(pname, run.keys)
+            if not key:
+                last = LLMError(f"Нет ключа {PROVIDER_TITLES.get(pname, pname)} — разблокируйте ключи в приложении")
+                continue
+            run.model = full
+            provider = get_provider(pname, self.settings)
+            started = False
 
-        async def on_text(t: str):
-            await run.emit("text", delta=t)
+            async def on_text(t: str):
+                nonlocal started
+                started = True
+                await run.emit("text", delta=t)
 
-        async def on_tool(i: int, name: str):
-            await run.emit("tool_call_building", index=i, name=name)
+            async def on_tool(i: int, name: str):
+                nonlocal started
+                started = True
+                await run.emit("tool_call_building", index=i, name=name)
 
-        hdrs = kgc.headers(run.conversation_id, run.user.get("id", "")) if kgc.enabled() else None
-        res = await provider.stream(key, model, messages, [t.schema() for t in self.tools_for(run)], on_text, on_tool,
-                                    headers=hdrs)
-        for c in res.tool_calls:
-            c["id"] = c["id"] or f"call_{new_id()}"
-        return res
+            hdrs = kgc.headers(run.conversation_id, run.user.get("id", "")) if kgc.enabled() else None
+            try:
+                res = await provider.stream(key, model, messages, [t.schema() for t in self.tools_for(run)], on_text, on_tool,
+                                            headers=hdrs)
+            except LLMError as e:
+                last = e
+                # Повтор после уже начавшегося ответа мог бы оплатить второй запрос и смешать два разных результата.
+                if started or index + 1 == len(candidates):
+                    raise
+                await run.emit("model_fallback", failed_model=full, model=candidates[index + 1], message=str(e)[:300])
+                continue
+            for c in res.tool_calls:
+                c["id"] = c["id"] or f"call_{new_id()}"
+            return res
+        raise last or LLMError("Нет доступной модели")
 
     async def _review(self, run: Run, args: dict, preview: dict | None) -> str | None:
         """Независимая проверка команды на сервере перед подписью: отдельный запрос к модели без контекста агента —
@@ -638,7 +669,8 @@ class Agent:
             return [t for t in REGISTRY.values() if t.group == "files"]
         git_ok = any(run.git_status.values()) if run.git_status is not None else True
         # доступы агента: какие группы инструментов ему даны (по умолчанию — все)
-        allowed = set((run.agent or {}).get("tools") or AGENT_TOOLS)
+        raw_allowed = (run.agent or {}).get("tools")
+        allowed = set(raw_allowed if isinstance(raw_allowed, list) else AGENT_TOOLS)
         owner = is_owner(run.user or {}, self.settings)  # агентов создаёт и меняет только владелец
         out = [t for t in REGISTRY.values()
                if (t.group not in AGENT_TOOLS or t.group in allowed)
@@ -743,6 +775,99 @@ class Agent:
             await self.db.audit(run.conversation_id, name, args, approved, False, err)
             return json.dumps({"error": err}, ensure_ascii=False)
 
+    # ------------------------------------------------------------ ручная SSH-команда Windows Workspace
+    async def start_terminal(self, cid: str, user: dict, server: str, command: str,
+                             why: str = "", preview: str = "") -> Run:
+        conv = await self.db.get_conversation(cid) or {}
+        keys: dict = {}  # ключи моделей не нужны ручному SSH-запуску
+        run = Run(id=new_id(), conversation_id=cid, model="terminal", project_id=conv.get("project_id") or "",
+                  user=user, keys=keys, git=self._git_for(keys, cid, user.get("id", "")),
+                  agent=await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT))
+        args = {"server": server, "command": command, "why": why}
+        if preview:
+            args["preview"] = preview
+        self.runs[run.id] = run
+        run.task = asyncio.create_task(self._run_terminal(run, args))
+        await self._publish("run.started", run)
+        return run
+
+    async def _run_terminal(self, run: Run, args: dict) -> None:
+        call = {"id": f"terminal_{run.id}", "function": {"name": "ssh_exec", "arguments": json.dumps(args)}}
+        try:
+            await run.emit("start", model="terminal")
+            raw = await self._exec_tool(run, call)
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError:
+                result = {"output": raw}
+            await run.emit("terminal_result", result=result)
+            run.status = "done"
+            await run.emit("done")
+        except asyncio.CancelledError:
+            run.status = "cancelled"
+            await run.emit("cancelled")
+        except Exception as e:
+            run.status = "error"
+            await run.emit("error", message=f"{e.__class__.__name__}: {e}")
+        finally:
+            run.finished_at = time.time()
+            run.keys.clear()
+            for git in run.git.values():
+                if git not in self.providers.values():
+                    await git.http.aclose()
+            run.git.clear()
+            for fut in run.approvals.values():
+                if not fut.done():
+                    fut.cancel()
+            async with run.cond:
+                run.cond.notify_all()
+            await self._publish("run.finished", run)
+
+    # ------------------------------------------------------------ детерминированный multi-model сценарий
+    async def _scenario_step(self, run: Run, stage: str, model: str, task: str) -> str:
+        await run.emit("scenario_stage", stage=stage, model=model)
+        conv = await self.db.create_conversation(model, run.project_id, run.user.get("id"),
+                                                  title=f"{stage} · сценарий", parent_id=run.conversation_id)
+        await self.db.add_message(conv["id"], "user", task,
+                                  meta={"author": "Fugu Scenario", "author_id": run.user.get("id")})
+        override = None if stage == "work" else {
+            "id": "scenario", "name": stage, "tools": [], "skills": [], "instructions": task,
+        }
+        child = await self.start(conv["id"], model, run.user, run.project_id, dict(run.keys),
+                                 llm_key=run.llm_key, budget=run.budget, payer_id=run.payer_id,
+                                 fallback_models=run.fallback_models, agent_override=override)
+        run.children.append(child)
+        try:
+            if child.task:
+                await asyncio.gather(child.task, return_exceptions=True)
+            if child.status != "done":
+                errors = [e.get("message") for e in child.events if e.get("type") == "error"]
+                raise LLMError(f"Этап {stage} не выполнен: {errors[-1] if errors else child.status}")
+            return (await self._sub_result("scenario", conv["id"], child))["result"]
+        finally:
+            if child in run.children:
+                run.children.remove(child)
+
+    async def _run_scenario(self, run: Run) -> None:
+        rows = await self.db.get_messages(run.conversation_id)
+        original = next((m.get("content") or "" for m in reversed(rows) if m["role"] == "user"), "")
+        models = run.scenario or {}
+        worker = await self._scenario_step(run, "work", models["worker"], original)
+        review_task = ("Независимо проверь результат другого ИИ. Ничего не изменяй и не вызывай инструменты. "
+                       "Укажи конкретные ошибки, пробелы и риски; если всё хорошо, скажи почему.\n\n"
+                       f"Исходная задача:\n{original}\n\nРезультат исполнителя:\n{worker}")
+        review = await self._scenario_step(run, "review", models["review"], review_task)
+        summary_task = ("Сделай краткую сводку работы по-русски: результат, важные замечания ревью и следующий шаг. "
+                        "Ничего не изменяй и не вызывай инструменты.\n\n"
+                        f"Результат:\n{worker}\n\nРевью:\n{review}")
+        summary = await self._scenario_step(run, "summary", models["summary"], summary_task)
+        content = f"{worker}\n\n## Независимое ревью\n{review}\n\n## Сводка\n{summary}"
+        meta = {"model": "multi:code-review-summary", "scenario": "code-review-summary",
+                "models": [models["worker"], models["review"], models["summary"]]}
+        await self.db.add_message(run.conversation_id, "assistant", content, meta=meta)
+        await run.emit("text", delta=content)
+        await run.emit("message_saved", has_tools=False)
+
     # ------------------------------------------------------------ основной цикл
     async def _run(self, run: Run) -> None:
         cid = run.conversation_id
@@ -750,13 +875,19 @@ class Agent:
         try:
             await run.emit("start", model=run.model)
             conv = await self.db.get_conversation(cid) or {}
-            run.agent = await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT) or await self.db.get_agent(DEFAULT_AGENT)
+            if run.scenario:
+                await self._run_scenario(run)
+                run.status = "done"
+                await run.emit("done")
+                return
+            run.agent = run.agent or await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT) or await self.db.get_agent(DEFAULT_AGENT)
             run.sub = bool(conv.get("parent_id"))  # под-прогон: delegate/plan ему недоступны (глубина 1)
-            git_allowed = run.project_id != TALK_PROJECT and "git" in ((run.agent or {}).get("tools") or AGENT_TOOLS)
+            agent_tools = (run.agent or {}).get("tools")
+            agent_tools = agent_tools if isinstance(agent_tools, list) else list(AGENT_TOOLS)
+            git_allowed = run.project_id != TALK_PROJECT and "git" in agent_tools
             run.git_status = await self.git_status(run.git) if git_allowed else {}
             # MCP — только в личных пространствах с keyguard и если агенту дан доступ «mcp»
-            if (run.project_id != TALK_PROJECT and mcp_client.enabled() and self.settings.space_kind != "team"
-                    and "mcp" in ((run.agent or {}).get("tools") or AGENT_TOOLS)):
+            if run.project_id != TALK_PROJECT and mcp_client.enabled() and self.settings.space_kind != "team" and "mcp" in agent_tools:
                 run.mcp_tools = await mcp_client.tools()
             for step in range(self.settings.max_agent_steps):
                 if run.budget and (why := await run.budget()):

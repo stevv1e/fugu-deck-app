@@ -126,6 +126,12 @@ class AnthropicProvider:
         self.timeout = settings.llm_timeout_seconds
         self.max_tokens = settings.anthropic_max_tokens
 
+    async def list_models(self, key: str, headers: dict | None = None) -> list[str]:
+        client = _client(key, self.base_url, min(self.timeout, 30))
+        kwargs = {"extra_headers": headers} if headers else {}
+        page = await client.models.list(**kwargs)
+        return [m.id for m in page.data]
+
     async def stream(self, key: str, model: str, messages: list[dict], tools: list[dict],
                      on_text: OnText, on_tool: OnTool, headers: dict | None = None) -> LLMResult:
         client = _client(key, self.base_url, self.timeout)

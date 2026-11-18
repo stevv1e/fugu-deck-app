@@ -29,11 +29,24 @@ class OpenAICompatProvider:
         self.name = name
         from .. import keyguard_client as kgc
         if kgc.enabled():
+            if name.startswith("custom-"):
+                raise LLMError("Пользовательские endpoint не проходят через Keyguard")
             self.base_url = kgc.llm_base(name)
+        elif name.startswith("custom-"):
+            endpoint = settings.custom_llm.get(name.removeprefix("custom-"))
+            if not endpoint:
+                raise LLMError("Пользовательский endpoint удалён — перезапустите приложение или добавьте его заново")
+            self.base_url = endpoint["base_url"]
         else:
             self.base_url = {"sakana": settings.sakana_base_url, "deepseek": settings.deepseek_base_url}.get(name) or BASE_URLS[name]
         self.max_tokens = settings.sakana_max_tokens
         self.timeout = settings.llm_timeout_seconds
+
+    async def list_models(self, key: str, headers: dict | None = None) -> list[str]:
+        client = _client(self.base_url, key or "not-required", min(self.timeout, 30))
+        kwargs = {"extra_headers": headers} if headers else {}
+        page = await client.models.list(**kwargs)
+        return [m.id for m in page.data]
 
     @staticmethod
     async def _create(client: AsyncOpenAI, kwargs: dict):

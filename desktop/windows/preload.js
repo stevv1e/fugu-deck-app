@@ -4,4 +4,5 @@ contextBridge.exposeInMainWorld("fuguDesktop", {
   minimize: () => ipcRenderer.invoke("window:minimize"),
   maximize: () => ipcRenderer.invoke("window:maximize"),
   close: () => ipcRenderer.invoke("window:close"),
+  notify: (title, body) => ipcRenderer.invoke("run:notify", title, body),
 });

@@ -77,6 +77,8 @@ class GitProvider(ABC):
     @abstractmethod
     async def ci_status(self, repo: str, ref: str | None) -> list[dict]: ...
     @abstractmethod
+    async def compare(self, repo: str, base: str, head: str) -> dict: ...
+    @abstractmethod
     async def search_code(self, repo: str, query: str, limit: int) -> dict: ...
 
 
@@ -247,6 +249,13 @@ class GitHubProvider(GitProvider):
         return [{"name": r["name"], "status": r["status"], "conclusion": r.get("conclusion"),
                  "branch": r.get("head_branch"), "url": r["html_url"], "created_at": r["created_at"]} for r in runs]
 
+    async def compare(self, repo, base, head):
+        path = f"/repos/{repo}/compare/{quote(base, safe='')}...{quote(head, safe='')}"
+        d = (await self._req("GET", path)).json()
+        return {"base": base, "head": head, "ahead_by": d.get("ahead_by", 0), "behind_by": d.get("behind_by", 0),
+                "files": [{"path": f["filename"], "status": f.get("status"), "patch": f.get("patch") or ""}
+                          for f in d.get("files", [])[:300]]}
+
 
 # ---------------------------------------------------------------- GitLab
 class GitLabProvider(GitProvider):
@@ -387,3 +396,13 @@ class GitLabProvider(GitProvider):
         pipes = (await self._req("GET", f"/projects/{self._pid(repo)}/pipelines", params=params)).json()
         return [{"name": f"pipeline #{p['id']}", "status": p["status"], "branch": p.get("ref"),
                  "url": p.get("web_url"), "created_at": p.get("created_at")} for p in pipes]
+
+    async def compare(self, repo, base, head):
+        d = (await self._req("GET", f"/projects/{self._pid(repo)}/repository/compare",
+                             params={"from": base, "to": head})).json()
+        files = []
+        for item in d.get("diffs", [])[:300]:
+            status = "added" if item.get("new_file") else "removed" if item.get("deleted_file") else "modified"
+            files.append({"path": item.get("new_path") or item.get("old_path"), "status": status,
+                          "patch": item.get("diff") or ""})
+        return {"base": base, "head": head, "ahead_by": len(d.get("commits", [])), "behind_by": 0, "files": files}

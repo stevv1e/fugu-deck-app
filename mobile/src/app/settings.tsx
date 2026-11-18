@@ -1,10 +1,11 @@
 /** Настройки приложения: оформление и что защищает ключи на этом телефоне. */
 import Constants from "expo-constants";
+import { router } from "expo-router";
 import { Pressable, View } from "react-native";
 
 import { versionLabel } from "@/core/version";
 import { useServers } from "@/state/servers";
-import { Card, Chip, Row, Screen, Txt } from "@/ui/kit";
+import { Btn, Card, Chip, Row, Screen, Txt } from "@/ui/kit";
 import { SectionHeading } from "@/ui/SectionHeading";
 import { THEMES, useTheme } from "@/ui/theme";
 
@@ -53,6 +54,13 @@ export default function AppSettings() {
           );
         })}
       </View>
+
+      <Txt kind="label">расширения</Txt>
+      <Card accent={p.accent}>
+        <Txt kind="h2">Git-модули</Txt>
+        <Txt kind="small">Каталог, установка по commit, разрешения, offline-запуск и песочница.</Txt>
+        <Btn small kind="ghost" title="Открыть модули" onPress={() => router.push("/modules")} style={{ alignSelf: "flex-start" }} />
+      </Card>
 
       <Txt kind="label">безопасность телефона</Txt>
       <Card>

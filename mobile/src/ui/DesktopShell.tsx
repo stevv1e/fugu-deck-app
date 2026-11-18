@@ -1,11 +1,12 @@
 import { router, usePathname } from "expo-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Image, Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 
 import { useServers } from "@/state/servers";
 
 import { alpha, MONO, useTheme } from "./theme";
 import { DesktopConversationContext, DesktopConversationSidebar } from "./DesktopChatPanels";
+import { DesktopCommandPalette } from "./DesktopCommandPalette";
 import { useDesktopLayout } from "./useDesktopLayout";
 
 type DesktopBridge = {
@@ -67,6 +68,7 @@ export function DesktopShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { p } = useTheme();
   const { servers, get } = useServers();
+  const [palette, setPalette] = useState(false);
   const sid = /^\/s\/([^/]+)/.exec(pathname)?.[1];
   const chatMatch = /^\/s\/([^/]+)\/c\/([^/]+)/.exec(pathname);
   const current = sid ? get(sid) : undefined;
@@ -77,12 +79,20 @@ export function DesktopShell({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        router.push("/");
+        setPalette(true);
+      }
+      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === "t" && sid) {
+        event.preventDefault();
+        router.push(`/s/${sid}/workspace`);
+      }
+      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && sid) {
+        event.preventDefault();
+        router.push(`/s/${sid}`);
       }
     };
     globalThis.addEventListener("keydown", onKey);
     return () => globalThis.removeEventListener("keydown", onKey);
-  }, [desktop]);
+  }, [desktop, sid]);
 
   if (!desktop) return children;
 
@@ -106,18 +116,19 @@ export function DesktopShell({ children }: { children: ReactNode }) {
         </View>
       </View>
       <View style={[styles.menubar, { borderColor: p.line }]}>
-        <Text style={[styles.menuText, { color: p.dim }]}>Файл</Text>
-        <Text style={[styles.menuText, { color: p.dim }]}>Правка</Text>
-        <Text style={[styles.menuText, { color: p.dim }]}>Вид</Text>
-        <Text style={[styles.menuText, { color: p.dim }]}>Пространство</Text>
-        <Pressable onPress={() => go("/")} style={[styles.command, { backgroundColor: p.panel, borderColor: p.line }]}>
-          <Text style={{ color: p.dim, fontSize: 11 }}>Перейти к пространству…</Text>
+        <Pressable onPress={() => go(sid ? `/s/${sid}` : "/")}><Text style={[styles.menuText, { color: p.dim }]}>Файл</Text></Pressable>
+        <Pressable onPress={() => setPalette(true)}><Text style={[styles.menuText, { color: p.dim }]}>Правка</Text></Pressable>
+        <Pressable onPress={bridge?.maximize}><Text style={[styles.menuText, { color: p.dim }]}>Вид</Text></Pressable>
+        <Pressable onPress={() => go(sid ? `/s/${sid}/workspace` : "/")}><Text style={[styles.menuText, { color: p.dim }]}>Пространство</Text></Pressable>
+        <Pressable onPress={() => setPalette(true)} style={[styles.command, { backgroundColor: p.panel, borderColor: p.line }]}>
+          <Text style={{ color: p.dim, fontSize: 11 }}>Команда или пространство…</Text>
           <Text style={{ color: p.faint, fontFamily: MONO, fontSize: 10 }}>Ctrl K</Text>
         </Pressable>
       </View>
       <View style={styles.workspace}>
         <View style={[styles.rail, { backgroundColor: p.bg2, borderColor: p.line }]}>
-          <RailButton glyph="▤" label="Пространства и чаты" active={!pathname.includes("/prefs") && pathname !== "/settings" && pathname !== "/modules"} onPress={() => go(sid ? `/s/${sid}` : "/")} />
+          <RailButton glyph="▤" label="Пространства и чаты" active={!pathname.includes("/prefs") && !pathname.includes("/workspace") && pathname !== "/settings" && pathname !== "/modules"} onPress={() => go(sid ? `/s/${sid}` : "/")} />
+          <RailButton glyph="⌘" label="Windows Workspace" active={pathname.includes("/workspace")} onPress={() => go(sid ? `/s/${sid}/workspace` : "/")} />
           <RailButton glyph="◇" label="Модели и провайдеры" active={pathname.includes("/prefs")} onPress={() => go(modelsPath)} />
           <RailButton glyph="▦" label="Git-модули" active={pathname === "/modules"} onPress={() => go("/modules")} />
           <RailButton glyph="⌁" label="Сервер и устройства" onPress={() => go(serverPath)} />
@@ -133,6 +144,7 @@ export function DesktopShell({ children }: { children: ReactNode }) {
         <Text style={[styles.statusText, { color: p.faint }]}>{current?.url || "Локальные настройки"}</Text>
         <Text style={[styles.statusText, styles.statusRight, { color: p.faint }]}>Fugu Deck · Windows</Text>
       </View>
+      {palette ? <DesktopCommandPalette visible sid={sid} onClose={() => setPalette(false)} /> : null}
     </View>
   );
 }

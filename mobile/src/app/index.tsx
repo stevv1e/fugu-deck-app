@@ -182,7 +182,7 @@ function DesktopHome({ servers, clusters, ready }: { servers: ServerRecord[]; cl
         <View style={{ width: 275, borderLeftWidth: 1, borderLeftColor: p.line, backgroundColor: p.bg2, padding: 18, gap: 20 }}>
           <View><Txt kind="label">сводка</Txt><View style={{ marginTop: 12, gap: 12 }}><Row style={{ justifyContent: "space-between" }}><Txt kind="dim">Подключено</Txt><Txt color={p.ok}>{connected}</Txt></Row><Row style={{ justifyContent: "space-between" }}><Txt kind="dim">Пространств</Txt><Txt>{servers.length + clusters.length}</Txt></Row><Row style={{ justifyContent: "space-between" }}><Txt kind="dim">Модели</Txt><Txt>Облачные API</Txt></Row></View></View>
           <Card><Txt kind="label">безопасность</Txt><Txt kind="small">✓ Проверка ключа сервера</Txt><Txt kind="small">✓ DPoP-сессии устройства</Txt><Txt kind="small">✓ Подтверждение действий</Txt></Card>
-          <Card onPress={() => router.push("/modules")} accent={p.accent}><Txt kind="label">расширения</Txt><Txt kind="h2">Git-модули</Txt><Txt kind="small">Каталог возможностей для приложения без обновления всего клиента.</Txt><Txt color={p.accent}>Открыть концепт →</Txt></Card>
+          <Card onPress={() => router.push("/modules")} accent={p.accent}><Txt kind="label">расширения</Txt><Txt kind="h2">Git-модули</Txt><Txt kind="small">Каталог возможностей для приложения без обновления всего клиента.</Txt><Txt color={p.accent}>Открыть каталог →</Txt></Card>
         </View>
       </View>
     </Screen>

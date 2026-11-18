@@ -10,19 +10,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { ApprovalRequest, DeckApi } from "@/core/api";
+import type { AppConfig, ApprovalRequest, DeckApi } from "@/core/api";
 import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, PREVIEW_MAX, rememberPreviewUri, sizeText, type PickedFile, type Uploaded } from "@/core/attachments";
 import { argsHash } from "@/core/crypto";
+import { fallbackChain, nameOfModel, resolveScenario, type ModelPreferences } from "@/core/models";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
 import { readAll, readChunk } from "@/platform/files";
 import { pickFiles, pickPhotos, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
+import { loadModelPreferences } from "@/state/modelPreferences";
 import { useServers } from "@/state/servers";
 import type { TeamChatState } from "@/core/teams";
 import { AttachmentList } from "@/ui/Attachments";
-import { Btn, Chip, errText, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { Btn, Card, Chip, errText, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { TeamModel } from "@/ui/TeamModel";
+import { ModelPicker } from "@/ui/ModelPicker";
 import { alpha, MONO, useTheme } from "@/ui/theme";
 
 type Tool = Extract<Item, { kind: "tool" }>;
@@ -311,7 +314,11 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string>("");
-  const [models, setModels] = useState<{ list: string[]; ready: string[] } | null>(null);
+  const [models, setModels] = useState<{ list: string[]; ready: string[]; titles: Record<string, string> } | null>(null);
+  const [catalog, setCatalog] = useState<AppConfig | null>(null);
+  const [modelPrefs, setModelPrefs] = useState<ModelPreferences | null>(null);
+  const [scenarioEnabled, setScenarioEnabled] = useState(false);
+  useEffect(() => { void loadModelPreferences().then(setModelPrefs); }, []);
   const [switching, setSwitching] = useState(false);
   const [agentList, setAgentList] = useState<{ id: string; name: string }[]>([]);
   const pickAgent = async (id: string) => {
@@ -361,6 +368,7 @@ export default function Chat() {
             setRunId(null);
             setLink("");
             if (err) setError(errText(err));
+            (globalThis as typeof globalThis & { fuguDesktop?: { notify?(title: string, body: string): void } }).fuguDesktop?.notify?.("Fugu Deck", err ? "Задача завершилась с ошибкой соединения" : "Ответ агента готов");
             // после завершения берём историю с сервера — она каноническая
             api.conversation(cid).then(
               (c) => {
@@ -437,9 +445,14 @@ export default function Chat() {
     setError(null);
     try {
       const sent = atts;
-      const r = await api.send(cid, msg, undefined, sent.map((a) => a.id));
+      const roles = catalog ? resolveScenario(modelPrefs || { favorites: [], recent: [], roles: { code: "", review: "", summary: "" }, fallbacks: [] }, conv?.model || catalog.default_model, catalog.models, catalog.llm_ready) : null;
+      const r = await api.send(cid, msg, undefined, sent.map((a) => a.id), {
+        fallbackModels: modelPrefs ? fallbackChain(modelPrefs) : [],
+        scenario: scenarioEnabled && roles ? { kind: "code-review-summary", worker: roles.code, review: roles.review, summary: roles.summary } : undefined,
+      });
       setText("");
       setAtts([]);
+      setScenarioEnabled(false);
       setItems((prev) => [...prev, { kind: "user", key: "u" + Date.now(), content: msg, mine: true, attachments: sent }]);
       toEnd(false);
       follow(r.run_id);
@@ -466,7 +479,8 @@ export default function Chat() {
     try {
       const [c, ags] = await Promise.all([api.config(), api.agents().catch(() => [])]);
       setAgentList(ags.length > 1 ? ags.map((a) => ({ id: a.id, name: a.name })) : []);
-      setModels({ list: c.models, ready: c.llm_ready });
+      setCatalog(c);
+      setModels({ list: c.models, ready: c.llm_ready, titles: c.provider_titles ?? {} });
     } catch (e) {
       setError(errText(e));
     }
@@ -519,6 +533,7 @@ export default function Chat() {
   }, []);
 
   const pending = items.filter((i): i is Tool => i.kind === "tool" && i.status === "pending" && !!i.approval);
+  const scenarioModels = catalog ? resolveScenario(modelPrefs || { favorites: [], recent: [], roles: { code: "", review: "", summary: "" }, fallbacks: [] }, conv?.model || catalog.default_model, catalog.models, catalog.llm_ready) : null;
   const canWrite = conv?.my_role !== "viewer";
 
   return (
@@ -536,16 +551,8 @@ export default function Chat() {
       ) : null}
       {models && conv && !conv.team ? (
         <View style={{ padding: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }}>
-          <Row gap={6} style={{ flexWrap: "wrap" }}>
-            {models.list.map((m) => {
-              const ready = models.ready.includes(m.split(":")[0]);
-              return (
-                <Btn key={m} small title={m.split(":").pop()!} kind={m === conv.model ? "primary" : "ghost"} disabled={!ready || switching}
-                  onPress={() => pickModel(m)} />
-              );
-            })}
-            <Btn small title="Закрыть" kind="ghost" onPress={() => setModels(null)} />
-          </Row>
+          <ModelPicker models={models.list} ready={models.ready} providerTitles={models.titles} selected={conv.model}
+            onSelect={(m) => { if (!switching) void pickModel(m); }} onClose={() => setModels(null)} maxHeight={390} />
           {agentList.length ? (
             <>
               <Txt kind="label">агент</Txt>
@@ -557,6 +564,13 @@ export default function Chat() {
               </Row>
             </>
           ) : null}
+          <Btn small kind="ghost" title={scenarioEnabled ? "✓ Multi-model: работа → ревью → сводка" : "Multi-model сценарий…"} onPress={() => setScenarioEnabled(!scenarioEnabled)} />
+          {scenarioEnabled && scenarioModels ? <Card accent={p.accent} style={{ padding: 12 }}>
+            <Txt kind="small">Исполнитель: {nameOfModel(scenarioModels.code)}</Txt>
+            <Txt kind="small">Ревью без инструментов: {nameOfModel(scenarioModels.review)}</Txt>
+            <Txt kind="small">Сводка: {nameOfModel(scenarioModels.summary)}</Txt>
+            <Txt kind="small">Роли и резервные модели настраиваются в «Модели и провайдеры». Сценарий применится к следующему сообщению.</Txt>
+          </Card> : null}
           {models.list.some((m) => !models.ready.includes(m.split(":")[0])) ? (
             <Txt kind="small">Серые модели недоступны: для их провайдера не введён ключ (экран кластера → ключи).</Txt>
           ) : null}

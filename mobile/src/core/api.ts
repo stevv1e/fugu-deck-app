@@ -24,6 +24,8 @@ export type AppConfig = {
   models: string[];
   default_model: string;
   llm_ready: string[];
+  provider_titles?: Record<string, string>;
+  custom_endpoints?: { id: string; name: string; base_url: string; models: string[] }[];
   approval_mode: string;
   providers: Record<string, { ok: boolean; login?: string; error?: string }>;
   [k: string]: unknown;
@@ -63,10 +65,19 @@ export type ApprovalRequest = Extract<RunEvent, { type: "approval_request" }>;
 
 const enc = encodeURIComponent;
 
+export type CustomEndpointInput = { id: string; name: string; base_url: string; models: string[]; api_key: string };
+export type SendOptions = {
+  fallbackModels?: string[];
+  scenario?: { kind: "code-review-summary"; worker: string; review: string; summary: string };
+};
+
 export class DeckApi {
   constructor(readonly s: DeviceSession) {}
 
   config = () => this.s.request<AppConfig>("GET", "/api/config");
+  refreshModels = (provider: string) => this.s.request<{ models: string[]; total: number }>("POST", `/api/models/refresh?provider=${enc(provider)}`);
+  addModelEndpoint = (value: CustomEndpointInput) => this.s.request("POST", "/api/models/endpoints", value);
+  deleteModelEndpoint = (id: string) => this.s.request("DELETE", `/api/models/endpoints/${enc(id)}`);
   projects = () => this.s.request<Project[]>("GET", "/api/projects");
   createProject = (name: string, description = "") => this.s.request<Project>("POST", "/api/projects", { name, description });
   conversations = (pid: string) => this.s.request<Conversation[]>("GET", `/api/projects/${enc(pid)}/conversations`);
@@ -94,6 +105,18 @@ export class DeckApi {
   moveConversation = (cid: string, projectId: string) => this.s.request<Conversation>("PATCH", `/api/conversations/${enc(cid)}`, { project_id: projectId });
   /** Репозитории пользователя на GitHub/GitLab (по его токенам). */
   repos = (q = "") => this.s.request<ReposByProvider>("GET", `/api/repos${q ? `?q=${enc(q)}` : ""}`, undefined, { timeoutMs: 60000 });
+  workspaceFiles = (provider: string, repo: string, ref = "", path = "") =>
+    this.s.request<{ ref: string; files: string[]; truncated?: boolean }>("GET", `/api/workspace/repos/${enc(provider)}/files?repo=${enc(repo)}&ref=${enc(ref)}&path=${enc(path)}`);
+  workspaceFile = (provider: string, repo: string, path: string, ref = "") =>
+    this.s.request<{ path: string; content: string; size: number; truncated: boolean }>("GET", `/api/workspace/repos/${enc(provider)}/file?repo=${enc(repo)}&path=${enc(path)}&ref=${enc(ref)}`);
+  workspaceDiff = (provider: string, repo: string, base: string, head: string) =>
+    this.s.request<{ base: string; head: string; ahead_by: number; behind_by: number; files: { path: string; status: string; patch: string }[] }>("GET", `/api/workspace/repos/${enc(provider)}/diff?repo=${enc(repo)}&base=${enc(base)}&head=${enc(head)}`);
+  workspaceCi = (provider: string, repo: string, ref = "") =>
+    this.s.request<{ name: string; status: string; conclusion?: string; branch?: string; url: string; created_at: string }[]>("GET", `/api/workspace/repos/${enc(provider)}/ci?repo=${enc(repo)}&ref=${enc(ref)}`);
+  workspaceRuns = () => this.s.request<{ run_id: string; conversation_id: string; project_id: string; model: string; status: string; started_at: number; scenario: boolean; terminal: boolean }[]>("GET", "/api/workspace/runs");
+  terminalServers = (cid: string) => this.s.request<{ servers: { id: string; name?: string; host?: string }[] }>("GET", `/api/terminal/servers?cid=${enc(cid)}`);
+  terminalExec = (value: { cid: string; server: string; command: string; why: string; preview?: string }) =>
+    this.s.request<{ run_id: string }>("POST", "/api/terminal/exec", value);
   setProjectRepos = (pid: string, repos: RepoRef[]) => this.s.request<Project>("PATCH", `/api/projects/${enc(pid)}`, { repos });
   proposals = (pid: string) => this.s.request<NoteProposal[]>("GET", `/api/projects/${enc(pid)}/kb/proposals`);
   acceptProposal = (id: number) => this.s.request("POST", `/api/kb/proposals/${id}/accept`);
@@ -120,8 +143,11 @@ export class DeckApi {
 
   /** Удалить чат со всей перепиской и вложениями; идущее задание агента в нём останавливается. */
   deleteConversation = (cid: string) => this.s.request<{ ok: boolean }>("DELETE", `/api/conversations/${enc(cid)}`);
-  send = (cid: string, content: string, model?: string, attachmentIds: string[] = []) =>
-    this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, { content, model: model || null, attachment_ids: attachmentIds });
+  send = (cid: string, content: string, model?: string, attachmentIds: string[] = [], options: SendOptions = {}) =>
+    this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/messages`, {
+      content, model: model || null, attachment_ids: attachmentIds,
+      fallback_models: options.fallbackModels || [], scenario: options.scenario || null,
+    });
   /** Загрузить вложение в чат: маленький файл — одним запросом, большой — частями (attachments.ts, uploadFile). */
   upload = (cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void) =>
     uploadFile((m, p, b, o) => this.s.request(m, p, b, o), cid, f, read, onProgress);

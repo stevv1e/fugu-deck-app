@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, net, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -49,6 +49,11 @@ ipcMain.handle("window:maximize", (event) => {
   else win.maximize();
 });
 ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+ipcMain.handle("run:notify", (event, title, body) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isFocused() || !Notification.isSupported()) return;
+  new Notification({ title: String(title).slice(0, 120), body: String(body).slice(0, 300) }).show();
+});
 
 app.whenReady().then(() => {
   protocol.handle("fugu-app", serveBundle);

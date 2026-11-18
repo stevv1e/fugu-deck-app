@@ -124,6 +124,14 @@ export function applyEvent(items: Item[], e: RunEvent): Item[] {
     case "notice":
       out.push({ kind: "notice", key: k(), level: "info", text: e.text });
       break;
+    case "model_fallback":
+      out.push({ kind: "notice", key: k(), level: "info", text: `${e.failed_model} не ответила до начала вывода. Переключились на ${e.model}.` });
+      break;
+    case "scenario_stage": {
+      const stage = { work: "исполнитель работает", review: "независимое ревью", summary: "финальная сводка" }[e.stage];
+      out.push({ kind: "notice", key: k(), level: "info", text: `${stage}: ${e.model}` });
+      break;
+    }
     case "cancelled":
       out.push({ kind: "notice", key: k(), level: "info", text: "Остановлено" });
       return out.map((i) =>

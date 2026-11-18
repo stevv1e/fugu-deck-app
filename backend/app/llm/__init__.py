@@ -51,7 +51,7 @@ def get_provider(name: str, settings):
     if name == "anthropic":
         from .anthropic_provider import AnthropicProvider
         return AnthropicProvider(settings)
-    if name in OPENAI_COMPATIBLE:
+    if name in OPENAI_COMPATIBLE or name.startswith("custom-"):
         from .openai_compat import OpenAICompatProvider
         return OpenAICompatProvider(name, settings)
     raise LLMError(f"Неизвестный провайдер {name}")

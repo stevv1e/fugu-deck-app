@@ -124,6 +124,9 @@ export type RunEvent =
   | { seq: number; type: "tool_end"; call_id: string; name: string; ok: boolean; result?: any; error?: string }
   | { seq: number; type: "message_saved"; has_tools: boolean }
   | { seq: number; type: "notice"; text: string }
+  | { seq: number; type: "model_fallback"; failed_model: string; model: string; message: string }
+  | { seq: number; type: "scenario_stage"; stage: "work" | "review" | "summary"; model: string }
+  | { seq: number; type: "terminal_result"; result: { stdout?: string; stderr?: string; exit_code?: number; error?: string } }
   | { seq: number; type: "error"; message: string }
   | { seq: number; type: "done" }
   | { seq: number; type: "cancelled" };

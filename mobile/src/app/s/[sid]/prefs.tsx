@@ -8,13 +8,10 @@ import { clusterOfSid } from "@/state/cluster";
 import { useApi, useLoad } from "@/state/hooks";
 import { Btn, Card, Chip, Empty, Field, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { AgentsEditor } from "@/ui/AgentsEditor";
+import { ModelCatalogPanel } from "@/ui/ModelCatalogPanel";
 import { SectionHeading } from "@/ui/SectionHeading";
 import { useTheme } from "@/ui/theme";
 
-const PROVIDERS: Record<string, string> = {
-  sakana: "Sakana", anthropic: "Claude (Anthropic)", openai: "OpenAI", xai: "Grok (xAI)", google: "Google Gemini",
-  moonshot: "Kimi (Moonshot AI)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM", deepseek: "DeepSeek",
-};
 const GIT: Record<string, string> = { github: "GitHub", gitlab: "GitLab" };
 
 export default function SpacePrefs() {
@@ -34,10 +31,6 @@ export default function SpacePrefs() {
     (projects.data ?? []).filter((pr) => pr.repos?.some((x) => x.provider === provider && x.repo.toLowerCase() === r.full_name.toLowerCase())).map((pr) => pr.name);
 
   const models = cfg.data?.models ?? [];
-  const ready = cfg.data?.llm_ready ?? [];
-  const pricing = (cfg.data?.pricing ?? {}) as Record<string, number[]>;
-  // тариф длинного контекста: [порог токенов входа, input, output, …] — запрос длиннее порога целиком по нему
-  const pricingLong = (cfg.data?.pricing_long ?? {}) as Record<string, number[]>;
   const groups = [...new Set(models.map((m) => m.split(":")[0]))];
 
   return (
@@ -58,26 +51,7 @@ export default function SpacePrefs() {
         <>
           {!cfg.data && !cfg.error ? <Loading /> : null}
           {cfg.error ? <Notice text={cfg.error} /> : null}
-          {groups.map((g) => (
-            <Card key={g} accent={ready.includes(g) ? p.ok : p.line2}>
-              <Row style={{ justifyContent: "space-between" }}>
-                <Txt kind="h2">{PROVIDERS[g] ?? g}</Txt>
-                <Chip text={ready.includes(g) ? "ключ есть" : "нет ключа"} color={ready.includes(g) ? p.ok : undefined} />
-              </Row>
-              {models.filter((m) => m.startsWith(g + ":")).map((m) => {
-                const pr = pricing[m];
-                const lg = pricingLong[m];
-                return (
-                  <Row key={m} style={{ justifyContent: "space-between" }}>
-                    <Txt kind="mono" numberOfLines={1} style={{ flex: 1, fontSize: 12.5 }}>{m.split(":")[1]}{m === cfg.data?.default_model ? " · по умолчанию" : ""}</Txt>
-                    {pr ? <Txt kind="small">${pr[0]} / ${pr[1]} за 1M{lg ? ` · больше ${Math.round(lg[0] / 1000)}K: $${lg[1]} / $${lg[2]}` : ""}</Txt> : null}
-                  </Row>
-                );
-              })}
-              {!ready.includes(g) && cluster ? <Btn small kind="ghost" title="Ввести ключ" onPress={() => keysScreen("llm")} style={{ alignSelf: "flex-start" }} /> : null}
-            </Card>
-          ))}
-          <Txt kind="small">Цена — за миллион токенов: ввод / вывод. Модель выбирается в чате; доступны те, для чьего провайдера введён ключ.</Txt>
+          {api && cfg.data ? <ModelCatalogPanel api={api} config={cfg.data} onChanged={cfg.reload} /> : null}
         </>
       ) : (
         <>

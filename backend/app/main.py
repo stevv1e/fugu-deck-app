@@ -27,8 +27,10 @@ from .db import DEFAULT_AGENT, DEFAULT_PROJECT, TALK_PROJECT, Database, new_id
 from .events import Broker
 from .keyvault import KeyVault
 from .outbox import outbox
-from .llm import split_model
+from .llm import get_provider, split_model
+from .model_catalog import CatalogError, ModelCatalog
 from .skills import SkillError, SkillStore
+from .tools import ssh_tools
 from .tools.providers import GitHubProvider, GitLabProvider
 
 settings = get_settings()
@@ -53,7 +55,7 @@ async def lifespan(app: FastAPI):
     skills.seed()
     broker = Broker(db, all_users=settings.is_space)
     state.update(db=db, providers=providers, skills=skills, broker=broker, vault=KeyVault(settings.key_ttl_seconds),
-                 agent=Agent(db, settings, providers, skills, broker))
+                 catalog=ModelCatalog(settings), agent=Agent(db, settings, providers, skills, broker))
     if not settings.is_space:
         state.update(server_keys=devices.ServerKeys(settings.data_dir, settings.server_name),
                      device_auth=devices.DeviceAuth(auth.jwt_secret(settings) + ":device"))
@@ -91,6 +93,10 @@ def db() -> Database:
 
 def agent() -> Agent:
     return state["agent"]
+
+
+def catalog() -> ModelCatalog:
+    return state["catalog"]
 
 
 def broker() -> Broker:
@@ -433,7 +439,7 @@ async def config(u: dict = Me):
                 providers[name] = {"ok": True, **(await p.whoami())}
             except Exception as e:
                 providers[name] = {"ok": False, "error": str(e)}
-    llm_ready = sorted({split_model(m)[0] for m in settings.model_list
+    llm_ready = sorted({split_model(m)[0] for m in catalog().models
                         if agent().llm_key(split_model(m)[0], vault().get(u["id"]))})
     if kgc.enabled() and not is_team() and (mine := await kgc.my_llm_providers()) is not None:
         llm_ready = [p for p in llm_ready if p in mine]  # ключи владельца — в keyguard, не здесь
@@ -444,8 +450,10 @@ async def config(u: dict = Me):
         "keys": keys,
         "llm_ready": llm_ready,
         "me": public_user(u),
-        "models": settings.model_list,
-        "default_model": settings.model_list[0] if settings.model_list else "",
+        "models": catalog().models,
+        "provider_titles": catalog().provider_titles,
+        "custom_endpoints": catalog().endpoints(),
+        "default_model": catalog().models[0] if catalog().models else "",
         "pricing": settings.pricing,
         "pricing_long": settings.pricing_long,
         "providers": providers,
@@ -453,6 +461,54 @@ async def config(u: dict = Me):
         "llm_configured": bool(llm_ready),
         "skills_writable": skills().writable,
     }
+
+
+@app.post("/api/models/refresh")
+async def refresh_models(provider: str, u: dict = Me):
+    """Получить реальные /models провайдера ключом текущего пользователя и пополнить каталог."""
+    if provider not in catalog().provider_titles or provider.startswith("custom-"):
+        raise HTTPException(400, "Этот провайдер не поддерживает обнаружение через общий endpoint")
+    key = agent().llm_key(provider, vault().get(u["id"]))
+    if not key:
+        raise HTTPException(400, f"Сначала добавьте ключ {catalog().provider_titles.get(provider, provider)}")
+    headers = kgc.headers("", u["id"]) if kgc.enabled() else None
+    try:
+        ids = await asyncio.wait_for(get_provider(provider, settings).list_models(key, headers), 35)
+        models = catalog().discover(provider, ids)
+    except Exception as e:
+        raise HTTPException(400, f"Не удалось получить /models: {str(e)[:300]}") from e
+    return {"provider": provider, "models": models, "total": len(catalog().models)}
+
+
+class EndpointIn(BaseModel):
+    id: str = Field(..., min_length=2, max_length=31)
+    name: str = Field(..., min_length=1, max_length=60)
+    base_url: str = Field(..., min_length=8, max_length=500)
+    models: list[str] = Field(..., min_length=1, max_length=200)
+    api_key: str = Field("", max_length=1000)
+
+
+@app.post("/api/models/endpoints")
+async def add_model_endpoint(body: EndpointIn, u: dict = Me):
+    owner_only(u)
+    try:
+        endpoint = catalog().add_endpoint(body.id, {**body.model_dump(exclude={"id", "api_key"}),
+                                                   "auth_required": bool(body.api_key.strip())})
+    except CatalogError as e:
+        raise HTTPException(400, str(e)) from e
+    vault().set(u["id"], f"custom-{body.id}", body.api_key.strip())
+    return endpoint
+
+
+@app.delete("/api/models/endpoints/{cid}")
+async def delete_model_endpoint(cid: str, u: dict = Me):
+    owner_only(u)
+    try:
+        catalog().remove_endpoint(cid)
+    except CatalogError as e:
+        raise HTTPException(404, str(e)) from e
+    vault().set(u["id"], f"custom-{cid}", "")
+    return {"ok": True}
 
 
 @app.get("/api/usage")
@@ -589,6 +645,103 @@ async def list_my_repos(q: str = "", u: dict = Me):
             if p not in state["providers"].values():
                 await p.http.aclose()
     return out
+
+
+# ================================================================== Windows Workspace: Git, задачи и SSH
+def _workspace_provider(provider: str, repo: str, u: dict):
+    RepoRef(provider=provider, repo=repo)
+    git = agent()._git_for(vault().get(u["id"]), "", u["id"])
+    selected = git.get(provider)
+    if not selected:
+        raise HTTPException(400, f"{provider} не подключён")
+    return git, selected
+
+
+async def _close_workspace(git: dict) -> None:
+    for provider in git.values():
+        if provider not in state["providers"].values():
+            await provider.http.aclose()
+
+
+@app.get("/api/workspace/repos/{provider}/files")
+async def workspace_files(provider: str, repo: str, ref: str = "", path: str = "", u: dict = Me):
+    git, selected = _workspace_provider(provider, repo, u)
+    try:
+        result = await selected.list_files(repo, ref or None, path or None)
+        if len(result.get("files", [])) > 1500:
+            result["files"] = result["files"][:1500]
+            result["truncated"] = True
+        return result
+    finally:
+        await _close_workspace(git)
+
+
+@app.get("/api/workspace/repos/{provider}/file")
+async def workspace_file(provider: str, repo: str, path: str, ref: str = "", u: dict = Me):
+    git, selected = _workspace_provider(provider, repo, u)
+    try:
+        raw = await selected.read_file(repo, path, ref or None)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise HTTPException(400, "Это бинарный файл") from e
+        return {"path": path, "content": text[:60000], "size": len(raw), "truncated": len(text) > 60000}
+    finally:
+        await _close_workspace(git)
+
+
+@app.get("/api/workspace/repos/{provider}/diff")
+async def workspace_diff(provider: str, repo: str, base: str, head: str, u: dict = Me):
+    git, selected = _workspace_provider(provider, repo, u)
+    try:
+        return await selected.compare(repo, base, head)
+    finally:
+        await _close_workspace(git)
+
+
+@app.get("/api/workspace/repos/{provider}/ci")
+async def workspace_ci(provider: str, repo: str, ref: str = "", u: dict = Me):
+    git, selected = _workspace_provider(provider, repo, u)
+    try:
+        return await selected.ci_status(repo, ref or None)
+    finally:
+        await _close_workspace(git)
+
+
+@app.get("/api/workspace/runs")
+async def workspace_runs(u: dict = Me):
+    out = []
+    for run in sorted(agent().runs.values(), key=lambda r: r.started_at, reverse=True):
+        try:
+            await need(u, run.project_id)
+        except HTTPException:
+            continue
+        out.append({"run_id": run.id, "conversation_id": run.conversation_id, "project_id": run.project_id,
+                    "model": run.model, "status": run.status, "started_at": run.started_at,
+                    "scenario": bool(run.scenario), "terminal": run.model == "terminal"})
+    return out[:100]
+
+
+@app.get("/api/terminal/servers")
+async def terminal_servers(cid: str, u: dict = Me):
+    await conv_access(u, cid)
+    ctx = await agent().context(cid, u)
+    return await ssh_tools.ssh_servers(ctx, {})
+
+
+class TerminalIn(BaseModel):
+    cid: str
+    server: str = Field(..., min_length=1, max_length=200)
+    command: str = Field(..., min_length=1, max_length=2000)
+    why: str = Field("", max_length=500)
+    preview: str = Field("", max_length=2000)
+
+
+@app.post("/api/terminal/exec")
+async def terminal_exec(body: TerminalIn, u: dict = Me):
+    await conv_access(u, body.cid, "editor")
+    run = await agent().start_terminal(body.cid, u, body.server, body.command, body.why, body.preview)
+    return {"run_id": run.id}
 
 
 # ================================================================== проекты
@@ -1035,7 +1188,7 @@ class ConvIn(BaseModel):
 
 
 def _check_model(m: str | None) -> str:
-    models = settings.model_list
+    models = catalog().models
     if m and m not in models:
         raise HTTPException(400, f"Неизвестная модель {m}")
     return m or models[0]
@@ -1361,6 +1514,8 @@ class MessageIn(BaseModel):
     content: str
     attachment_ids: list[str] = []
     model: str | None = None
+    fallback_models: list[str] = Field(default_factory=list, max_length=3)
+    scenario: dict[str, str] | None = None
 
 
 async def _llm_access(c: dict, u: dict, want_model: str | None):
@@ -1387,6 +1542,23 @@ async def _llm_access(c: dict, u: dict, want_model: str | None):
 async def send(cid: str, body: MessageIn, u: dict = Me):
     c = await conv_access(u, cid, "editor")
     model, keys, llm_key, budget = await _llm_access(c, u, body.model)
+    if (body.scenario or body.fallback_models) and is_team():
+        raise HTTPException(400, "Сценарии и fallback пока доступны только в личных пространствах")
+    scenario = None
+    if body.scenario:
+        if body.scenario.get("kind") != "code-review-summary" or c["project_id"] == TALK_PROJECT:
+            raise HTTPException(400, "Поддерживается сценарий code-review-summary в проекте разработки")
+        scenario = {"kind": "code-review-summary"}
+        for role in ("worker", "review", "summary"):
+            selected = _check_model(body.scenario.get(role) or model)
+            await _llm_access(c, u, selected)
+            scenario[role] = selected
+    fallbacks = []
+    for fallback in body.fallback_models:
+        selected = _check_model(fallback)
+        if selected != model and selected not in fallbacks:
+            await _llm_access(c, u, selected)
+            fallbacks.append(selected)
     atts = []
     for aid in body.attachment_ids:
         a = await db().get_attachment(aid)
@@ -1399,6 +1571,8 @@ async def send(cid: str, body: MessageIn, u: dict = Me):
     meta: dict = {"author": u["display_name"], "author_id": u["id"]}
     if atts:
         meta["attachments"] = atts
+    if scenario:
+        meta["scenario"] = scenario["kind"]
     await db().add_message(cid, "user", body.content, meta=meta)
     updates: dict = {} if is_team() else {"model": model}
     if c["title"] == "Новый чат":
@@ -1406,7 +1580,8 @@ async def send(cid: str, body: MessageIn, u: dict = Me):
         updates["title"] = (t[:60] + "…") if len(t) > 60 else t or "Новый чат"
     await db().update_conversation(cid, **updates)
     run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
-                              payer_id=c.get("sponsor_id") if is_team() else u["id"])
+                              payer_id=c.get("sponsor_id") if is_team() else u["id"],
+                              fallback_models=fallbacks, scenario=scenario)
     return {"run_id": run.id}
 
 

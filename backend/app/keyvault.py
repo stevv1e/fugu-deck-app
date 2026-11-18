@@ -25,12 +25,27 @@ class KeyVault:
         self.ttl = ttl_seconds
         self._data: dict[str, _Entry] = {}
 
+    @staticmethod
+    def _allowed(key: str) -> bool:
+        return key in ALLOWED or (key.startswith("custom-") and 8 <= len(key) <= 38)
+
     def put(self, user_id: str, keys: dict[str, str]) -> list[str]:
-        clean = {k: v.strip() for k, v in keys.items() if k in ALLOWED and isinstance(v, str) and v.strip()}
+        clean = {k: v.strip() for k, v in keys.items() if self._allowed(k) and isinstance(v, str) and v.strip()}
         e = self._data.setdefault(user_id, _Entry())
-        e.keys = clean  # полная замена: ключ, удалённый на телефоне, исчезает и здесь
+        custom = {k: v for k, v in e.keys.items() if k.startswith("custom-")}
+        e.keys = {**custom, **clean}  # обычные ключи заменяются; endpoint-ключи меняются только через свой экран
         e.expires = time.time() + self.ttl
         return sorted(k for k in clean if k != "gitlab_url")
+
+    def set(self, user_id: str, key: str, value: str) -> None:
+        if not self._allowed(key):
+            raise ValueError("Неизвестный тип ключа")
+        e = self._data.setdefault(user_id, _Entry())
+        if value:
+            e.keys[key] = value
+        else:
+            e.keys.pop(key, None)
+        e.expires = time.time() + self.ttl
 
     def touch(self, user_id: str) -> None:
         if e := self._data.get(user_id):
