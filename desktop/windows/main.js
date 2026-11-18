@@ -85,7 +85,7 @@ ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.se
 ipcMain.handle("auth:open", async (event, raw) => {
   const url = new URL(raw);
   if (url.protocol !== "https:") throw new Error("Для входа нужен HTTPS");
-  await shell.openExternal(url);
+  await shell.openExternal(url.toString());
   return new Promise((resolve, reject) => {
     const id = event.sender.id;
     authPending.set(id, resolve);
