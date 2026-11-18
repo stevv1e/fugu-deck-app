@@ -91,7 +91,7 @@ class ModelCatalog:
         return {**PROVIDER_TITLES, **{f"custom-{cid}": item["name"] for cid, item in self.custom.items()}}
 
     def endpoints(self) -> list[dict]:
-        return [{"id": cid, **item, "api_key_required": True} for cid, item in self.custom.items()]
+        return [{"id": cid, **item} for cid, item in self.custom.items()]
 
     def add_endpoint(self, cid: str, item: dict) -> dict:
         if self.settings.is_space:

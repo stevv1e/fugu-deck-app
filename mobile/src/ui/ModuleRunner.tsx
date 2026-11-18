@@ -3,7 +3,7 @@ import { Platform, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { moduleHtml } from "@/core/moduleHtml";
-import type { InstalledModule } from "@/core/modules";
+import { readResponseText, type InstalledModule } from "@/core/modules";
 import { prefs } from "@/platform/storage";
 import { Notice, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
@@ -16,6 +16,7 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
   const webFrame = useRef<HTMLIFrameElement | null>(null);
   const webContainer = useRef<View>(null);
   const nativeFrame = useRef<WebView | null>(null);
+  const rpcTimes = useRef<number[]>([]);
   const send = useCallback((message: unknown) => {
     if (Platform.OS === "web") webFrame.current?.contentWindow?.postMessage(message, "*");
     else nativeFrame.current?.injectJavaScript(`window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(message)}}));true;`);
@@ -41,7 +42,7 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
         const timer = setTimeout(() => controller.abort(), 10_000);
         try {
           const response = await fetch(url, { method: "GET", redirect: "error", signal: controller.signal });
-          const text = (await response.text()).slice(0, 100_000);
+          const text = await readResponseText(response, 100_000);
           return respond({ status: response.status, text });
         } finally { clearTimeout(timer); }
       }
@@ -53,7 +54,12 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
   const receive = useCallback((data: unknown) => {
     try {
       const rpc = typeof data === "string" ? JSON.parse(data) : data;
-      if (rpc?.type === "fugu-rpc") void handle(rpc);
+      if (rpc?.type !== "fugu-rpc") return;
+      const now = Date.now();
+      rpcTimes.current = rpcTimes.current.filter((time) => now - time < 60_000);
+      if (rpcTimes.current.length >= 60) return onError?.("Превышен лимит: 60 RPC в минуту");
+      rpcTimes.current.push(now);
+      void handle(rpc);
     } catch { onError?.("Модуль отправил некорректное сообщение"); }
   }, [handle, onError]);
 

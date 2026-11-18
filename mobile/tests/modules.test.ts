@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 
 import { utf8 } from "../src/core/bytes";
 import { moduleHtml } from "../src/core/moduleHtml";
-import { installModule, loadOfficialCatalog, modulePermissions, parseGitSource } from "../src/core/modules";
+import { installModule, loadOfficialCatalog, modulePermissions, parseGitSource, readResponseText } from "../src/core/modules";
 
 const hex = (text: string) => Buffer.from(sha256(utf8(text))).toString("hex");
 const commit = "a".repeat(40);
@@ -57,4 +57,11 @@ test("module sandbox has no direct network and cannot close the script early", (
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /default-src 'none'/);
   assert.ok(!html.includes("</script><script>bad()"));
+});
+
+
+test("module responses are limited while streaming", async () => {
+  assert.equal(await readResponseText(new Response("ok"), 2), "ok");
+  await assert.rejects(readResponseText(new Response("too large"), 3), /размера/);
+  await assert.rejects(readResponseText(new Response("too large", { headers: { "content-length": "9" } }), 3), /размера/);
 });

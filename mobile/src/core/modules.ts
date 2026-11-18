@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { utf8 } from "@/core/bytes";
+import { fromUtf8, utf8 } from "@/core/bytes";
 
 export const OFFICIAL_MODULES = "https://github.com/stevv1e/fugu-modules";
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -68,13 +68,36 @@ function bytesHex(value: Uint8Array): string {
   return [...value].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
+export async function readResponseText(response: Response, limit: number): Promise<string> {
+  const length = Number(response.headers.get("content-length") || 0);
+  if (length > limit) throw new Error("Ответ больше разрешённого размера");
+  const reader = response.body?.getReader?.();
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > limit) {
+        await reader.cancel();
+        throw new Error("Ответ больше разрешённого размера");
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    return fromUtf8(bytes);
+  }
+  const text = await response.text();
+  if (utf8(text).length > limit) throw new Error("Ответ больше разрешённого размера");
+  return text;
+}
+
 async function responseText(response: Response, limit: number): Promise<string> {
   if (!response.ok) throw new Error(`GitHub: HTTP ${response.status}`);
-  const length = Number(response.headers.get("content-length") || 0);
-  if (length > limit) throw new Error("Файл модуля слишком большой");
-  const text = await response.text();
-  if (utf8(text).length > limit) throw new Error("Файл модуля слишком большой");
-  return text;
+  return readResponseText(response, limit);
 }
 
 async function fetchText(url: string, token: string, fetcher: typeof fetch, limit = 256_000): Promise<string> {
