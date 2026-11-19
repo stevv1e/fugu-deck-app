@@ -36,6 +36,37 @@ async def test_media_transient_retry(monkeypatch):
     assert sleeps == [1, 2]
 
 
+@pytest.mark.asyncio
+async def test_google_transcribe_fallback(tmp_path: Path, monkeypatch):
+    class Response:
+        headers = {}
+        text = ""
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": '[{"start":0,"end":2,"text":"голос"}]'}]}}]}
+
+    models = []
+
+    async def fake_retry(client, url, **kwargs):
+        models.append(kwargs["headers"]["X-Deck-Model"])
+        return Response(503 if len(models) == 1 else 200)
+
+    monkeypatch.setattr("app.media.post_transient_retry", fake_retry)
+    monkeypatch.setattr("app.media.kgc.enabled", lambda: True)
+    monkeypatch.setattr("app.media.kgc.token", lambda: "token")
+    settings = Settings(data_dir=tmp_path, keyguard_url="http://keyguard")
+    source = tmp_path / "voice.ogg"
+    source.write_bytes(b"audio")
+    worker = MediaWorker(None, settings)
+    job = {"id": "j", "conversation_id": "c", "created_by": "u"}
+    got = await worker._google(job, source, 2)
+    assert models == ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
+    assert got[0]["text"] == "голос"
+
+
 def test_media_formats_and_segments():
     assert media_kind("voice.ogg", "") == "audio"
     assert media_kind("movie.bin", "video/mp4") == "video"

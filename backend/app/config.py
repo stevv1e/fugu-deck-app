@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     media_transcribe_provider: Literal["auto", "openai", "google"] = "auto"
     openai_transcribe_model: str = "gpt-4o-transcribe-diarize"
     google_transcribe_model: str = "gemini-3.8-flash"
+    google_transcribe_fallback_model: str = "gemini-3.5-flash-lite"
     google_drive_refresh_token: str = ""
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
