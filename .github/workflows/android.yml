@@ -8,7 +8,7 @@ on:
   workflow_dispatch: {}
   release: {types: [created]}
 
-permissions: {contents: read}
+permissions: {contents: write}
 
 concurrency:
   group: android-${{ github.ref }}
@@ -71,6 +71,11 @@ jobs:
           "$SIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
           { echo '### SHA-256 подписи (для DECK_ANDROID_CERT_SHA256)'; echo '```'; grep -i 'SHA-256' "$RUNNER_TEMP/certs.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           shred -u "$RUNNER_TEMP/keystore.jks"
+      - name: Имя релизного APK
+        working-directory: mobile/android
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mv "$APK" "app/build/outputs/apk/release/Fugu-Deck-Android-${DECK_VERSION}-arm64.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: fugu-deck-android
