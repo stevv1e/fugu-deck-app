@@ -5,7 +5,7 @@
  * platform/net.ts, ключи — в platform/secrets.ts. Ключ уходит только провайдеру, которому принадлежит.
  */
 
-export type Provider = "sakana" | "anthropic" | "deepseek" | "openai" | "xai" | "google" | "moonshot" | "qwen" | "mistral" | "minimax" | "zai";
+export type Provider = "sakana" | "anthropic" | "deepseek" | "openai" | "xai" | "google" | "kimi" | "moonshot" | "qwen" | "mistral" | "minimax" | "zai";
 
 export const PROVIDERS: Record<Provider, { title: string; base: string; style: "openai" | "anthropic"; keyUrl: string; keyPrefix?: string }> = {
   sakana: { title: "Sakana", base: "https://api.sakana.ai/v1", style: "openai", keyUrl: "https://console.sakana.ai" },
@@ -14,7 +14,8 @@ export const PROVIDERS: Record<Provider, { title: string; base: string; style: "
   openai: { title: "OpenAI", base: "https://api.openai.com/v1", style: "openai", keyUrl: "https://platform.openai.com/api-keys", keyPrefix: "sk-" },
   xai: { title: "Grok (xAI)", base: "https://api.x.ai/v1", style: "openai", keyUrl: "https://console.x.ai/" },
   google: { title: "Google Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", style: "openai", keyUrl: "https://aistudio.google.com/apikey" },
-  moonshot: { title: "Kimi (Moonshot AI)", base: "https://api.moonshot.ai/v1", style: "openai", keyUrl: "https://platform.moonshot.ai/console/api-keys" },
+  kimi: { title: "Kimi Code", base: "https://api.kimi.ai/coding/v1", style: "openai", keyUrl: "https://www.kimi.ai/code/console" },
+  moonshot: { title: "Kimi (Moonshot Platform)", base: "https://api.moonshot.ai/v1", style: "openai", keyUrl: "https://platform.moonshot.ai/console/api-keys" },
   qwen: { title: "Qwen (Alibaba Cloud)", base: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", style: "openai", keyUrl: "https://modelstudio.console.alibabacloud.com/" },
   mistral: { title: "Mistral AI", base: "https://api.mistral.ai/v1", style: "openai", keyUrl: "https://console.mistral.ai/api-keys" },
   minimax: { title: "MiniMax", base: "https://api.minimax.io/v1", style: "openai", keyUrl: "https://platform.minimax.io/user-center/basic-information/interface-key" },
@@ -33,6 +34,7 @@ export const DEFAULT_MODELS = [
   "openai:gpt-6.2-astra", "openai:gpt-6.2-sol", "openai:gpt-6.1-terra", "openai:gpt-6-luna",
   "xai:grok-4.7",
   "google:gemini-4-carbon", "google:gemini-4-argon", "google:gemini-4-hydrogen", "google:gemini-3.8-flash", "google:gemini-3.5-flash-lite",
+  "kimi:k3.1-pro", "kimi:k3.1-pro-highspeed", "kimi:k3", "kimi:k3-256k", "kimi:kimi-for-coding", "kimi:kimi-for-coding-highspeed",
   "moonshot:kimi-k3.1-pro", "moonshot:kimi-k3.1-pro-highspeed", "moonshot:kimi-k3",
   "qwen:qwen4-max", "qwen:qwen3.8-max", "qwen:qwen3.8-flash",
   "mistral:mistral-large-4", "mistral:mistral-medium-3.5", "mistral:mistral-small-latest",
@@ -54,6 +56,8 @@ export const PRICES: Record<string, [number, number]> = {
   "xai:grok-4.7": [2, 6],
   "google:gemini-4-carbon": [4, 20], "google:gemini-4-argon": [4, 20], "google:gemini-4-hydrogen": [1.5, 7.5],
   "google:gemini-3.8-flash": [0.75, 3.75], "google:gemini-3.5-flash-lite": [0.3, 2.5],
+  "kimi:k3.1-pro": [0, 0], "kimi:k3.1-pro-highspeed": [0, 0], "kimi:k3": [0, 0], "kimi:k3-256k": [0, 0],
+  "kimi:kimi-for-coding": [0, 0], "kimi:kimi-for-coding-highspeed": [0, 0],
   "moonshot:kimi-k3.1-pro": [2, 10], "moonshot:kimi-k3.1-pro-highspeed": [4, 20], "moonshot:kimi-k3": [3, 15],
   "qwen:qwen4-max": [1.5, 4.5], "qwen:qwen3.8-max": [2, 6], "qwen:qwen3.8-flash": [0.16, 0.47],
   "mistral:mistral-large-4": [0.7, 2.1], "mistral:mistral-medium-3.5": [1.5, 7.5], "mistral:mistral-small-latest": [0.15, 0.6],

@@ -23,6 +23,7 @@ test("каталог: все модели имеют провайдера и ц�
     assert.ok(PRICES[model]?.length === 2, model);
     assert.equal(validModel(model), null, model);
   }
+  assert.equal(buildRequest("kimi:k3.1-pro", [], "", "k").url, "https://api.kimi.ai/coding/v1/chat/completions");
   assert.equal(buildRequest("moonshot:kimi-k3.1-pro", [], "", "k").url, "https://api.moonshot.ai/v1/chat/completions");
   assert.equal(buildRequest("xai:grok-4.7", [], "", "k").url, "https://api.x.ai/v1/chat/completions");
   assert.equal(buildRequest("google:gemini-4-carbon", [], "", "k").url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");

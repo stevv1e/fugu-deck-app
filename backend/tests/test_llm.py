@@ -148,6 +148,7 @@ def test_model_catalog_complete():
             assert p.base_url
         if provider not in ("anthropic", "sakana", "deepseek"):
             assert p.base_url == BASE_URLS[provider]
+    assert get_provider("kimi", s).base_url == "https://api.kimi.ai/coding/v1"
     assert get_provider("moonshot", s).base_url == "https://api.moonshot.ai/v1"
     assert get_provider("google", s).base_url.endswith("/v1beta/openai")
 

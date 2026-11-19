@@ -15,7 +15,7 @@
  * ct_sha256 = SHA-256(enc||ct), key_hint — последние 4 символа ключа (keyguard сверяет их с расшифрованным).
  */
 
-export type LlmProvider = 'sakana' | 'anthropic' | 'openai' | 'xai' | 'google' | 'moonshot' | 'qwen' | 'mistral' | 'minimax' | 'zai' | 'deepseek';
+export type LlmProvider = 'sakana' | 'anthropic' | 'openai' | 'xai' | 'google' | 'kimi' | 'moonshot' | 'qwen' | 'mistral' | 'minimax' | 'zai' | 'deepseek';
 export type Provider = LlmProvider | 'github' | 'gitlab';
 /** none — исключить участника из пространства. */
 export type Role = 'reader' | 'editor' | 'owner' | 'none';
@@ -161,7 +161,7 @@ const list =
 const MCP_ID = /^[a-z][a-z0-9-]{1,30}$/;
 /** Домен для агента: точное имя хоста строчными буквами, без «*» и IP. */
 export const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
-const PROVIDERS = ['sakana', 'anthropic', 'openai', 'xai', 'google', 'moonshot', 'qwen', 'mistral', 'minimax', 'zai', 'deepseek', 'github', 'gitlab'];
+const PROVIDERS = ['sakana', 'anthropic', 'openai', 'xai', 'google', 'kimi', 'moonshot', 'qwen', 'mistral', 'minimax', 'zai', 'deepseek', 'github', 'gitlab'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
 // Обязательные ключи типа (необязательные, с «?», живут в OPTIONAL и в обязательную схему не входят).
@@ -277,7 +277,8 @@ const PROVIDER_NAMES: Record<Provider, string> = {
   openai: 'OpenAI',
   xai: 'Grok (xAI)',
   google: 'Google Gemini',
-  moonshot: 'Kimi (Moonshot AI)',
+  kimi: 'Kimi Code',
+  moonshot: 'Kimi (Moonshot Platform)',
   qwen: 'Qwen (Alibaba Cloud)',
   mistral: 'Mistral AI',
   minimax: 'MiniMax',

@@ -15,7 +15,7 @@ import { useTheme } from "@/ui/theme";
 
 const KEY_TITLES: Record<KeyProvider, string> = {
   sakana: "Sakana", anthropic: "Claude (Anthropic)", openai: "OpenAI", xai: "Grok (xAI)", google: "Google Gemini",
-  moonshot: "Kimi (Moonshot AI)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM",
+  kimi: "Kimi Code", moonshot: "Kimi (Moonshot Platform)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM",
   deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab",
 };
 const HINTS: Partial<Record<KeyProvider, string>> = {
@@ -24,7 +24,8 @@ const HINTS: Partial<Record<KeyProvider, string>> = {
   openai: "platform.openai.com → API Keys",
   xai: "console.x.ai → API Keys",
   google: "aistudio.google.com → Get API key",
-  moonshot: "platform.moonshot.ai → API Keys",
+  kimi: "kimi.ai/code/console → Create API Key (нужна подписка Kimi)",
+  moonshot: "platform.moonshot.ai → API Keys (оплата за токены)",
   qwen: "Alibaba Cloud Model Studio → API Key (международный регион)",
   mistral: "console.mistral.ai → API Keys",
   minimax: "platform.minimax.io → API Keys",

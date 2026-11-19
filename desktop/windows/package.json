@@ -1,6 +1,6 @@
 {
   "name": "fugu-deck-desktop",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "private": true,
   "description": "Fugu Deck desktop client (Electron over Expo web export)",
   "main": "main.js",

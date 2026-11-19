@@ -7,19 +7,21 @@ PROVIDER_TITLES = {
     "openai": "OpenAI",
     "xai": "Grok",
     "google": "Google Gemini",
-    "moonshot": "Kimi",
+    "kimi": "Kimi Code",
+    "moonshot": "Kimi (Moonshot Platform)",
     "qwen": "Qwen",
     "mistral": "Mistral AI",
     "minimax": "MiniMax",
     "zai": "Z.AI GLM",
 }
 
-OPENAI_COMPATIBLE = ("sakana", "deepseek", "openai", "xai", "google", "moonshot", "qwen", "mistral", "minimax", "zai")
+OPENAI_COMPATIBLE = ("sakana", "deepseek", "openai", "xai", "google", "kimi", "moonshot", "qwen", "mistral", "minimax", "zai")
 
 BASE_URLS = {
     "openai": "https://api.openai.com/v1",
     "xai": "https://api.x.ai/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "kimi": "https://api.kimi.ai/coding/v1",
     "moonshot": "https://api.moonshot.ai/v1",
     "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     "mistral": "https://api.mistral.ai/v1",
@@ -33,6 +35,7 @@ KEYGUARD_PREFIXES = {
     "openai": "/v1",
     "xai": "/v1",
     "google": "/v1beta/openai",
+    "kimi": "/coding/v1",
     "moonshot": "/v1",
     "qwen": "/compatible-mode/v1",
     "mistral": "/v1",
@@ -68,6 +71,12 @@ DEFAULT_MODELS = (
     "google:gemini-4-hydrogen",
     "google:gemini-3.8-flash",
     "google:gemini-3.5-flash-lite",
+    "kimi:k3.1-pro",
+    "kimi:k3.1-pro-highspeed",
+    "kimi:k3",
+    "kimi:k3-256k",
+    "kimi:kimi-for-coding",
+    "kimi:kimi-for-coding-highspeed",
     "moonshot:kimi-k3.1-pro",
     "moonshot:kimi-k3.1-pro-highspeed",
     "moonshot:kimi-k3",
@@ -117,6 +126,13 @@ PRICING = {
     "google:gemini-4-hydrogen": [1.5, 7.5, 0.075],
     "google:gemini-3.8-flash": [0.75, 3.75, 0.075],
     "google:gemini-3.5-flash-lite": [0.3, 2.5, 0.03],
+    # Kimi Code расходует лимит подписки, а не деньги за токены.
+    "kimi:k3.1-pro": [0, 0],
+    "kimi:k3.1-pro-highspeed": [0, 0],
+    "kimi:k3": [0, 0],
+    "kimi:k3-256k": [0, 0],
+    "kimi:kimi-for-coding": [0, 0],
+    "kimi:kimi-for-coding-highspeed": [0, 0],
     "moonshot:kimi-k3.1-pro": [2, 10, 0.2],
     "moonshot:kimi-k3.1-pro-highspeed": [4, 20, 0.4],
     "moonshot:kimi-k3": [3, 15, 0.3],

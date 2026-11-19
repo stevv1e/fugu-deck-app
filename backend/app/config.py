@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     xai_api_key: str = ""
     google_api_key: str = ""
+    kimi_api_key: str = ""
     moonshot_api_key: str = ""
     qwen_api_key: str = ""
     mistral_api_key: str = ""

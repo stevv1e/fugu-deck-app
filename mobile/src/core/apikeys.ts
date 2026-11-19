@@ -10,7 +10,7 @@ import { b64, concat, randomId, utf8 } from "./bytes";
 import { sha256 } from "./crypto";
 import { HPKE_INFO, hpkeSeal } from "./hpke";
 
-export const LLM_PROVIDERS = ["sakana", "anthropic", "openai", "xai", "google", "moonshot", "qwen", "mistral", "minimax", "zai", "deepseek"] as const;
+export const LLM_PROVIDERS = ["sakana", "anthropic", "openai", "xai", "google", "kimi", "moonshot", "qwen", "mistral", "minimax", "zai", "deepseek"] as const;
 export const KEY_PROVIDERS = [...LLM_PROVIDERS, "github", "gitlab"] as const;
 /** Ключи моделей и токены Git — на экране это две разные кнопки. */
 export const GIT_PROVIDERS = ["github", "gitlab"] as const;

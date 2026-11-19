@@ -143,5 +143,7 @@ test("телефон шифрует — keyguard расшифровывает; k
   assert.match(put(foreignCt)[0], /^403\|\|.*расшифровать/, "шифротекст для чужого устройства");
   const gh = await buildKeyPut(sign, { hpkePub: pub, deviceId: device_id, provider: "github", apiKey: "ghp_REALTOKEN0123" });
   assert.match(put(gh)[0], /^200\|github=ghp_REALTOKEN0123/, "токен GitHub");
+  const kimi = await buildKeyPut(sign, { hpkePub: pub, deviceId: device_id, provider: "kimi", apiKey: "sk-kimi-REAL-KEY-12345678" });
+  assert.match(put(kimi)[0], /^200\|kimi=sk-kimi-REAL-KEY-12345678/, "ключ Kimi Code проходит схему provider");
   await assert.rejects(buildKeyPut(sign, { hpkePub: pub, deviceId: device_id, provider: "anthropic", apiKey: "sk-ant\r\nX-Evil: 1" }), /пробелов/);
 });
