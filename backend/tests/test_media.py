@@ -5,7 +5,35 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
-from app.media import MediaWorker, MediaError, media_kind, parse_google_segments, srt_time, transcript_text
+from app.media import MediaWorker, MediaError, media_kind, parse_google_segments, post_transient_retry, srt_time, transcript_text
+
+
+@pytest.mark.asyncio
+async def test_media_transient_retry(monkeypatch):
+    class Response:
+        headers = {}
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def post(self, url, **kwargs):
+            self.calls += 1
+            return Response(503 if self.calls < 3 else 200)
+
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("app.media.asyncio.sleep", fake_sleep)
+    client = Client()
+    response = await post_transient_retry(client, "https://example.test")
+    assert response.status_code == 200 and client.calls == 3
+    assert sleeps == [1, 2]
 
 
 def test_media_formats_and_segments():

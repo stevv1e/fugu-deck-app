@@ -19,6 +19,24 @@ AUDIO_EXT = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".webm", ".mpeg"}
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".mpeg"}
 
 
+async def post_transient_retry(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    for attempt in range(3):
+        try:
+            response = await client.post(url, **kwargs)
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt == 2:
+                raise
+        else:
+            if response.status_code not in {429, 500, 503, 504} or attempt == 2:
+                return response
+            retry_after = response.headers.get("Retry-After", "")
+            delay = min(30, float(retry_after)) if retry_after.isdigit() else 2 ** attempt
+            await asyncio.sleep(delay)
+            continue
+        await asyncio.sleep(2 ** attempt)
+    raise AssertionError("unreachable")
+
+
 class MediaError(ValueError):
     pass
 
@@ -269,7 +287,7 @@ class MediaWorker:
             headers = {"x-goog-api-key": key}
         headers["X-Deck-Media-Seconds"] = str(max(1, round(seconds)))
         async with httpx.AsyncClient(timeout=self.settings.llm_timeout_seconds) as client:
-            response = await client.post(url, headers=headers, json=body)
+            response = await post_transient_retry(client, url, headers=headers, json=body)
         if response.status_code != 200:
             raise MediaError(f"Google transcription: {response.status_code} {response.text[:500]}")
         data = response.json()
