@@ -5,7 +5,8 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
-from app.media import MediaWorker, MediaError, media_kind, parse_google_segments, post_transient_retry, srt_time, transcript_text
+from app.media import (MediaWorker, MediaError, TranscriptFormatError, media_kind, parse_google_segments,
+                       post_transient_retry, srt_time, transcript_text)
 
 
 @pytest.mark.asyncio
@@ -65,6 +66,101 @@ async def test_google_transcribe_fallback(tmp_path: Path, monkeypatch):
     got = await worker._google(job, source, 2)
     assert models == ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
     assert got[0]["text"] == "голос"
+
+
+@pytest.mark.asyncio
+async def test_google_transcribe_retries_invalid_json(tmp_path: Path, monkeypatch):
+    class Response:
+        status_code = 200
+        headers = {}
+        text = ""
+
+        def __init__(self, text, finish="STOP"):
+            self.text_value = text
+            self.finish = finish
+
+        def json(self):
+            return {"candidates": [{"finishReason": self.finish,
+                                    "content": {"parts": [{"text": self.text_value}]}}]}
+
+    calls, bodies = [], []
+
+    async def fake_retry(client, url, **kwargs):
+        calls.append(kwargs["headers"]["X-Deck-Model"])
+        bodies.append(kwargs["json"])
+        return Response('[{"start":' if len(calls) == 1 else '[{"start":0,"end":2,"text":"голос"}]')
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("app.media.post_transient_retry", fake_retry)
+    monkeypatch.setattr("app.media.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("app.media.kgc.enabled", lambda: True)
+    monkeypatch.setattr("app.media.kgc.token", lambda: "token")
+    source = tmp_path / "voice.ogg"
+    source.write_bytes(b"audio")
+    worker = MediaWorker(None, Settings(data_dir=tmp_path, keyguard_url="http://keyguard"))
+    job = {"id": "j", "conversation_id": "c", "created_by": "u"}
+    got = await worker._google(job, source, 2)
+    assert calls == ["gemini-3.8-flash", "gemini-3.8-flash"]
+    assert got[0]["text"] == "голос"
+    config = bodies[0]["generationConfig"]
+    assert config["maxOutputTokens"] == 16384
+    assert config["responseSchema"]["type"] == "ARRAY"
+    assert config["responseSchema"]["items"]["required"] == ["start", "end", "text"]
+
+
+@pytest.mark.asyncio
+async def test_google_transcribe_reports_truncation(tmp_path: Path, monkeypatch):
+    class Response:
+        status_code = 200
+        headers = {}
+        text = ""
+
+        def json(self):
+            return {"candidates": [{"finishReason": "MAX_TOKENS",
+                                    "content": {"parts": [{"text": '[{"start":'}]}}]}
+
+    async def fake_retry(client, url, **kwargs):
+        return Response()
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("app.media.post_transient_retry", fake_retry)
+    monkeypatch.setattr("app.media.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("app.media.kgc.enabled", lambda: True)
+    monkeypatch.setattr("app.media.kgc.token", lambda: "token")
+    source = tmp_path / "voice.ogg"
+    source.write_bytes(b"audio")
+    worker = MediaWorker(None, Settings(data_dir=tmp_path, keyguard_url="http://keyguard"))
+    job = {"id": "j", "conversation_id": "c", "created_by": "u"}
+    with pytest.raises(TranscriptFormatError, match="MAX_TOKENS"):
+        await worker._google(job, source, 600)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_chunk_splits_invalid_response(tmp_path: Path):
+    source = tmp_path / "chunk.ogg"
+    source.write_bytes(b"audio")
+    worker = MediaWorker(None, Settings(data_dir=tmp_path))
+
+    async def fake_run(jid, args):
+        Path(args[-1]).write_bytes(b"part")
+        return ""
+
+    async def fake_transcribe(job, path, seconds):
+        if path == source:
+            raise TranscriptFormatError("обрезано")
+        return [{"start": 0, "end": 1, "text": path.name}]
+
+    worker._run = fake_run
+    worker._transcribe = fake_transcribe
+    got = await worker._transcribe_chunk({"id": "j"}, source, 600)
+    assert [s["start"] for s in got] == [0, 300]
+    assert [s["text"] for s in got] == ["chunk_part0.ogg", "chunk_part1.ogg"]
+    assert not (tmp_path / "chunk_part0.ogg").exists()
+    assert not (tmp_path / "chunk_part1.ogg").exists()
 
 
 @pytest.mark.asyncio
