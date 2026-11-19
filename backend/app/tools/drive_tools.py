@@ -1,4 +1,4 @@
-"""Google Drive read-only: поиск и импорт выбранных файлов в текущий чат."""
+"""Google Drive: поиск, импорт выбранных файлов и загрузка вложений из текущего чата."""
 from __future__ import annotations
 
 from ..drive import DriveClient, DriveError
@@ -27,5 +27,17 @@ async def drive_search(ctx, a):
 async def drive_import(ctx, a):
     try:
         return await DriveClient(ctx).import_file(a["file_id"])
+    except DriveError as e:
+        raise ProviderError(str(e))
+
+
+@tool("drive_upload",
+      "Загрузить вложение этого чата в Google Drive как новый файл. Можно указать folder_id; без него файл попадёт в корень. "
+      "Не изменяет и не удаляет существующие файлы.",
+      obj({"attachment_id": {"type": "string"}, "folder_id": {"type": "string"}}, ["attachment_id"]),
+      risk="write", group="drive", title="Загрузка в Google Drive")
+async def drive_upload(ctx, a):
+    try:
+        return await DriveClient(ctx).upload(a["attachment_id"], a.get("folder_id", ""))
     except DriveError as e:
         raise ProviderError(str(e))

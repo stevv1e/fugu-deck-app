@@ -124,6 +124,8 @@ class Settings(BaseSettings):
     openai_transcribe_model: str = "gpt-4o-transcribe-diarize"
     google_transcribe_model: str = "gemini-3.8-flash"
     google_transcribe_fallback_model: str = "gemini-3.5-flash-lite"
+    openai_image_model: str = "gpt-image-2.5-flare"
+    google_image_model: str = "gemini-3.1-flash-lite-image"
     google_drive_refresh_token: str = ""
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""

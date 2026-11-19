@@ -34,7 +34,7 @@ const HINTS: Partial<Record<KeyProvider, string>> = {
   deepseek: "platform.deepseek.com → API Keys",
   github: "github.com → Settings → Developer settings → токен с доступом к нужным репозиториям",
   gitlab: "gitlab.com → Preferences → Access tokens (api, read_repository, write_repository)",
-  google_drive: "OAuth refresh token с доступом drive.readonly; Client ID/Secret задаёт администратор сервера",
+  google_drive: "Подключение через Google: чтение Drive и загрузка новых файлов; Client ID/Secret задаёт администратор сервера",
 };
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
 

@@ -67,6 +67,43 @@ async def test_google_transcribe_fallback(tmp_path: Path, monkeypatch):
     assert got[0]["text"] == "голос"
 
 
+@pytest.mark.asyncio
+async def test_media_report_with_topics(tmp_path: Path, monkeypatch):
+    from app.tools.media_tools import media_report
+
+    settings = Settings(data_dir=tmp_path)
+    db = Database(str(settings.db_path))
+    await db.connect()
+    await db._exec("INSERT INTO conversations (id,model,created_at,updated_at) VALUES ('c','openai:test',1,1)")
+    source = tmp_path / "meeting.json"
+    source.write_text(json.dumps({"segments": [{"start": 65, "end": 70, "text": "Решили выпустить отчёт"}]}))
+    att = await db.add_attachment("c", "meeting.json", "application/json", source.stat().st_size, str(source))
+    seen = []
+
+    class Provider:
+        async def stream(self, key, model, messages, tools, on_text, on_tool, headers=None):
+            seen.append((key, model, messages))
+            return type("Result", (), {"text": "# Отчёт\n\n[00:01:05] Выпустить отчёт", "usage": None})()
+
+    class Orchestrator:
+        def llm_key(self, provider, keys):
+            return "key"
+
+        async def _record_usage(self, run, usage):
+            pass
+
+    run = type("Run", (), {"model": "kimi:k3", "keys": {}, "llm_key": None, "user": {"id": "u"}})()
+    ctx = type("Ctx", (), {"settings": settings, "db": db, "conversation_id": "c", "run": run,
+                           "orchestrator": Orchestrator()})()
+    monkeypatch.setattr("app.tools.media_tools.get_provider", lambda name, settings: Provider())
+    got = await media_report(ctx, {"attachment_id": att["id"], "request": "Решения", "topics": ["релиз"]})
+    report = await db.get_attachment(got["attachment"]["id"])
+    assert "00:01:05" in Path(report["path"]).read_text()
+    assert "Темы: релиз" in seen[0][2][1]["content"]
+    assert seen[0][0] == "key" and seen[0][1] == "k3"
+    await db.close()
+
+
 def test_media_formats_and_segments():
     assert media_kind("voice.ogg", "") == "audio"
     assert media_kind("movie.bin", "video/mp4") == "video"

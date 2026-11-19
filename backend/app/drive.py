@@ -1,6 +1,8 @@
-"""Google Drive read-only: поиск, метаданные, экспорт Google-документов и скачивание во вложения чата."""
+"""Google Drive: поиск, скачивание во вложения чата и загрузка новых файлов."""
 from __future__ import annotations
 
+import asyncio
+import json
 import mimetypes
 import re
 import time
@@ -142,3 +144,48 @@ class DriveClient:
         return {"attachment": {k: att[k] for k in ("id", "filename", "mime", "size")},
                 "source": {"id": file_id, "name": meta["name"], "url": meta.get("webViewLink")},
                 "note": "Файл импортирован в чат; для аудио/видео используйте transcribe_media, для документов — read_attachment"}
+
+    async def upload(self, attachment_id: str, folder_id: str = "") -> dict:
+        att = await self.ctx.db.get_attachment(attachment_id)
+        if not att or att["conversation_id"] != self.ctx.conversation_id:
+            raise DriveError("Вложение не найдено")
+        if folder_id and not FILE_ID.fullmatch(folder_id):
+            raise DriveError("Некорректный ID папки")
+        path = Path(att["path"])
+        if not path.is_file():
+            raise DriveError("Файл вложения не найден")
+        size = path.stat().st_size
+        limit = self.settings.max_media_upload_mb * 1024 * 1024
+        if not size or size > limit:
+            raise DriveError(f"Файл должен быть непустым и не больше {limit // 1024 // 1024} МБ")
+        await self._refresh()
+        name = re.sub(r"[^\w.\-() ]+", "_", Path(att["filename"]).name, flags=re.UNICODE)[:120].strip(" .") or "fugu-file"
+        mime = att["mime"] or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        metadata = {"name": name, **({"parents": [folder_id]} if folder_id else {})}
+        boundary = "fugu-" + uuid.uuid4().hex
+        prefix = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+                  + json.dumps(metadata, ensure_ascii=False)
+                  + f"\r\n--{boundary}\r\nContent-Type: {mime}\r\n\r\n").encode()
+        suffix = f"\r\n--{boundary}--\r\n".encode()
+
+        async def content():
+            yield prefix
+            with path.open("rb") as f:
+                while chunk := await asyncio.to_thread(f.read, 2 * 1024 * 1024):
+                    yield chunk
+            yield suffix
+
+        base = self.settings.keyguard_url.rstrip("/") + "/drive/upload/files" if kgc.enabled() else \
+            "https://www.googleapis.com/upload/drive/v3/files"
+        params = {"uploadType": "multipart", "fields": "id,name,mimeType,size,webViewLink", "supportsAllDrives": "true"}
+        headers = self._headers() | {"Content-Type": f"multipart/related; boundary={boundary}",
+                                    "Content-Length": str(len(prefix) + size + len(suffix))}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(900, connect=30)) as client:
+            r = await client.post(base, params=params, headers=headers, content=content())
+        if r.status_code != 200:
+            raise DriveError(f"Google Drive upload: {r.status_code} {r.text[:300]}")
+        data = r.json()
+        if not data.get("id"):
+            raise DriveError("Google Drive не вернул ID загруженного файла")
+        return {"file": data, "attachment_id": attachment_id,
+                "note": "Новый файл загружен в Google Drive; существующие файлы не изменялись"}

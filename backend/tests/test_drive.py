@@ -30,6 +30,12 @@ class FakeClient:
     async def aclose(self):
         pass
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
     async def get(self, url, **kwargs):
         self.requests.append((url, kwargs))
         if url.endswith("/files"):
@@ -41,6 +47,13 @@ class FakeClient:
         response = httpx.Response(200, content=self.content)
         response.request = httpx.Request("GET", url)
         return FakeStream(response)
+
+    async def post(self, url, **kwargs):
+        chunks = []
+        async for chunk in kwargs["content"]:
+            chunks.append(chunk)
+        self.requests.append((url, {**kwargs, "content": b"".join(chunks)}))
+        return httpx.Response(200, json={"id": "new-file", "name": "voice.ogg", "webViewLink": "https://drive.test/new-file"})
 
 
 @pytest.mark.asyncio
@@ -67,6 +80,29 @@ async def test_drive_search_and_import_google_doc(tmp_path: Path, monkeypatch):
     att = await db.get_attachment(got["attachment"]["id"])
     assert Path(att["path"]).read_bytes() == b"docx-content"
     assert FakeClient.requests[-1][1]["params"]["mimeType"].endswith("wordprocessingml.document")
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_drive_upload_attachment(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.drive.httpx.AsyncClient", FakeClient)
+    settings = Settings(data_dir=tmp_path)
+    db = Database(str(settings.db_path))
+    await db.connect()
+    await db._exec("INSERT INTO conversations (id,model,created_at,updated_at) VALUES ('c','openai:test',1,1)")
+    source = tmp_path / "voice.ogg"
+    source.write_bytes(b"audio-data")
+    att = await db.add_attachment("c", "voice.ogg", "audio/ogg", 10, str(source))
+    ctx = type("Ctx", (), {"settings": settings, "db": db, "conversation_id": "c"})()
+    client = DriveClient(ctx)
+    client._access = "token"
+    client._expires = 4_000_000_000
+    got = await client.upload(att["id"], "folder-1")
+    assert got["file"]["id"] == "new-file"
+    url, call = FakeClient.requests[-1]
+    assert url.endswith("/upload/drive/v3/files")
+    assert b'"parents": ["folder-1"]' in call["content"] and b"audio-data" in call["content"]
+    assert int(call["headers"]["Content-Length"]) == len(call["content"])
     await db.close()
 
 

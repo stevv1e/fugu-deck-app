@@ -15,7 +15,7 @@ APPROVAL_TITLES = {"sign": "с подписью", "tap": "без подписи"
 APPROVAL_ACTIONS = (
     "commit_files", "create_pull_request", "create_branch", "create_repo", "project_repo_set",
     "memory_save", "memory_update", "memory_link", "memory_delete", "create_file", "delegate", "mcp",
-    "transcribe_media", "media_cancel", "drive_import",
+    "transcribe_media", "media_report", "generate_image", "media_cancel", "drive_import", "drive_upload",
 )
 
 

@@ -132,7 +132,7 @@ async def test_talk_agent_tools_and_prompt(client):
     login(client)
     ag = main.agent()
     talk = Run(id="r1", conversation_id="c", model="sakana:x", project_id="talk")
-    assert {t.name for t in ag.tools_for(talk)} == {"list_attachments", "read_attachment", "create_file", "transcribe_media", "media_jobs", "media_cancel", "drive_search", "drive_import"}
+    assert {t.name for t in ag.tools_for(talk)} == {"list_attachments", "read_attachment", "create_file", "transcribe_media", "media_jobs", "media_report", "generate_image", "media_cancel", "drive_search", "drive_import", "drive_upload"}
     eng = Run(id="r2", conversation_id="c", model="sakana:x", project_id="general", git_status={"github": None})
     names = {t.name for t in ag.tools_for(eng)}
     assert "memory_save" in names and "commit_files" not in names  # ключа Git нет — инструменты Git не отправляются
