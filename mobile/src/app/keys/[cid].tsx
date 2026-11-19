@@ -3,10 +3,11 @@
  * Ключ шифруется на телефоне для keyguard (HPKE); ввод, удаление и лимит подписываются биометрией.
  */
 import { useLocalSearchParams } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useState } from "react";
 
 import { GIT_PROVIDERS, LLM_PROVIDERS, SERVICE_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
-import { deleteKey, keyStatus, parseLimit, putKey, setSpendLimit, type KeyStatus } from "@/core/personal";
+import { deleteKey, driveOAuthStart, driveOAuthStatus, keyStatus, parseLimit, putKey, setSpendLimit, type KeyStatus } from "@/core/personal";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, type ClusterRecord } from "@/state/cluster";
 import { openClusterSession } from "@/state/clusterSession";
@@ -100,6 +101,17 @@ export default function Keys() {
       return `Ключ ${KEY_TITLES[provider]} сохранён: ${out.masked}. Его видит только keyguard.`;
     });
   };
+  const connectDrive = () => run("drive-oauth", async (r) => {
+    const session = await openClusterSession(r, r.api);
+    const oauth = await driveOAuthStart(session);
+    await WebBrowser.openBrowserAsync(oauth.url);
+    for (let i = 0; i < 20; i++) {
+      const status = await driveOAuthStatus(session, oauth.state);
+      if (status.connected) return "Google Drive подключён с доступом только на чтение";
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error("Google пока не подтвердил подключение. Если вы разрешили доступ, повторите проверку через минуту");
+  });
   const remove = (pv: KeyProvider) => run(`rm:${pv}`, async (r) => {
     await deleteKey(await openClusterSession(r, r.api), await keysOf(r), pv);
     return `Ключ ${KEY_TITLES[pv]} удалён`;
@@ -158,7 +170,9 @@ export default function Keys() {
         </>
       ) : null}
 
-      <Txt kind="label">{service ? "OAuth refresh token" : git ? "добавить или заменить токен" : "от какой ИИ ключ"}</Txt>
+      {service ? <Btn title="Подключить через Google" onPress={connectDrive} busy={busy === "drive-oauth"} /> : null}
+      {service ? <Txt kind="small">Откроется Google: войдите и разрешите чтение Drive. Refresh token получит keyguard, вводить его вручную не нужно.</Txt> : null}
+      <Txt kind="label">{service ? "Резервный вариант: OAuth refresh token" : git ? "добавить или заменить токен" : "от какой ИИ ключ"}</Txt>
       <Row gap={6} style={{ flexWrap: "wrap" }}>{list.map((pv) => (
         <Btn key={pv} small title={KEY_TITLES[pv]} kind={pv === provider ? "primary" : "ghost"} onPress={() => setProvider(pv)} />
       ))}</Row>

@@ -19,6 +19,17 @@ export type KeyStatus = {
 
 export const keyStatus = (s: ApiSession) => s.request<KeyStatus>("GET", "/v1/keys/status");
 
+export type DriveOAuthStart = { state: string; url: string };
+export type DriveOAuthStatus = { connected: boolean; pending: boolean; expires: string };
+
+export function driveOAuthStart(s: ApiSession) {
+  return s.request<DriveOAuthStart>("POST", "/v1/drive/oauth/start");
+}
+
+export function driveOAuthStatus(s: ApiSession, state: string) {
+  return s.request<DriveOAuthStatus>("GET", `/v1/drive/oauth/status?state=${encodeURIComponent(state)}`);
+}
+
 export async function putKey(s: ApiSession, keys: DeviceKeys, hpkePub: string, provider: KeyProvider, apiKey: string) {
   const body = await buildKeyPut((b, n) => signClusterAction(keys, b, { nonce: n }), { hpkePub: unb64(hpkePub), deviceId: clusterDeviceId(keys), provider, apiKey });
   return s.request<{ masked: string }>("POST", "/v1/keys", body);
