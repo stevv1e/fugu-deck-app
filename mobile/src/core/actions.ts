@@ -16,7 +16,7 @@
  */
 
 export type LlmProvider = 'sakana' | 'anthropic' | 'openai' | 'xai' | 'google' | 'kimi' | 'moonshot' | 'qwen' | 'mistral' | 'minimax' | 'zai' | 'deepseek';
-export type Provider = LlmProvider | 'github' | 'gitlab';
+export type Provider = LlmProvider | 'github' | 'gitlab' | 'google_drive';
 /** none — исключить участника из пространства. */
 export type Role = 'reader' | 'editor' | 'owner' | 'none';
 
@@ -161,7 +161,7 @@ const list =
 const MCP_ID = /^[a-z][a-z0-9-]{1,30}$/;
 /** Домен для агента: точное имя хоста строчными буквами, без «*» и IP. */
 export const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
-const PROVIDERS = ['sakana', 'anthropic', 'openai', 'xai', 'google', 'kimi', 'moonshot', 'qwen', 'mistral', 'minimax', 'zai', 'deepseek', 'github', 'gitlab'];
+const PROVIDERS = ['sakana', 'anthropic', 'openai', 'xai', 'google', 'kimi', 'moonshot', 'qwen', 'mistral', 'minimax', 'zai', 'deepseek', 'github', 'gitlab', 'google_drive'];
 const HOST = /^(?=.{1,253}$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$|^\d{1,3}(\.\d{1,3}){3}$|^\[[0-9A-Fa-f:]+\]$/;
 
 // Обязательные ключи типа (необязательные, с «?», живут в OPTIONAL и в обязательную схему не входят).
@@ -286,6 +286,7 @@ const PROVIDER_NAMES: Record<Provider, string> = {
   deepseek: 'DeepSeek',
   github: 'GitHub',
   gitlab: 'GitLab',
+  google_drive: 'Google Drive',
 };
 const ROLE_NAMES: Record<Role, string> = { reader: 'читатель', editor: 'редактор', owner: 'владелец', none: 'исключить из пространства' };
 const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;

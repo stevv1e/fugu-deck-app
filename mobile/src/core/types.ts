@@ -122,6 +122,7 @@ export type RunEvent =
   | { seq: number; type: "approval_resolved"; approval_id: string; call_id: string; approved: boolean }
   | { seq: number; type: "tool_start"; call_id: string; name: string; title?: string; args: any; risk?: string }
   | { seq: number; type: "tool_end"; call_id: string; name: string; ok: boolean; result?: any; error?: string }
+  | { seq: number; type: "media_progress"; job_id: string; status: string; progress: number }
   | { seq: number; type: "message_saved"; has_tools: boolean }
   | { seq: number; type: "notice"; text: string }
   | { seq: number; type: "model_fallback"; failed_model: string; model: string; message: string }

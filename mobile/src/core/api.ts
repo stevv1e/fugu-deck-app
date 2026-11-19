@@ -49,11 +49,12 @@ export type ScheduleInput = Partial<Pick<Schedule, "title" | "prompt" | "kind" |
 export type ProjectExport = { format: string; name: string; description: string; instructions: string; skills: unknown[]; memories: unknown[] };
 
 /** Агент пространства: имя, модель («» — модель чата), инструкции, доступы и скилы («*» — все). */
-export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp" | "web";
+export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp" | "web" | "media" | "drive";
 /** Подтверждения действий агента: "" — как на сервере; sign — с подписью; tap — без подписи; dangerous — только опасные; none — без подтверждений. */
 export type AgentApprovals = "" | "sign" | "tap" | "dangerous" | "none";
 export type AgentApprovalAction = "commit_files" | "create_pull_request" | "create_branch" | "create_repo" | "project_repo_set" |
-  "memory_save" | "memory_update" | "memory_link" | "memory_delete" | "create_file" | "delegate" | "mcp";
+  "memory_save" | "memory_update" | "memory_link" | "memory_delete" | "create_file" | "delegate" | "mcp" |
+  "transcribe_media" | "media_cancel" | "drive_import";
 export type SpaceAgent = {
   id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[];
   approvals?: AgentApprovals; approval_rules?: Partial<Record<AgentApprovalAction, AgentApprovals>>;

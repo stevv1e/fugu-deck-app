@@ -29,6 +29,7 @@ from .keyvault import KeyVault
 from .outbox import outbox
 from .llm import get_provider, split_model
 from .model_catalog import CatalogError, ModelCatalog
+from .media import MediaWorker
 from .skills import SkillError, SkillStore
 from .tools import ssh_tools
 from .tools.providers import GitHubProvider, GitLabProvider
@@ -56,10 +57,14 @@ async def lifespan(app: FastAPI):
     broker = Broker(db, all_users=settings.is_space)
     state.update(db=db, providers=providers, skills=skills, broker=broker, vault=KeyVault(settings.key_ttl_seconds),
                  catalog=ModelCatalog(settings), agent=Agent(db, settings, providers, skills, broker))
+    media = MediaWorker(db, settings)
+    state["media"] = media
+    state["agent"].media = media
     if not settings.is_space:
         state.update(server_keys=devices.ServerKeys(settings.data_dir, settings.server_name),
                      device_auth=devices.DeviceAuth(auth.jwt_secret(settings) + ":device"))
     await mark_interrupted()
+    await media.start()
     scheduler = sched.Scheduler(db, fire_schedule)
     scheduler.start()
     janitor = asyncio.create_task(attachment_janitor())
@@ -68,6 +73,7 @@ async def lifespan(app: FastAPI):
     await scheduler.stop()
     janitor.cancel()
     watcher.cancel()
+    await media.stop()
     for p in providers.values():
         await p.http.aclose()
     await db.close()
@@ -1416,8 +1422,12 @@ def _drop_stale_uploads(now: float) -> None:
 @app.post("/api/conversations/{cid}/uploads")
 async def upload_start(cid: str, body: UploadStart, u: dict = Me):
     await conv_access(u, cid, "editor")
-    if body.size > CHUNKED_MAX:
-        raise HTTPException(413, f"Файл больше {CHUNKED_MAX // 1024 // 1024} МБ")
+    media = body.mime.startswith(("audio/", "video/")) or Path(body.filename).suffix.lower() in {
+        ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".webm", ".mp4", ".mpeg", ".mov", ".mkv",
+    }
+    limit = settings.max_media_upload_mb if media else CHUNKED_MAX // 1024 // 1024
+    if body.size > limit * 1024 * 1024:
+        raise HTTPException(413, f"Файл больше {limit} МБ")
     _drop_stale_uploads(time.time())
     if sum(1 for x in uploads.values() if x["user"] == u["id"]) >= 6:
         raise HTTPException(429, "Слишком много незавершённых загрузок — дождитесь окончания")
@@ -1488,6 +1498,21 @@ async def download_chunk(aid: str, offset: int = 0, length: int = CHUNK_BYTES, u
         raw = f.read(max(1, min(length, CHUNK_BYTES)))
     return {"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": size, "offset": offset,
             "data": base64.b64encode(raw).decode(), "eof": offset + len(raw) >= size}
+
+
+@app.get("/api/conversations/{cid}/media-jobs")
+async def media_jobs(cid: str, u: dict = Me):
+    await conv_access(u, cid)
+    return await db().list_media_jobs(cid)
+
+
+@app.post("/api/media-jobs/{jid}/cancel")
+async def media_job_cancel(jid: str, u: dict = Me):
+    job = await db().get_media_job(jid)
+    if not job:
+        raise HTTPException(404, "Задача не найдена")
+    await conv_access(u, job["conversation_id"], "editor")
+    return await state["media"].cancel(jid, job["conversation_id"])
 
 
 UNSENT_TTL = 24 * 3600

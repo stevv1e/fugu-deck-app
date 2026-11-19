@@ -341,11 +341,35 @@ SCHEMA = [
     """
     ALTER TABLE agents ADD COLUMN approval_rules TEXT NOT NULL DEFAULT '{}';
     """,
+    # v24: длительные медиа-задачи переживают перезапуск; результат — JSON с ID созданных вложений
+    """
+    CREATE TABLE IF NOT EXISTS media_jobs (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        attachment_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        progress REAL NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT '',
+        result TEXT NOT NULL DEFAULT '{}',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_jobs_conv ON media_jobs(conversation_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_media_jobs_active ON media_jobs(status);
+    """,
+    # v25: доступы к медиа-конвейеру и Google Drive выдаются агенту отдельно
+    """
+    UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp","web","media","drive"]'
+        WHERE id='fugu' AND tools='["git","ssh","memory","files","skills","mcp","web"]';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
 DEFAULT_AGENT = "fugu"
-AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp", "web")
+AGENT_TOOLS = ("git", "ssh", "memory", "files", "skills", "mcp", "web", "media", "drive")
 # Режим «Общение»: его чаты живут в скрытом проекте — не видны среди проектов инжиниринга, а агент в них — собеседник
 # без инструментов Git, серверов и памяти (agent.py).
 TALK_PROJECT = "talk"
@@ -752,6 +776,42 @@ class Database:
             "SELECT id,filename,mime,size,created_at,origin FROM attachments WHERE conversation_id=? ORDER BY created_at",
             (cid,),
         )
+
+    # --- media jobs ---
+    async def create_media_job(self, cid: str, attachment_id: str, kind: str, provider: str, created_by: str = "") -> dict:
+        jid, now = new_id(), time.time()
+        await self._exec(
+            "INSERT INTO media_jobs (id,conversation_id,attachment_id,kind,status,provider,created_by,created_at,updated_at) "
+            "VALUES (?,?,?,?,'queued',?,?,?,?)", (jid, cid, attachment_id, kind, provider, created_by, now, now))
+        return await self.get_media_job(jid)
+
+    async def get_media_job(self, jid: str) -> dict | None:
+        row = await self._one("SELECT * FROM media_jobs WHERE id=?", (jid,))
+        if row:
+            row["result"] = json.loads(row["result"] or "{}")
+        return row
+
+    async def update_media_job(self, jid: str, **fields) -> None:
+        allowed = {"status", "progress", "provider", "error", "result"}
+        sets, values = [], []
+        for key, value in fields.items():
+            if key not in allowed:
+                raise ValueError(f"неизвестное поле media job: {key}")
+            sets.append(f"{key}=?")
+            values.append(json.dumps(value, ensure_ascii=False) if key == "result" else value)
+        if sets:
+            values.extend([time.time(), jid])
+            await self._exec(f"UPDATE media_jobs SET {', '.join(sets)}, updated_at=? WHERE id=?", values)
+
+    async def list_media_jobs(self, cid: str, active: bool = False) -> list[dict]:
+        where = "conversation_id=? AND status IN ('queued','running')" if active else "conversation_id=?"
+        rows = await self._all(f"SELECT * FROM media_jobs WHERE {where} ORDER BY updated_at DESC", (cid,))
+        for row in rows:
+            row["result"] = json.loads(row["result"] or "{}")
+        return rows
+
+    async def pending_media_jobs(self) -> list[dict]:
+        return await self._all("SELECT * FROM media_jobs WHERE status IN ('queued','running') ORDER BY created_at")
 
     # --- usage ---
     async def add_usage(self, cid: str | None, model: str, p: int, c: int, cached: int, cost: float,

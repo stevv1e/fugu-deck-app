@@ -121,6 +121,15 @@ export function applyEvent(items: Item[], e: RunEvent): Item[] {
     case "error":
       out.push({ kind: "notice", key: k(), level: "error", text: e.message });
       break;
+    case "media_progress": {
+      const key = `media:${e.job_id}`;
+      const item = { kind: "notice" as const, key, level: "info" as const,
+        text: `Обработка медиа: ${Math.round(e.progress * 100)}%` };
+      const idx = out.findIndex((i) => i.kind === "notice" && i.key === key);
+      if (idx >= 0) out[idx] = item;
+      else out.push(item);
+      break;
+    }
     case "notice":
       out.push({ kind: "notice", key: k(), level: "info", text: e.text });
       break;

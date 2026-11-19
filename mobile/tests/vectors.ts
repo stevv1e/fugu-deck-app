@@ -40,6 +40,7 @@ const GRANT = {
 const valid: [string, string | null, Record<string, unknown>][] = [
   ["key_put", null, { type: "key_put", provider: "anthropic", key_hint: "6789", ct_sha256: CT }],
   ["key_put Kimi Code", null, { type: "key_put", provider: "kimi", key_hint: "6789", ct_sha256: CT }],
+  ["key_put Google Drive", null, { type: "key_put", provider: "google_drive", key_hint: "6789", ct_sha256: CT }],
   ["key_delete", null, { type: "key_delete", provider: "sakana" }],
   ["key_delete Moonshot", null, { type: "key_delete", provider: "moonshot" }],
   ["mcp_put с токеном", null, { type: "mcp_put", id: "docs", name: "Документация", url: "https://mcp.example.com/mcp", token_hint: "ab_9", ct_sha256: CT }],

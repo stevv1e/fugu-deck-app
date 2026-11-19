@@ -11,8 +11,9 @@ import { sha256 } from "./crypto";
 import { HPKE_INFO, hpkeSeal } from "./hpke";
 
 export const LLM_PROVIDERS = ["sakana", "anthropic", "openai", "xai", "google", "kimi", "moonshot", "qwen", "mistral", "minimax", "zai", "deepseek"] as const;
-export const KEY_PROVIDERS = [...LLM_PROVIDERS, "github", "gitlab"] as const;
-/** Ключи моделей и токены Git — на экране это две разные кнопки. */
+export const SERVICE_PROVIDERS = ["google_drive"] as const;
+export const KEY_PROVIDERS = [...LLM_PROVIDERS, "github", "gitlab", ...SERVICE_PROVIDERS] as const;
+/** Ключи моделей, Git и внешних сервисов — на экране разные кнопки. */
 export const GIT_PROVIDERS = ["github", "gitlab"] as const;
 export type KeyProvider = (typeof KEY_PROVIDERS)[number];
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from .llm.catalog import PROVIDER_TITLES
 
-ALLOWED = {*PROVIDER_TITLES, "github", "gitlab", "gitlab_url"}
+ALLOWED = {*PROVIDER_TITLES, "github", "gitlab", "gitlab_url", "google_drive"}
 
 
 @dataclass

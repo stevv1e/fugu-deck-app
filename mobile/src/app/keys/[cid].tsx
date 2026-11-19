@@ -5,7 +5,7 @@
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 
-import { GIT_PROVIDERS, LLM_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
+import { GIT_PROVIDERS, LLM_PROVIDERS, SERVICE_PROVIDERS, validateApiKey, type KeyProvider } from "@/core/apikeys";
 import { deleteKey, keyStatus, parseLimit, putKey, setSpendLimit, type KeyStatus } from "@/core/personal";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, type ClusterRecord } from "@/state/cluster";
@@ -16,7 +16,7 @@ import { useTheme } from "@/ui/theme";
 const KEY_TITLES: Record<KeyProvider, string> = {
   sakana: "Sakana", anthropic: "Claude (Anthropic)", openai: "OpenAI", xai: "Grok (xAI)", google: "Google Gemini",
   kimi: "Kimi Code", moonshot: "Kimi (Moonshot Platform)", qwen: "Qwen (Alibaba Cloud)", mistral: "Mistral AI", minimax: "MiniMax", zai: "Z.AI GLM",
-  deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab",
+  deepseek: "DeepSeek", github: "GitHub", gitlab: "GitLab", google_drive: "Google Drive",
 };
 const HINTS: Partial<Record<KeyProvider, string>> = {
   sakana: "console.sakana.ai → API Keys",
@@ -33,20 +33,22 @@ const HINTS: Partial<Record<KeyProvider, string>> = {
   deepseek: "platform.deepseek.com → API Keys",
   github: "github.com → Settings → Developer settings → токен с доступом к нужным репозиториям",
   gitlab: "gitlab.com → Preferences → Access tokens (api, read_repository, write_repository)",
+  google_drive: "OAuth refresh token с доступом drive.readonly; Client ID/Secret задаёт администратор сервера",
 };
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
 
 export default function Keys() {
   const { cid, kind } = useLocalSearchParams<{ cid: string; kind?: string }>();
   const git = kind === "git";
-  const list: readonly KeyProvider[] = git ? GIT_PROVIDERS : LLM_PROVIDERS;
-  const title = git ? "Git-токены" : "Токены моделей";
+  const service = kind === "services";
+  const list: readonly KeyProvider[] = service ? SERVICE_PROVIDERS : git ? GIT_PROVIDERS : LLM_PROVIDERS;
+  const title = service ? "Подключения" : git ? "Git-токены" : "Токены моделей";
   const { p } = useTheme();
   const [rec, setRec] = useState<ClusterRecord | null>(null);
   const [st, setSt] = useState<KeyStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
-  const [provider, setProvider] = useState<KeyProvider>(kind === "git" ? "github" : "sakana");
+  const [provider, setProvider] = useState<KeyProvider>(service ? "google_drive" : kind === "git" ? "github" : "sakana");
   const [apiKey, setApiKey] = useState("");
   const [armed, setArmed] = useState<KeyProvider | null>(null);
   const [limit, setLimit] = useState("");
@@ -156,11 +158,11 @@ export default function Keys() {
         </>
       ) : null}
 
-      <Txt kind="label">{git ? "добавить или заменить токен" : "от какой ИИ ключ"}</Txt>
+      <Txt kind="label">{service ? "OAuth refresh token" : git ? "добавить или заменить токен" : "от какой ИИ ключ"}</Txt>
       <Row gap={6} style={{ flexWrap: "wrap" }}>{list.map((pv) => (
         <Btn key={pv} small title={KEY_TITLES[pv]} kind={pv === provider ? "primary" : "ghost"} onPress={() => setProvider(pv)} />
       ))}</Row>
-      <Field label={`${git ? "Токен" : "Ключ"} ${KEY_TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false}
+      <Field label={`${git || service ? "Токен" : "Ключ"} ${KEY_TITLES[provider]}`} value={apiKey} onChangeText={setApiKey} secureTextEntry autoCapitalize="none" autoCorrect={false}
         hint={HINTS[provider] ? `Где взять: ${HINTS[provider]}` : undefined} />
       <Btn title="Сохранить ключ ⌁" onPress={save} busy={busy === "put"} disabled={!apiKey} />
       <Txt kind="small">Ключ шифруется на этом телефоне для keyguard — ни сервер, ни администратор его не видят. ⌁ — понадобится биометрия.</Txt>

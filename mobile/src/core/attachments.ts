@@ -3,8 +3,10 @@
  * поэтому файл идёт в JSON как base64: маленький — одним запросом, большой — частями по 2 МБ (сервер: uploads).
  */
 
-/** Предел сервера для вложений с телефона (загрузка частями). */
+/** Пределы сервера для обычных вложений и медиа (загрузка частями). */
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+export const MAX_MEDIA_ATTACHMENT_BYTES = 500 * 1024 * 1024;
+const MEDIA_EXT = /\.(mp3|wav|flac|ogg|m4a|aac|webm|mp4|mpeg|mov|mkv)$/i;
 export const MAX_ATTACHMENTS = 6;
 /** До этого размера — одним запросом. */
 export const SMALL_UPLOAD = 2 * 1024 * 1024;
@@ -31,7 +33,8 @@ export function base64Bytes(b64: string): number {
 export function attachProblem(f: Pick<PickedFile, "name" | "size">, already: number): string | null {
   if (already >= MAX_ATTACHMENTS) return `К сообщению можно приложить не больше ${MAX_ATTACHMENTS} файлов`;
   if (f.size <= 0) return `Файл «${f.name}» пустой`;
-  if (f.size > MAX_ATTACHMENT_BYTES) return `Файл «${f.name}» — ${sizeText(f.size)}; с телефона можно приложить до ${sizeText(MAX_ATTACHMENT_BYTES)}`;
+  const limit = MEDIA_EXT.test(f.name) ? MAX_MEDIA_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
+  if (f.size > limit) return `Файл «${f.name}» — ${sizeText(f.size)}; с телефона можно приложить до ${sizeText(limit)}`;
   return null;
 }
 

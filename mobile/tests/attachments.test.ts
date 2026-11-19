@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { attachProblem, base64Bytes, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, sizeText, SMALL_UPLOAD, uploadBody, uploadFile } from "../src/core/attachments";
+import { attachProblem, base64Bytes, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_MEDIA_ATTACHMENT_BYTES, sizeText, SMALL_UPLOAD, uploadBody, uploadFile } from "../src/core/attachments";
 
 test("размер по base64 и подписи размера", () => {
   for (const n of [1, 2, 3, 4, 1000, 1001, 1002]) {
@@ -16,7 +16,9 @@ test("размер по base64 и подписи размера", () => {
 test("большой, пустой и лишний файл отклоняются до загрузки", () => {
   assert.equal(attachProblem({ name: "a.png", size: 1024 }, 0), null);
   assert.equal(attachProblem({ name: "a.png", size: MAX_ATTACHMENT_BYTES }, MAX_ATTACHMENTS - 1), null);
-  assert.match(attachProblem({ name: "video.mp4", size: MAX_ATTACHMENT_BYTES + 1 }, 0)!, /video\.mp4.*до 50,0 МБ/);
+  assert.equal(attachProblem({ name: "video.mp4", size: MAX_MEDIA_ATTACHMENT_BYTES }, 0), null);
+  assert.match(attachProblem({ name: "video.mp4", size: MAX_MEDIA_ATTACHMENT_BYTES + 1 }, 0)!, /до 500,0 МБ/);
+  assert.match(attachProblem({ name: "document.txt", size: MAX_ATTACHMENT_BYTES + 1 }, 0)!, /до 50,0 МБ/);
   assert.match(attachProblem({ name: "empty.txt", size: 0 }, 0)!, /пустой/);
   assert.match(attachProblem({ name: "a.png", size: 10 }, MAX_ATTACHMENTS)!, /не больше 6/);
 });
