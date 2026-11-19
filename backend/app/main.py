@@ -1079,6 +1079,7 @@ class AgentIn(BaseModel):
     tools: list[str] | None = None
     skills: list[str] | None = Field(None, max_length=100)
     approvals: str | None = Field(None, pattern="^(|sign|tap|dangerous|none)$")
+    approval_rules: dict[str, str] | None = None
 
 
 @app.get("/api/agents")

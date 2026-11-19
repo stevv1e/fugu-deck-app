@@ -5,14 +5,15 @@
  */
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { AppConfig, ApprovalRequest, DeckApi } from "@/core/api";
 import { attachProblem, isImage, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, PREVIEW_MAX, rememberPreviewUri, sizeText, type PickedFile, type Uploaded } from "@/core/attachments";
 import { argsHash } from "@/core/crypto";
+import { approvalActionTitle, APPROVAL_MODES } from "@/core/agentPolicies";
 import { fallbackChain, nameOfModel, resolveScenario, type ModelPreferences } from "@/core/models";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
@@ -23,7 +24,7 @@ import { loadModelPreferences } from "@/state/modelPreferences";
 import { useServers } from "@/state/servers";
 import type { TeamChatState } from "@/core/teams";
 import { AttachmentList } from "@/ui/Attachments";
-import { Btn, Card, Chip, errText, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
+import { Btn, Card, Chip, errText, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { TeamModel } from "@/ui/TeamModel";
 import { ModelPicker } from "@/ui/ModelPicker";
 import { alpha, MONO, useTheme } from "@/ui/theme";
@@ -94,11 +95,16 @@ const ACCESS: Record<string, string> = { git: "репозитории", ssh: "с
 function AgentPreview({ a }: { a: any }) {
   const { p } = useTheme();
   const tools: string[] = Array.isArray(a?.tools) ? a.tools : [];
+  const rules = Object.entries(a?.approval_rules || {}).filter(([, mode]) => !!mode)
+    .map(([id, mode]) => `${approvalActionTitle(id)}: ${APPROVAL_MODES.find(([v]) => v === mode)?.[1] || mode}`);
+  const automatic = a?.approvals === "none" || Object.values(a?.approval_rules || {}).includes("none");
   return (
     <View style={{ gap: 6 }}>
       <Txt>Доступы: {tools.length ? tools.map((t) => ACCESS[t] || t).join(", ") : "никаких"}</Txt>
       {tools.includes("ssh") ? <Notice kind="warn" text="Агент получит доступ к серверам (каждую команду вы всё равно подписываете)." /> : null}
       {a?.model ? <Txt kind="small">Модель: {a.model}</Txt> : null}
+      {rules.length ? <Txt kind="small">Отдельные правила: {rules.join("; ")}</Txt> : null}
+      {automatic ? <Notice kind="warn" text="Агент сможет выполнять часть изменений автоматически, без вашего подтверждения." /> : null}
       <Txt kind="label">инструкция</Txt>
       <View style={{ backgroundColor: p.bg2, borderWidth: 1, borderColor: p.line, padding: 10, borderRadius: p.radius }}>
         <Txt selectable>{String(a?.instructions || "—")}</Txt>
@@ -320,6 +326,7 @@ export default function Chat() {
   const [scenarioEnabled, setScenarioEnabled] = useState(false);
   useEffect(() => { void loadModelPreferences().then(setModelPrefs); }, []);
   const [switching, setSwitching] = useState(false);
+  const [chatMenu, setChatMenu] = useState(false);
   const [agentList, setAgentList] = useState<{ id: string; name: string }[]>([]);
   const pickAgent = async (id: string) => {
     if (!api || !conv) return;
@@ -538,9 +545,28 @@ export default function Chat() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
-      <TopBar title={conv?.title || "Чат"} back />
+      <TopBar title={conv?.title || "Чат"} back right={<IconBtn glyph="⋮" label="Контекст и переходы чата" onPress={() => { setModels(null); setChatMenu(!chatMenu); }} />} />
+      {chatMenu && conv ? (
+        <ScrollView style={{ flexGrow: 0, maxHeight: "60%", borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }} contentContainerStyle={{ padding: 12, gap: 10 }} keyboardShouldPersistTaps="handled">
+          <Row style={{ justifyContent: "space-between" }}><Txt kind="label">контекст задачи</Txt><Chip text={runId ? "агент работает" : "готов"} color={runId ? p.ok : p.dim} /></Row>
+          <Card style={{ padding: 12 }}>
+            <Txt kind="small">Проект: {conv.project_id === "talk" ? "Общение" : conv.project_id}</Txt>
+            <Txt kind="mono" numberOfLines={1}>{conv.model}</Txt>
+            <Txt kind="small">Подтверждения выполняются по правилам выбранного агента.</Txt>
+          </Card>
+          <Row gap={7} style={{ flexWrap: "wrap" }}>
+            <Btn small kind="ghost" title="Чаты проекта" onPress={() => { setChatMenu(false); router.push(`/s/${sid}/p/${conv.project_id}`); }} />
+            <Btn small kind="ghost" title="Workspace" onPress={() => { setChatMenu(false); router.push(`/s/${sid}/workspace`); }} />
+            <Btn small kind="ghost" title="Задачи" onPress={() => { setChatMenu(false); router.push(`/s/${sid}/tasks`); }} />
+          </Row>
+          {conv.project_id !== "talk" ? <Row gap={7} style={{ flexWrap: "wrap" }}>
+            <Btn small kind="ghost" title="База знаний" onPress={() => { setChatMenu(false); router.push(`/s/${sid}/kb/${conv.project_id}`); }} />
+            <Btn small kind="ghost" title="Расписание" onPress={() => { setChatMenu(false); router.push(`/s/${sid}/sched/${conv.project_id}`); }} />
+          </Row> : null}
+        </ScrollView>
+      ) : null}
       {conv ? (
-        <Pressable onPress={conv.team || runId || !canWrite ? undefined : openModels}>
+        <Pressable onPress={conv.team || runId || !canWrite ? undefined : () => { setChatMenu(false); void openModels(); }}>
           <Row style={{ paddingHorizontal: 14, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.line, justifyContent: "space-between" }}>
             <Txt kind="mono" color={p.accent} numberOfLines={1} style={{ fontSize: 11.5, flex: 1 }}>
               {(conv.agent as { name?: string } | undefined)?.name && (conv.agent as { id?: string }).id !== "fugu" ? `${(conv.agent as { name: string }).name} · ` : ""}{conv.model}{conv.team || !canWrite ? "" : "  ▾"}
@@ -550,9 +576,10 @@ export default function Chat() {
         </Pressable>
       ) : null}
       {models && conv && !conv.team ? (
-        <View style={{ padding: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }}>
+        <ScrollView style={{ flexGrow: 0, maxHeight: "65%", borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }}
+          contentContainerStyle={{ padding: 10, gap: 8 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
           <ModelPicker models={models.list} ready={models.ready} providerTitles={models.titles} selected={conv.model}
-            onSelect={(m) => { if (!switching) void pickModel(m); }} onClose={() => setModels(null)} maxHeight={390} />
+            onSelect={(m) => { if (!switching) void pickModel(m); }} onClose={() => setModels(null)} maxHeight={320} />
           {agentList.length ? (
             <>
               <Txt kind="label">агент</Txt>
@@ -574,7 +601,7 @@ export default function Chat() {
           {models.list.some((m) => !models.ready.includes(m.split(":")[0])) ? (
             <Txt kind="small">Серые модели недоступны: для их провайдера не введён ключ (экран кластера → ключи).</Txt>
           ) : null}
-        </View>
+        </ScrollView>
       ) : null}
       {/* На Android окно рисуется под системными панелями (edge-to-edge), и система сама его под клавиатуру
           не сжимает — без отступа клавиатура закрывала бы поле ввода. */}

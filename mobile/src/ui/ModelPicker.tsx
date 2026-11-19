@@ -75,7 +75,7 @@ export function ModelPicker({ models, ready, selected, providerTitles = {}, onSe
           style={{ flex: 1, color: p.text, fontSize: 14, outlineStyle: "none", paddingVertical: 5 } as never} />
         {onClose ? <IconBtn glyph="×" label="Закрыть выбор модели" onPress={onClose} /> : null}
       </Row>
-      <ScrollView style={{ maxHeight }} contentContainerStyle={{ padding: 10, gap: 13 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ maxHeight }} contentContainerStyle={{ padding: 10, gap: 13 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
         {preferences && !query ? special("избранное", preferences.favorites.filter((x) => models.includes(x))) : null}
         {preferences && !query ? special("недавние", preferences.recent.filter((x) => models.includes(x) && !preferences.favorites.includes(x))) : null}
         {groups.map(([provider, values]) => (

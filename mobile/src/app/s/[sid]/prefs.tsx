@@ -10,6 +10,7 @@ import { Btn, Card, Chip, Empty, Field, Loading, Notice, Row, Screen, Txt } from
 import { AgentsEditor } from "@/ui/AgentsEditor";
 import { ModelCatalogPanel } from "@/ui/ModelCatalogPanel";
 import { SectionHeading } from "@/ui/SectionHeading";
+import { Tabs } from "@/ui/Tabs";
 import { useTheme } from "@/ui/theme";
 
 const GIT: Record<string, string> = { github: "GitHub", gitlab: "GitLab" };
@@ -37,11 +38,12 @@ export default function SpacePrefs() {
     <Screen title="Модели, репозитории, агенты">
       {tab === "models" ? <SectionHeading eyebrow="облачные API" title="Модели и провайдеры" text={`${models.length} моделей · ${groups.length} провайдеров. Выбирайте модель под задачу и контролируйте доступ по ключам.`} /> : null}
       {apiError ? <Notice text={apiError} /> : null}
-      <Row gap={8}>
-        <Btn title="Модели" kind={tab === "models" ? "primary" : "ghost"} onPress={() => setTab("models")} style={{ flex: 1 }} />
-        <Btn title="Репозитории" kind={tab === "repos" ? "primary" : "ghost"} onPress={() => setTab("repos")} style={{ flex: 1 }} />
-        <Btn title="Агенты" kind={tab === "agents" ? "primary" : "ghost"} onPress={() => setTab("agents")} style={{ flex: 1 }} />
-      </Row>
+      <Tabs<"models" | "repos" | "agents">
+        items={[{ id: "models", title: "Модели" }, { id: "repos", title: "Репозитории" }, { id: "agents", title: "Агенты" }]}
+        value={tab}
+        onChange={setTab}
+        label="Настройки пространства"
+      />
       {tab === "agents" && api ? (
         <AgentsEditor api={api} models={cfg.data?.models ?? []}
           canEdit={(cfg.data?.me as { role?: string } | undefined)?.role === "owner"} />

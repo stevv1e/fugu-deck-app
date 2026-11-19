@@ -12,11 +12,21 @@ MAX_AGENTS = 20
 # требует ssh-gateway), изменение агентов (agent_save) — тоже.
 APPROVALS = ("", "sign", "tap", "dangerous", "none")
 APPROVAL_TITLES = {"sign": "с подписью", "tap": "без подписи", "dangerous": "только опасные", "none": "без подтверждений"}
+APPROVAL_ACTIONS = (
+    "commit_files", "create_pull_request", "create_branch", "create_repo", "project_repo_set",
+    "memory_save", "memory_update", "memory_link", "memory_delete", "create_file", "delegate", "mcp",
+)
 
 
-def approval_mode(agent: dict | None, server_mode: str) -> tuple[str, bool]:
-    """(режим ApprovalPolicy, нужна ли подпись) для агента; без своей настройки — режим сервера и подпись."""
-    a = (agent or {}).get("approvals") or ""
+def approval_mode(agent: dict | None, server_mode: str, action: str = "") -> tuple[str, bool]:
+    """(режим ApprovalPolicy, нужна ли подпись) для действия агента; пустое правило наследует общий режим."""
+    agent = agent or {}
+    a = agent.get("approvals") or ""
+    rules = agent.get("approval_rules") or {}
+    if action and isinstance(rules, dict):
+        rule = rules.get("mcp" if action.startswith("mcp_") else action)
+        if rule in APPROVALS and rule:
+            a = rule
     if a == "tap":
         return "all", False
     if a == "sign":
@@ -40,6 +50,10 @@ def agent_problem(aid: str, fields: dict, exists: bool, count: int, models: list
         return f"Доступы агента: {', '.join(AGENT_TOOLS)}"
     if fields.get("approvals") is not None and fields["approvals"] not in APPROVALS:
         return "Подтверждения: sign, tap, dangerous, none или пусто"
+    rules = fields.get("approval_rules")
+    if rules is not None:
+        if not isinstance(rules, dict) or any(k not in APPROVAL_ACTIONS or v not in APPROVALS for k, v in rules.items()):
+            return "Неподдерживаемое правило действия агента"
     if fields.get("model") and fields["model"] not in models:
         return f"Неизвестная модель {fields['model']}"
     if not exists and count >= MAX_AGENTS:

@@ -337,6 +337,10 @@ SCHEMA = [
     """
     ALTER TABLE conversations ADD COLUMN parent_id TEXT;
     """,
+    # v23: у агента отдельные правила подтверждения для коммитов, PR/MR и других изменяющих инструментов
+    """
+    ALTER TABLE agents ADD COLUMN approval_rules TEXT NOT NULL DEFAULT '{}';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -648,6 +652,7 @@ class Database:
         if r:
             r["tools"] = json.loads(r["tools"] or "[]")
             r["skills"] = json.loads(r["skills"] or "[]")
+            r["approval_rules"] = json.loads(r["approval_rules"] or "{}")
         return r
 
     async def list_agents(self) -> list[dict]:
@@ -658,7 +663,7 @@ class Database:
 
     async def put_agent(self, aid: str, **f: Any) -> dict:
         now = time.time()
-        f = {k: (json.dumps(v) if k in ("tools", "skills") else v) for k, v in f.items() if v is not None}
+        f = {k: (json.dumps(v) if k in ("tools", "skills", "approval_rules") else v) for k, v in f.items() if v is not None}
         if await self.get_agent(aid):
             if f:
                 sets = ",".join(f"{k}=?" for k in f)

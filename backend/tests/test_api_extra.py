@@ -496,6 +496,9 @@ async def test_agent_approvals(client):
     assert approval_mode({"approvals": "dangerous"}, "all") == ("dangerous", True)
     assert approval_mode({"approvals": ""}, "dangerous") == ("dangerous", True)
     assert approval_mode(None, "all") == ("all", True)
+    assert approval_mode({"approvals": "none", "approval_rules": {"commit_files": "sign"}}, "all", "commit_files") == ("all", True)
+    assert approval_mode({"approvals": "sign", "approval_rules": {"create_pull_request": "none"}}, "all", "create_pull_request") == ("none", True)
+    assert approval_mode({"approval_rules": {"mcp": "tap"}}, "all", "mcp_git_push") == ("all", False)
 
     login(client)
     assert "mcp" in (await main.db().get_agent("fugu"))["tools"], "агенту по умолчанию дан доступ к MCP"
@@ -509,12 +512,28 @@ async def test_agent_approvals(client):
               agent=await main.db().get_agent("auto"), user={**me, "role": "owner"})
     m1 = client.post("/api/projects/general/memory", json={"content": "удалить 1"}).json()["id"]
     m2 = client.post("/api/projects/general/memory", json={"content": "удалить 2"}).json()["id"]
+    m3 = client.post("/api/projects/general/memory", json={"content": "удалить 3"}).json()["id"]
     call = {"id": "c1", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m1})}}
     out = _json.loads(await asyncio.wait_for(ag._exec_tool(run, call), 5))
     assert "error" not in out and not run.approval_meta, out  # «без подтверждений» — изменение сразу
-    call = {"id": "c1b", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m2})}}
 
-    client.put("/api/agents/auto", json={"approvals": "tap", "tools": ["memory"]})
+    assert client.put("/api/agents/auto", json={"approval_rules": {"ssh_exec": "none"}}).status_code == 400
+    r = client.put("/api/agents/auto", json={"approval_rules": {"memory_delete": "sign", "commit_files": "none"}})
+    assert r.status_code == 200 and r.json()["approval_rules"]["commit_files"] == "none"
+    run.agent = await main.db().get_agent("auto")
+    call = {"id": "c1a", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m3})}}
+    task = asyncio.create_task(ag._exec_tool(run, call))
+    for _ in range(100):
+        if run.approvals:
+            break
+        await asyncio.sleep(0.01)
+    aid = next(iter(run.approval_meta))
+    assert run.approval_meta[aid]["nosign"] is False, "правило действия заменяет общий режим"
+    run.approvals[aid].set_result((False, ""))
+    assert "отклонил" in _json.loads(await task)["error"]
+
+    call = {"id": "c1b", "function": {"name": "memory_delete", "arguments": _json.dumps({"id": m2})}}
+    client.put("/api/agents/auto", json={"approvals": "tap", "tools": ["memory"], "approval_rules": {}})
     run.agent = await main.db().get_agent("auto")
     task = asyncio.create_task(ag._exec_tool(run, call))
     for _ in range(100):

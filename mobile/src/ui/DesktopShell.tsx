@@ -128,7 +128,7 @@ export function DesktopShell({ children }: { children: ReactNode }) {
       <View style={styles.workspace}>
         <View style={[styles.rail, { backgroundColor: p.bg2, borderColor: p.line }]}>
           <RailButton glyph="▤" label="Пространства и чаты" active={!pathname.includes("/prefs") && !pathname.includes("/workspace") && pathname !== "/settings" && pathname !== "/modules"} onPress={() => go(sid ? `/s/${sid}` : "/")} />
-          <RailButton glyph="⌘" label="Windows Workspace" active={pathname.includes("/workspace")} onPress={() => go(sid ? `/s/${sid}/workspace` : "/")} />
+          <RailButton glyph="⌘" label="Workspace" active={pathname.includes("/workspace")} onPress={() => go(sid ? `/s/${sid}/workspace` : "/")} />
           <RailButton glyph="◇" label="Модели и провайдеры" active={pathname.includes("/prefs")} onPress={() => go(modelsPath)} />
           <RailButton glyph="▦" label="Git-модули" active={pathname === "/modules"} onPress={() => go("/modules")} />
           <RailButton glyph="⌁" label="Сервер и устройства" onPress={() => go(serverPath)} />

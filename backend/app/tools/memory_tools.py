@@ -90,7 +90,7 @@ SOURCE_FILE = {"type": "object", "description": "факт взят из файл
            "external": {"type": "boolean", "description": "true, если текст взят из чужих данных: README чужого репозитория, лог, вывод команды"},
            "source_file": SOURCE_FILE},
           ["content"]),
-      group="memory", title="Запомнить")
+      risk="write", group="memory", title="Запомнить")
 async def memory_save(ctx, a):
     ext = bool(a.get("external"))
     src = kb_watch.source_file(a.get("source_file")) if a.get("source_file") else None
@@ -119,7 +119,7 @@ async def memory_save(ctx, a):
       "con — противоречит, ex — пример, ref — ссылка. Связь читается как «from <type> to».",
       obj({"from": {"type": "integer"}, "to": {"type": "integer"}, "type": {"type": "string", "enum": list(kb.LINK_TYPES)}},
           ["from", "to", "type"]),
-      group="memory", title="Связать заметки")
+      risk="write", group="memory", title="Связать заметки")
 async def memory_link(ctx, a):
     if a["from"] == a["to"]:
         raise ProviderError("нельзя связать заметку саму с собой")
@@ -136,7 +136,7 @@ async def memory_link(ctx, a):
       "передай source_file с новой version: пометка «устарела» снимется.",
       obj({"id": {"type": "integer"}, "content": {"type": "string"}, "tags": {"type": "string"}, "source_file": SOURCE_FILE},
           ["id", "content"]),
-      group="memory", title="Обновить память")
+      risk="write", group="memory", title="Обновить память")
 async def memory_update(ctx, a):
     await _own(ctx, a["id"])
     src = kb_watch.source_file(a.get("source_file")) if a.get("source_file") else None

@@ -10,6 +10,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { routeFor, startPush } from "@/platform/push";
 import { ServersProvider } from "@/state/servers";
 import { DesktopShell } from "@/ui/DesktopShell";
+import { MobileShell } from "@/ui/MobileShell";
 import { ThemeProvider, useTheme } from "@/ui/theme";
 
 function Themed() {
@@ -18,7 +19,9 @@ function Themed() {
     <>
       <StatusBar style={p.dark ? "light" : "dark"} />
       <DesktopShell>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.bg }, animation: "slide_from_right" }} />
+        <MobileShell>
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.bg }, animation: "slide_from_right" }} />
+        </MobileShell>
       </DesktopShell>
     </>
   );

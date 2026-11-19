@@ -52,7 +52,12 @@ export type ProjectExport = { format: string; name: string; description: string;
 export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp" | "web";
 /** Подтверждения действий агента: "" — как на сервере; sign — с подписью; tap — без подписи; dangerous — только опасные; none — без подтверждений. */
 export type AgentApprovals = "" | "sign" | "tap" | "dangerous" | "none";
-export type SpaceAgent = { id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[]; approvals?: AgentApprovals };
+export type AgentApprovalAction = "commit_files" | "create_pull_request" | "create_branch" | "create_repo" | "project_repo_set" |
+  "memory_save" | "memory_update" | "memory_link" | "memory_delete" | "create_file" | "delegate" | "mcp";
+export type SpaceAgent = {
+  id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[];
+  approvals?: AgentApprovals; approval_rules?: Partial<Record<AgentApprovalAction, AgentApprovals>>;
+};
 
 /** Найденная заметка; linked_to — найдена не по словам, а как связанная с заметкой linked_to. */
 export type FoundNote = { id: number; project_id: string; project_name?: string; title?: string | null; content: string; area?: string; tags: string; linked_to?: number; link_type?: string };

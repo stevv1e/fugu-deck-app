@@ -154,7 +154,7 @@ CREATE_MAX = 20 << 20
            "content": {"type": "string", "description": "Текст файла"},
            "from_attachments": {"type": "array", "items": {"type": "string"}, "maxItems": 50,
                                 "description": "attachment_id вложений, которые сложить в zip"}},
-          ["filename"]), group="files", title="Файл для пользователя")
+          ["filename"]), risk="write", group="files", title="Файл для пользователя")
 async def create_file(ctx, a):
     name = SAFE_NAME.sub("_", Path(a["filename"]).name)[:120].strip(" .") or "file.txt"
     has_text, ids = a.get("content") is not None, a.get("from_attachments") or []
@@ -236,7 +236,7 @@ async def project_repos(ctx, a):
       "Добавить репозиторий в работу проекта (on=true) или убрать из неё (on=false). Добавляй, когда начинаешь "
       "работать с репозиторием в этом проекте; убирай, когда пользователь просит или проект с ним больше не связан.",
       obj({"provider": PROVIDER, "repo": REPO, "on": {"type": "boolean"}}, ["provider", "repo", "on"]),
-      group="git", title="Репозиторий в проекте")
+      risk="write", group="git", title="Репозиторий в проекте")
 async def project_repo_set(ctx, a):
     if not ctx.project_id:
         raise ProviderError("чат не в проекте")
