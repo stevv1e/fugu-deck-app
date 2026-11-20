@@ -558,6 +558,24 @@ async def audit(limit: int = 100, u: dict = Me):
     return await db().list_audit(min(limit, 500))
 
 
+class SyncIn(BaseModel):
+    data: str = Field(min_length=1, max_length=8_000_000)
+    base_updated_at: float | None = None
+
+
+@app.get("/api/sync")
+async def get_sync(u: dict = Me):
+    return await db().get_sync(u["id"])
+
+
+@app.put("/api/sync")
+async def put_sync(body: SyncIn, u: dict = Me):
+    try:
+        return await db().put_sync(u["id"], body.data, body.base_updated_at)
+    except ValueError:
+        raise HTTPException(409, "На сервере есть более новая синхронизация; сначала скачайте её")
+
+
 # ================================================================== профиль и пользователи
 class MeIn(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=40)

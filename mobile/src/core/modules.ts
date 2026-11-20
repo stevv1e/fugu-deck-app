@@ -1,7 +1,9 @@
 import { sha256 } from "@noble/hashes/sha2.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { fromUtf8, utf8 } from "@/core/bytes";
 
 export const OFFICIAL_MODULES = "https://github.com/stevv1e/fugu-modules";
+export const OFFICIAL_CATALOG_KEY = "9e6f36089f3c6f5f747ffa916a8094209ef49c75ddcba38a9ebf4823a2f2fff9";
 const HEX64 = /^[a-f0-9]{64}$/;
 const ID = /^[a-z][a-z0-9-]{1,60}$/;
 const VERSION = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
@@ -31,7 +33,7 @@ export type InstalledModule = {
 };
 export type GitSource = { owner: string; repo: string; ref: string; path: string; repository: string };
 
-function validManifest(value: any): ModuleManifest {
+export function validManifest(value: any): ModuleManifest {
   if (!value || value.format !== "fugu-module/1" || !ID.test(value.id) || !VERSION.test(value.version)) throw new Error("Некорректный формат или ID модуля");
   if (typeof value.name !== "string" || !value.name.trim() || typeof value.description !== "string") throw new Error("У модуля должны быть имя и описание");
   if (typeof value.entry !== "string" || !value.entry.endsWith(".js") || value.entry.startsWith("/") || value.entry.split("/").includes("..")) throw new Error("Entry должен быть локальным JS-файлом");
@@ -126,12 +128,20 @@ export async function installModule(source: GitSource, token = "", fetcher: type
   return { manifest, commit, repository: source.repository, path: source.path, code, installedAt: Date.now(), enabled: true };
 }
 
-export async function loadOfficialCatalog(fetcher: typeof fetch = fetch): Promise<{ commit: string; entries: ModuleIndexEntry[]; sources: Record<string, GitSource> }> {
+export async function loadOfficialCatalog(fetcher: typeof fetch = fetch, verificationKey = OFFICIAL_CATALOG_KEY): Promise<{ commit: string; entries: ModuleIndexEntry[]; sources: Record<string, GitSource> }> {
   const root = parseGitSource(OFFICIAL_MODULES);
   const commitData = JSON.parse(await fetchText(`https://api.github.com/repos/${root.owner}/${root.repo}/commits/main`, "", fetcher, 64_000));
   const commit = String(commitData.sha || "");
   if (!COMMIT.test(commit)) throw new Error("GitHub не вернул commit каталога");
-  const index = JSON.parse(await fetchText(`https://raw.githubusercontent.com/${root.owner}/${root.repo}/${commit}/index.json`, "", fetcher, 256_000)) as ModuleIndex;
+  const base = `https://raw.githubusercontent.com/${root.owner}/${root.repo}/${commit}`;
+  const indexText = await fetchText(`${base}/index.json`, "", fetcher, 256_000);
+  const signature = (await fetchText(`${base}/index.sig`, "", fetcher, 1000)).trim();
+  if (!/^[a-f0-9]{128}$/.test(signature)) throw new Error("Некорректная подпись каталога");
+  const sig = Uint8Array.from({ length: 64 }, (_, i) => parseInt(signature.slice(i * 2, i * 2 + 2), 16));
+  if (!/^[a-f0-9]{64}$/.test(verificationKey)) throw new Error("Некорректный публичный ключ каталога");
+  const key = Uint8Array.from({ length: 32 }, (_, i) => parseInt(verificationKey.slice(i * 2, i * 2 + 2), 16));
+  if (!ed25519.verify(sig, utf8(indexText), key)) throw new Error("Подпись официального каталога не прошла проверку");
+  const index = JSON.parse(indexText) as ModuleIndex;
   if (index.format !== "fugu-modules/1" || !Array.isArray(index.modules)) throw new Error("Некорректный index.json");
   const entries = index.modules.filter((item) => ID.test(item.id) && item.path && item.name && VERSION.test(item.version)).slice(0, 100);
   const sources = Object.fromEntries(entries.map((item) => [item.id, parseGitSource(`${root.repository}/tree/${commit}/${item.path}`)]));

@@ -126,6 +126,18 @@ def test_talk_mode_project(client):
     assert r.status_code == 400
 
 
+def test_e2ee_sync_is_per_user_and_detects_conflicts(client):
+    login(client)
+    assert client.get("/api/sync").json() == {"data": "", "updated_at": 0}
+    first = client.put("/api/sync", json={"data": '{"format":"fugu-e2ee/1"}', "base_updated_at": None})
+    assert first.status_code == 200
+    updated = first.json()["updated_at"]
+    assert client.put("/api/sync", json={"data": "stale", "base_updated_at": 0}).status_code == 409
+    got = client.get("/api/sync").json()
+    assert got["data"] == '{"format":"fugu-e2ee/1"}' and got["updated_at"] == updated
+    assert client.put("/api/sync", json={"data": "new", "base_updated_at": updated}).status_code == 200
+
+
 async def test_talk_agent_tools_and_prompt(client):
     from app.agent import TALK_PROMPT, Run
 

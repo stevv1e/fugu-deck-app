@@ -365,6 +365,14 @@ SCHEMA = [
     UPDATE agents SET tools='["git","ssh","memory","files","skills","mcp","web","media","drive"]'
         WHERE id='fugu' AND tools='["git","ssh","memory","files","skills","mcp","web"]';
     """,
+    # v26: необязательная синхронизация standalone-модулей; сервер хранит только E2EE-конверт пользователя
+    """
+    CREATE TABLE IF NOT EXISTS sync_blobs (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        data TEXT NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -864,6 +872,21 @@ class Database:
         for r in rows:
             r["args"] = json.loads(r["args"])
         return rows
+
+    async def get_sync(self, user_id: str) -> dict:
+        return await self._one("SELECT data,updated_at FROM sync_blobs WHERE user_id=?", (user_id,)) or {"data": "", "updated_at": 0}
+
+    async def put_sync(self, user_id: str, data: str, base_updated_at: float | None) -> dict:
+        current = await self.get_sync(user_id)
+        if base_updated_at is not None and current["updated_at"] != base_updated_at:
+            raise ValueError("sync conflict")
+        now = time.time()
+        await self._exec(
+            "INSERT INTO sync_blobs (user_id,data,updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at",
+            (user_id, data, now),
+        )
+        return {"updated_at": now}
 
     # ================================================================ пользователи
     # --- устройства ---

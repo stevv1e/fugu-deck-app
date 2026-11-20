@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 import { utf8 } from "../src/core/bytes";
 import { moduleHtml } from "../src/core/moduleHtml";
@@ -39,17 +40,24 @@ test("Git module source is pinned to a commit and checked by SHA-256", async () 
   await assert.rejects(installModule(source, "", installerFetch(code, (m) => { m.min_app = "99.0.0"; }) as typeof fetch), /min_app|нужен Fugu Deck/);
 });
 
-test("official catalog resolves index at one commit", async () => {
+test("official catalog resolves a signed index at one commit", async () => {
+  const secret = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+  const publicKey = Buffer.from(ed25519.getPublicKey(secret)).toString("hex");
+  const index = JSON.stringify({ format: "fugu-modules/1", modules: [
+    { id: "text-tools", path: "modules/text-tools", name: "Text", description: "Tools", version: "1.0.0" },
+  ] });
+  const signature = Buffer.from(ed25519.sign(utf8(index), secret)).toString("hex");
   const fetcher = async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes("api.github.com")) return new Response(JSON.stringify({ sha: commit }));
-    return new Response(JSON.stringify({ format: "fugu-modules/1", modules: [
-      { id: "text-tools", path: "modules/text-tools", name: "Text", description: "Tools", version: "1.0.0" },
-    ] }));
+    if (url.endsWith("index.sig")) return new Response(signature);
+    return new Response(index);
   };
-  const catalog = await loadOfficialCatalog(fetcher as typeof fetch);
+  const catalog = await loadOfficialCatalog(fetcher as typeof fetch, publicKey);
   assert.equal(catalog.sources["text-tools"].ref, commit);
   assert.equal(catalog.entries.length, 1);
+  const tampered = async (input: string | URL | Request) => String(input).endsWith("index.json") ? new Response(index.replace("Text", "Changed")) : fetcher(input);
+  await assert.rejects(loadOfficialCatalog(tampered as typeof fetch, publicKey), /подпись/i);
 });
 
 test("module sandbox has no direct network and cannot close the script early", () => {

@@ -139,6 +139,9 @@ export class DeckApi {
   deleteSkill = (name: string) => this.s.request("DELETE", `/api/skills/${enc(name)}`);
 
   usage = (period: "today" | "week" | "month" | "all") => this.s.request<UsageReport>("GET", `/api/usage/members?period=${period}`);
+  audit = () => this.s.request<{ id: number; ts: number; tool: string; args: Record<string, unknown>; approved: boolean | null; ok: boolean; summary: string }[]>("GET", "/api/audit?limit=200");
+  sync = () => this.s.request<{ data: string; updated_at: number }>("GET", "/api/sync");
+  putSync = (data: string, baseUpdatedAt: number | null) => this.s.request<{ updated_at: number }>("PUT", "/api/sync", { data, base_updated_at: baseUpdatedAt });
 
   // ---- задания по расписанию ----
   schedules = (pid: string) => this.s.request<Schedule[]>("GET", `/api/projects/${enc(pid)}/schedules`);

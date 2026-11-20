@@ -5,6 +5,7 @@ import { WebView } from "react-native-webview";
 import { moduleHtml } from "@/core/moduleHtml";
 import { readResponseText, type InstalledModule } from "@/core/modules";
 import { prefs } from "@/platform/storage";
+import { recordModuleEvent } from "@/platform/moduleAudit";
 import { Notice, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
 
@@ -30,9 +31,14 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
         const key = String(rpc.payload?.key || "");
         if (!/^[A-Za-z0-9_.-]{1,100}$/.test(key)) throw new Error("Некорректный ключ хранилища");
         const storageKey = `fd:module:${module.manifest.id}:${key}`;
-        if (rpc.method === "storage.get") return respond(await prefs.get(storageKey, null));
+        if (rpc.method === "storage.get") {
+          const value = await prefs.get(storageKey, null);
+          await recordModuleEvent({ module: module.manifest.id, action: "storage.get", ok: true, details: key });
+          return respond(value);
+        }
         if (JSON.stringify(rpc.payload?.value).length > 50_000) throw new Error("Слишком большое значение");
         await prefs.set(storageKey, rpc.payload?.value ?? null);
+        await recordModuleEvent({ module: module.manifest.id, action: "storage.set", ok: true, details: key });
         return respond({ ok: true });
       }
       if (rpc.method === "network.get") {
@@ -43,12 +49,17 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
         try {
           const response = await fetch(url, { method: "GET", redirect: "error", signal: controller.signal });
           const text = await readResponseText(response, 100_000);
+          await recordModuleEvent({ module: module.manifest.id, action: "network.get", ok: true, details: `${url.host} · HTTP ${response.status}` });
           return respond({ status: response.status, text });
         } finally { clearTimeout(timer); }
       }
       throw new Error("Неизвестный RPC метод");
     } catch (error) {
-      respond(undefined, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (["storage.get", "storage.set", "network.get"].includes(rpc.method)) {
+        await recordModuleEvent({ module: module.manifest.id, action: rpc.method as "storage.get" | "storage.set" | "network.get", ok: false, details: message });
+      }
+      respond(undefined, message);
     }
   }, [module, send]);
   const receive = useCallback((data: unknown) => {
@@ -57,11 +68,14 @@ export function ModuleRunner({ module, onError }: { module: InstalledModule; onE
       if (rpc?.type !== "fugu-rpc") return;
       const now = Date.now();
       rpcTimes.current = rpcTimes.current.filter((time) => now - time < 60_000);
-      if (rpcTimes.current.length >= 60) return onError?.("Превышен лимит: 60 RPC в минуту");
+      if (rpcTimes.current.length >= 60) {
+        void recordModuleEvent({ module: module.manifest.id, action: "rate_limit", ok: false, details: "60 RPC в минуту" });
+        return onError?.("Превышен лимит: 60 RPC в минуту");
+      }
       rpcTimes.current.push(now);
       void handle(rpc);
     } catch { onError?.("Модуль отправил некорректное сообщение"); }
-  }, [handle, onError]);
+  }, [handle, module.manifest.id, onError]);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
