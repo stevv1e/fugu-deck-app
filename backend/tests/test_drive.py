@@ -49,6 +49,12 @@ class FakeClient:
         return FakeStream(response)
 
     async def post(self, url, **kwargs):
+        if "json" in kwargs:
+            self.requests.append((url, kwargs))
+            return httpx.Response(200, json={"id": "new-folder", "name": kwargs["json"]["name"],
+                                             "mimeType": "application/vnd.google-apps.folder",
+                                             "parents": kwargs["json"].get("parents", []),
+                                             "webViewLink": "https://drive.test/new-folder"})
         chunks = []
         async for chunk in kwargs["content"]:
             chunks.append(chunk)
@@ -104,6 +110,25 @@ async def test_drive_upload_attachment(tmp_path: Path, monkeypatch):
     assert b'"parents": ["folder-1"]' in call["content"] and b"audio-data" in call["content"]
     assert int(call["headers"]["Content-Length"]) == len(call["content"])
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_drive_create_folder(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.drive.httpx.AsyncClient", FakeClient)
+    settings = Settings(data_dir=tmp_path)
+    ctx = type("Ctx", (), {"settings": settings})()
+    client = DriveClient(ctx)
+    client._access = "token"
+    client._expires = 4_000_000_000
+    got = await client.create_folder("Проекты", "folder-1")
+    assert got["folder"]["id"] == "new-folder"
+    url, call = FakeClient.requests[-1]
+    assert url.endswith("/drive/v3/files")
+    assert call["json"] == {"name": "Проекты", "mimeType": "application/vnd.google-apps.folder",
+                            "parents": ["folder-1"]}
+    assert call["params"]["supportsAllDrives"] == "true"
+    with pytest.raises(Exception, match="ID родительской папки"):
+        await client.create_folder("Проекты", "../other")
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Google Drive: поиск, импорт выбранных файлов и загрузка вложений из текущего чата."""
+"""Google Drive: поиск, импорт выбранных файлов, загрузка вложений и создание папок."""
 from __future__ import annotations
 
 from ..drive import DriveClient, DriveError
@@ -39,5 +39,18 @@ async def drive_import(ctx, a):
 async def drive_upload(ctx, a):
     try:
         return await DriveClient(ctx).upload(a["attachment_id"], a.get("folder_id", ""))
+    except DriveError as e:
+        raise ProviderError(str(e))
+
+
+@tool("drive_create_folder",
+      "Создать новую папку в Google Drive. Можно указать folder_id родительской папки; без него папка создаётся в корне. "
+      "Возвращает ID и ссылку новой папки, не изменяет существующие файлы.",
+      obj({"name": {"type": "string", "description": "Название новой папки"},
+           "folder_id": {"type": "string", "description": "Необязательный ID родительской папки"}}, ["name"]),
+      risk="write", group="drive", title="Создание папки в Google Drive")
+async def drive_create_folder(ctx, a):
+    try:
+        return await DriveClient(ctx).create_folder(a["name"], a.get("folder_id", ""))
     except DriveError as e:
         raise ProviderError(str(e))

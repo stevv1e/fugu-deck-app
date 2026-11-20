@@ -1,4 +1,4 @@
-"""Google Drive: поиск, скачивание во вложения чата и загрузка новых файлов."""
+"""Google Drive: поиск, скачивание во вложения чата, загрузка файлов и создание папок."""
 from __future__ import annotations
 
 import asyncio
@@ -144,6 +144,27 @@ class DriveClient:
         return {"attachment": {k: att[k] for k in ("id", "filename", "mime", "size")},
                 "source": {"id": file_id, "name": meta["name"], "url": meta.get("webViewLink")},
                 "note": "Файл импортирован в чат; для аудио/видео используйте transcribe_media, для документов — read_attachment"}
+
+    async def create_folder(self, name: str, folder_id: str = "") -> dict:
+        name = name.strip()
+        if not name or len(name) > 120 or any(ord(c) < 32 for c in name):
+            raise DriveError("Название папки должно содержать от 1 до 120 символов без управляющих символов")
+        if folder_id and not FILE_ID.fullmatch(folder_id):
+            raise DriveError("Некорректный ID родительской папки")
+        await self._refresh()
+        metadata = {"name": name, "mimeType": "application/vnd.google-apps.folder",
+                    **({"parents": [folder_id]} if folder_id else {})}
+        base = self.settings.keyguard_url.rstrip("/") + "/drive/files" if kgc.enabled() else \
+            "https://www.googleapis.com/drive/v3/files"
+        params = {"fields": "id,name,mimeType,parents,webViewLink", "supportsAllDrives": "true"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=30)) as client:
+            r = await client.post(base, params=params, headers=self._headers(), json=metadata)
+        if r.status_code != 200:
+            raise DriveError(f"Google Drive create folder: {r.status_code} {r.text[:300]}")
+        data = r.json()
+        if not data.get("id") or data.get("mimeType") != "application/vnd.google-apps.folder":
+            raise DriveError("Google Drive не вернул созданную папку")
+        return {"folder": data, "note": "Папка создана; её ID можно использовать как folder_id для drive_upload"}
 
     async def upload(self, attachment_id: str, folder_id: str = "") -> dict:
         att = await self.ctx.db.get_attachment(attachment_id)
