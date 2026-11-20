@@ -87,6 +87,9 @@ test("текст для биометрии строится из подписы�
   assert.ok(Object.isFrozen(p.envelope) && Object.isFrozen(p.description), "после подготовки действие не изменить");
   assert.throws(() => prepareClusterAction(keys, { type: "grant_revoke", chat: "c-1", proposal: "p-1" }), /space/, "действие в пространстве без space");
   assert.throws(() => prepareClusterAction(keys, { type: "key_delete", provider: "sakana" }, { space: "t-shop" }), /space/, "space у действия вне пространства");
+  const pair = prepareClusterAction(keys, { type: "pair_approve", pairing: "p".repeat(43), user: "anna", target: "d-Zm9vYmFyMTIzNDU2", name: "Мой ПК", code: "ABCDEFGH", session_jkt: keys.session.jkt });
+  assert.match(promptOf(pair), /Разрешить вход на ПК по коду.*Код: ABCDEFGH/);
+  assert.throws(() => prepareClusterAction(keys, { type: "pair_approve", pairing: "p".repeat(43), user: "anna", target: "d-Zm9vYmFyMTIzNDU2", name: "Мой ПК", code: "00000000", session_jkt: keys.session.jkt }), /code/);
 });
 
 // ---------------- HPKE и ввод ключа ----------------

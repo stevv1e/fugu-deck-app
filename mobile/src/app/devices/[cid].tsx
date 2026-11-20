@@ -7,7 +7,7 @@ import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Share } from "react-native";
 
-import { confirmDevice, createInvite, listDevices, nickProblem, revokeDevice, sortDevices, type ClusterDevice, type DeviceList, type IssuedInvite } from "@/core/devices";
+import { approvePair, confirmDevice, createInvite, listDevices, lookupPair, nickProblem, revokeDevice, sortDevices, type ClusterDevice, type DeviceList, type IssuedInvite, type PairInfo } from "@/core/devices";
 import { keyProvider } from "@/platform/keys";
 import { getCluster, type ClusterRecord } from "@/state/cluster";
 import { openClusterSession } from "@/state/clusterSession";
@@ -27,6 +27,8 @@ export default function ClusterDevices() {
   const [armed, setArmed] = useState<string | null>(null); // отзыв — в два нажатия
   const [nick, setNick] = useState("");
   const [invite, setInvite] = useState<IssuedInvite | null>(null);
+  const [pairCode, setPairCode] = useState("");
+  const [pairInfo, setPairInfo] = useState<PairInfo | null>(null);
 
   const load = useCallback(async (r: ClusterRecord) => {
     try {
@@ -90,6 +92,19 @@ export default function ClusterDevices() {
       setNick("");
     });
 
+  const findPair = () =>
+    run("pair:lookup", "Код найден — проверьте ПК перед подтверждением", async (r) => {
+      setPairInfo(null);
+      setPairInfo(await lookupPair(await openClusterSession(r, r.api), pairCode));
+    });
+
+  const allowPair = () =>
+    run("pair:approve", "Вход ПК разрешён. После регистрации подтвердите его в списке устройств выше", async (r) => {
+      if (!pairInfo) return;
+      const s = await openClusterSession(r, r.api);
+      setPairInfo(await approvePair(s, await keysOf(r), pairInfo));
+    });
+
   if (!rec || (!list && !msg)) return <Screen title="Устройства"><Loading /></Screen>;
   const nickBad = nick ? nickProblem(nick) : null;
 
@@ -141,6 +156,24 @@ export default function ClusterDevices() {
           </Card>
         );
       }) : null}
+      {list ? (
+        <Card>
+          <Txt kind="h2">Подтвердить вход на ПК</Txt>
+          <Txt kind="dim">Введите код с экрана Windows. Bluetooth, USB и камера не нужны.</Txt>
+          <Field label="Код с экрана ПК" value={pairCode} onChangeText={(t) => { setPairCode(t.toUpperCase()); setPairInfo(null); }}
+            autoCapitalize="characters" autoCorrect={false} maxLength={9} />
+          <Btn title="Найти ПК по коду" onPress={findPair} busy={busy === "pair:lookup"} disabled={!!busy || pairCode.replace(/[- ]/g, "").length !== 8} />
+          {pairInfo ? (
+            <>
+              <Txt>Пользователь: {pairInfo.user}</Txt>
+              <Txt>Устройство: {pairInfo.name}</Txt>
+              <Txt kind="mono" selectable>{pairInfo.device_id}</Txt>
+              <Btn title={pairInfo.approved ? "Вход подтверждён" : "Подтвердить вход ПК"} kind={pairInfo.approved ? "ghost" : "danger"}
+                onPress={allowPair} busy={busy === "pair:approve"} disabled={!!busy || pairInfo.approved} />
+            </>
+          ) : null}
+        </Card>
+      ) : null}
       {list ? (
         <Card>
           <Txt kind="h2">Пригласить</Txt>

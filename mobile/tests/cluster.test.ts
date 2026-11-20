@@ -12,7 +12,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { buildKeyPut } from "../src/core/apikeys";
 import { b64u, randomId } from "../src/core/bytes";
 import {
-  authorizeUrl, buildEnroll, claims, clusterDeviceId, clusterJoinParams, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, statusRequest,
+  authorizeUrl, browserPairUrl, browserStartUrl, buildEnroll, claims, clusterDeviceId, clusterJoinParams, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, startDesktopPair, statusRequest,
   type ClusterInvite,
 } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
@@ -68,6 +68,30 @@ test("сервер выдал непривязанный Bearer — прилож
   const c: ClusterInvite = { api: "https://api.x", issuer: "https://id.x/realms/deck", join: "https://join.x", invite: "i".repeat(20), hpke: HPKE };
   await assert.rejects(exchangeCode(fake("Bearer", keys.session.jkt), c, keys, "code", newPkce(), Date.now() / 1000), /непривязанный/);
   await assert.rejects(exchangeCode(fake("DPoP", "чужой"), c, keys, "code", newPkce(), Date.now() / 1000), /не к ключу/);
+});
+
+test("Windows pairing: код привязан к ключам ПК, мобильная ссылка не меняется", async () => {
+  const keys = softKeys();
+  const c: ClusterInvite = { api: "https://api.x", issuer: "https://id.x/realms/deck", join: "https://join.x", invite: "i".repeat(20), hpke: HPKE };
+  const http: Http = {
+    request: async (r) => {
+      assert.equal(r.url, "https://join.x/v1/pair/start");
+      const body = JSON.parse(r.body!);
+      assert.deepEqual(body, { name: "Мой ПК", session_jkt: keys.session.jkt, confirm_jkt: keys.confirm.jkt });
+      return { status: 200, text: JSON.stringify({ secret: "s".repeat(43), pair: {
+        id: "p".repeat(43), code: "ABCDEFGH", user: "anna", name: "Мой ПК", device_id: clusterDeviceId(keys),
+        session_jkt: keys.session.jkt, expires: "2026-11-20T20:00:00Z",
+      } }) };
+    },
+    stream: () => ({ close() {} }),
+  };
+  const pair = await startDesktopPair(http, c, keys, "Мой ПК");
+  const pkce = newPkce();
+  const url = new URL(browserPairUrl(c, pkce, pair));
+  assert.equal(url.searchParams.get("pair"), pair.id);
+  assert.equal(url.searchParams.get("pair_secret"), pair.secret);
+  assert.ok(url.searchParams.get("next")!.startsWith(c.issuer));
+  assert.equal(new URL(browserStartUrl(c, pkce)).searchParams.get("pair"), null);
 });
 
 // ---------------- настоящий Keycloak + keyguard ----------------

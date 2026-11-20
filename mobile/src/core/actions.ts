@@ -66,6 +66,7 @@ export type ActionBody =
   // user и name подтверждаемого устройства keyguard сверяет со своим реестром: подписано то, что показано.
   | { type: 'device_approve'; user: string; target: string; name: string }
   | { type: 'device_revoke'; user: string; target: string }
+  | { type: 'pair_approve'; pairing: string; user: string; target: string; name: string; code: string; session_jkt: string }
   // Приглашение на ник user: себе — ещё одно своё устройство, другому (только администратор) — новый пользователь.
   | { type: 'invite_create'; user: string }
   | { type: 'account_delete'; user: string }
@@ -119,7 +120,7 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /** Действия в пространстве несут space в конверте (и человек его видит); у остальных поля space нет вовсе. */
 export const IN_SPACE: Record<ActionType, boolean> = {
-  key_put: false, key_delete: false, mcp_put: false, mcp_delete: false, egress_set: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, account_delete: false, invite_create: false,
+  key_put: false, key_delete: false, mcp_put: false, mcp_delete: false, egress_set: false, spend_limit: false, device_enroll: false, device_approve: false, device_revoke: false, pair_approve: false, account_delete: false, invite_create: false,
   grant: true, grant_revoke: true, server_add: true, agent_rights: true, ssh_write: true, ssh_danger: true,
   role_change: true, space_delete: true, tool_approve: true,
 };
@@ -220,6 +221,14 @@ const SCHEMAS: { [T in ActionType]: Record<Exclude<RequiredKeys<Extract<ActionBo
   },
   device_enroll: { session_jkt: str(43, JKT), confirm_jkt: str(43, JKT), name: str(80) },
   device_revoke: { user: id, target: deviceId },
+  pair_approve: {
+    pairing: str(43, JKT),
+    user: id,
+    target: deviceId,
+    name: str(80),
+    code: str(8, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/),
+    session_jkt: str(43, JKT),
+  },
   invite_create: { user: id },
   account_delete: { user: id },
   space_delete: {},
@@ -401,6 +410,18 @@ export function describeAction(a: ActionEnvelope): ActionDescription {
       return {
         title: 'Отозвать устройство',
         lines: [`Пользователь: ${a.user}`, `ID: ${a.target.slice(0, 10)}…`, 'Устройство сразу потеряет доступ.'],
+        danger: true,
+      };
+    case 'pair_approve':
+      return {
+        title: 'Разрешить вход на ПК по коду',
+        lines: [
+          `Пользователь: ${a.user}`,
+          `Устройство: ${a.name}`,
+          `Код: ${a.code}`,
+          `ID: ${a.target.slice(0, 10)}…`,
+          'После входа устройство появится в списке и потребует обычного подтверждения.',
+        ],
         danger: true,
       };
     case 'invite_create':

@@ -3,7 +3,7 @@
 | Папка | Что |
 |---|---|
 | `mobile/` | приложение Android: React Native + Expo, ключи устройства в чипе (модуль `fd-secure`), DPoP, аттестация, подписанные действия, вход в кластер, ввод ключей API для keyguard. Подробно — [mobile/README.md](mobile/README.md) |
-| `desktop/windows/` | Windows-клиент на Electron поверх общего React Native-интерфейса: Workspace, файлы и diff Git, CI, фоновые задачи, подписываемый SSH-терминал, command palette и уведомления |
+| `desktop/windows/` | Windows-клиент на Electron поверх общего React Native-интерфейса: вход по коду с подтверждением на телефоне без Bluetooth/USB, Workspace, файлы и diff Git, CI, фоновые задачи, подписываемый SSH-терминал, command palette и уведомления |
 | `backend/` | агент пространства (FastAPI): чаты, проекты, несколько агентов, база знаний, скилы, инструменты GitHub/GitLab, серверы (через ssh-gateway), MCP и страницы с разрешённых доменов (через keyguard), расписания, подтверждения. В кластере (`DECK_MODE=space`) к моделям, Git, MCP и сайтам ходит только через keyguard (`KEYGUARD_URL`) |
 | `local/` | Fugu Local — второе приложение без сервера: модели напрямую с телефона ([local/README.md](local/README.md)) |
 

@@ -64,6 +64,7 @@ const valid: [string, string | null, Record<string, unknown>][] = [
   ["device_enroll", null, { type: "device_enroll", session_jkt: JKT, confirm_jkt: JKT, name: "iPhone 17 Pro — Анна" }],
   ["device_approve", null, { type: "device_approve", user: "anna", target: TARGET, name: "iPhone 17 Pro — Анна" }],
   ["device_revoke", null, { type: "device_revoke", user: "anna", target: TARGET }],
+  ["pair_approve", null, { type: "pair_approve", pairing: JKT, user: "anna", target: TARGET, name: "Мой ПК", code: "ABCDEFGH", session_jkt: JKT }],
   ["account_delete", null, { type: "account_delete", user: "anna" }],
   ["invite_create", null, { type: "invite_create", user: "dave" }],
   ["space_delete", "t-shop", { type: "space_delete" }],

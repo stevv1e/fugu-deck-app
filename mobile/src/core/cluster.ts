@@ -81,9 +81,27 @@ export function authorizeUrl(c: ClusterInvite, p: Pkce): string {
   return `${c.issuer}/protocol/openid-connect/auth?${q}`;
 }
 
+export type DesktopPair = { id: string; code: string; user: string; name: string; deviceId: string; sessionJkt: string; secret: string; expires: string };
+
 /** Куда открыть системный браузер: join проверит приглашение, поставит cookie и уведёт в Keycloak. */
 export function browserStartUrl(c: ClusterInvite, p: Pkce): string {
   return `${c.join}/start?${new URLSearchParams({ invite: c.invite, next: authorizeUrl(c, p) })}`;
+}
+
+export function browserPairUrl(c: ClusterInvite, p: Pkce, pair: DesktopPair): string {
+  return `${c.join}/start?${new URLSearchParams({ invite: c.invite, next: authorizeUrl(c, p), pair: pair.id, pair_secret: pair.secret })}`;
+}
+
+export async function startDesktopPair(http: Http, c: ClusterInvite, keys: DeviceKeys, name: string): Promise<DesktopPair> {
+  const r = await http.request({ method: "POST", url: `${c.join}/v1/pair/start`, headers: joinHeaders(c),
+    body: JSON.stringify({ name: deviceNameOf(name), session_jkt: keys.session.jkt, confirm_jkt: keys.confirm.jkt }) });
+  if (r.status !== 200) throw errorFrom(r.status, r.text);
+  const out = JSON.parse(r.text) as { pair?: { id?: string; code?: string; user?: string; name?: string; device_id?: string; session_jkt?: string; expires?: string }; secret?: string };
+  const p = out.pair;
+  if (!p?.id || !p.code || !p.user || !p.name || !p.device_id || !p.session_jkt || !p.expires || !out.secret || p.session_jkt !== keys.session.jkt) {
+    throw new Error("Сервер вернул повреждённый pairing");
+  }
+  return { id: p.id, code: p.code, user: p.user, name: p.name, deviceId: p.device_id, sessionJkt: p.session_jkt, secret: out.secret, expires: p.expires };
 }
 
 /** Возврат из браузера: fugudeck://oauth?code=…&state=… Чужой state — отказ (CSRF/подмена ответа). */

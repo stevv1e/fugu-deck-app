@@ -47,6 +47,19 @@ export async function createInvite(s: ApiSession, keys: DeviceKeys, nick: string
   return s.request<IssuedInvite>("POST", "/v1/invites", await signClusterAction(keys, { type: "invite_create", user: nick }));
 }
 
+export type PairInfo = { id: string; code: string; user: string; name: string; device_id: string; session_jkt: string; expires: string; approved: boolean };
+
+export const lookupPair = (s: ApiSession, code: string) =>
+  s.request<PairInfo>("POST", "/v1/pair/lookup", { code: code.trim().toUpperCase() });
+
+export async function approvePair(s: ApiSession, keys: DeviceKeys, p: PairInfo): Promise<PairInfo> {
+  const signed = await signClusterAction(keys, {
+    type: "pair_approve", pairing: p.id, user: p.user, target: p.device_id,
+    name: p.name, code: p.code, session_jkt: p.session_jkt,
+  });
+  return s.request<PairInfo>("POST", "/v1/pair/approve", signed);
+}
+
 const ORDER = { pending: 0, active: 1, revoked: 2 } as const;
 
 /** Порядок на экране: сначала ждущие решения, затем действующие (это устройство — первым), отозванные — в конце. */

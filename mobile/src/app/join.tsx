@@ -8,7 +8,8 @@ import * as WebBrowser from "expo-web-browser";
 import { useMemo, useState } from "react";
 
 import {
-  browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
+  browserPairUrl, browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
+  startDesktopPair, type DesktopPair,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
 import { desktopAvailable, desktopAuth } from "@/platform/desktop";
@@ -19,10 +20,11 @@ import { Btn, Card, errText, Field, Notice, Screen, Txt } from "@/ui/kit";
 
 export default function Join() {
   const q = useLocalSearchParams<Record<string, string>>();
-  const [name, setName] = useState("Мой телефон");
+  const [name, setName] = useState(desktopAvailable() ? "Мой ПК" : "Мой телефон");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState("");
+  const [pair, setPair] = useState<DesktopPair | null>(null);
 
   const inv = useMemo(() => {
     try {
@@ -61,9 +63,12 @@ export default function Join() {
       const keys = await provider.create(alias, challenge ? unb64(challenge) : undefined);
       newAlias = alias;
       const pkce = newPkce();
-      setStep("Вход в браузере…");
-      const res = desktopAvailable()
-        ? await desktopAuth(browserStartUrl(inv, pkce))
+      const desktop = desktopAvailable();
+      const pairing = desktop ? await startDesktopPair(http, inv, keys, name) : null;
+      setPair(pairing);
+      setStep(desktop ? "Жду подтверждения кода на телефоне…" : "Вход в браузере…");
+      const res = desktop
+        ? await desktopAuth(browserPairUrl(inv, pkce, pairing!))
         : await WebBrowser.openAuthSessionAsync(browserStartUrl(inv, pkce), REDIRECT_URI);
       if (res.type !== "success") throw new Error("Вход отменён");
       const code = parseRedirect(res.url, pkce);
@@ -115,10 +120,18 @@ export default function Join() {
         <Txt selectable>{new URL(inv.issuer).host}</Txt>
       </Card>
       <Txt kind="dim">
-        Откроется браузер: войдите по passkey. Телефон создаст два ключа в защищённом чипе, токен будет привязан к ним.
-        После регистрации устройство подтвердит тот, кто вас пригласил.
+        {desktopAvailable()
+          ? "На этом ПК появится код. Введите его на телефоне в разделе «Устройства» и подтвердите вход — Bluetooth, USB и passkey на ПК не нужны."
+          : "Откроется браузер: войдите по passkey. Телефон создаст два ключа в защищённом чипе, токен будет привязан к ним. После регистрации устройство подтвердит тот, кто вас пригласил."}
       </Txt>
       <Field label="Название устройства" value={name} onChangeText={setName} maxLength={40} />
+      {pair ? (
+        <Card>
+          <Txt kind="dim">Код для подтверждения на телефоне</Txt>
+          <Txt kind="title" selectable>{pair.code}</Txt>
+          <Txt kind="small">Действует до {new Date(pair.expires).toLocaleTimeString()}. После входа подтвердите новый ПК в списке устройств.</Txt>
+        </Card>
+      ) : null}
       {error ? <Notice text={error} /> : null}
       {step ? <Notice kind="info" text={step} /> : null}
       <Btn title="Войти" onPress={start} busy={busy} />
