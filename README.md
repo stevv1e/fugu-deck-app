@@ -7,7 +7,19 @@
 | `backend/` | агент пространства (FastAPI): чаты, проекты, несколько агентов, база знаний, скилы, инструменты GitHub/GitLab, серверы (через ssh-gateway), MCP и страницы с разрешённых доменов (через keyguard), расписания, подтверждения. В кластере (`DECK_MODE=space`) к моделям, Git, MCP и сайтам ходит только через keyguard (`KEYGUARD_URL`) |
 | `local/` | Fugu Local — второе приложение без сервера: модели напрямую с телефона ([local/README.md](local/README.md)) |
 
-Архитектура — `../docs/ARCHITECTURE-v2.md`, инфраструктура кластера — `../fugu-deck-infra/`, keyguard — `../fugu-deck-keyguard/`.
+Архитектура и границы компонентов описаны в [технической документации](docs/TECHNICAL_ARCHITECTURE.md). Серверная монорепа и приватные manifests отделены от публичного клиента.
+
+## Документация
+
+Полная актуальная документация находится в [`docs/`](docs/README.md):
+
+- [руководство пользователя](docs/USER_GUIDE.md);
+- [техническая архитектура и протоколы](docs/TECHNICAL_ARCHITECTURE.md);
+- [эксплуатация, GitHub Actions и образы](docs/OPERATIONS.md);
+- [руководство для ИИ-разработчиков](docs/AI_DEVELOPMENT_GUIDE.md);
+- [план развития](docs/ROADMAP.md).
+
+Быстрые ссылки: [релизы](https://github.com/stevv1e/fugu-deck-app/releases) · [официальные модули](https://github.com/stevv1e/fugu-modules) · [лендинг](https://fugu.ghostixel.io).
 
 ## Рабочие пространства, модели и модули
 
