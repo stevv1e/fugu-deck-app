@@ -1,20 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { appSection, appSectionPath, ROUTE_INVENTORY, SECTION_LABELS } from "../src/core/navigation";
 import { mobileSection, mobileSectionPath, showMobileNavigation } from "../src/core/mobileNavigation";
 
-test("mobile navigation keeps every main section distinct", () => {
-  assert.equal(mobileSection("/s/one/chats"), "chats");
-  assert.equal(mobileSection("/s/one/p/general"), "chats");
-  assert.equal(mobileSection("/s/one/kb/general"), "chats");
-  assert.equal(mobileSection("/s/one/workspace"), "workspace");
-  assert.equal(mobileSection("/s/one/tasks"), "tasks");
-  assert.equal(mobileSection("/modules"), "modules");
-  assert.equal(mobileSection("/s/one/prefs"), "more");
-  assert.equal(mobileSection("/settings"), "more");
+test("route inventory preserves every product area", () => {
+  assert.ok(ROUTE_INVENTORY.length >= 18);
+  for (const item of ROUTE_INVENTORY) {
+    assert.ok(item.features.length > 20, item.match);
+    assert.ok(SECTION_LABELS[item.section], item.match);
+  }
+  for (const path of ["/", "/s/one/chats", "/s/one/tasks", "/s/one", "/s/one/p/general", "/s/one/kb/general", "/s/one/workspace", "/s/one/prefs", "/servers/c1", "/keys/c1", "/mcp/c1", "/egress/c1", "/devices/c1", "/cluster/c1", "/modules", "/settings", "/s/one/usage"]) {
+    assert.ok(appSection(path), path);
+  }
 });
 
-test("conversation and enrollment remain full-screen", () => {
+test("desktop sections keep the current space and existing routes", () => {
+  assert.equal(appSectionPath("home"), "/");
+  assert.equal(appSectionPath("chats", { sid: "one" }), "/s/one/chats");
+  assert.equal(appSectionPath("projects", { sid: "one" }), "/s/one");
+  assert.equal(appSectionPath("models", { sid: "one" }), "/s/one/prefs?tab=models");
+  assert.equal(appSectionPath("servers", { sid: "one", cluster: "c1" }), "/servers/c1");
+  assert.equal(appSectionPath("access", { sid: "one", cluster: "c1" }), "/keys/c1");
+  assert.equal(appSectionPath("permissions", { sid: "one", kind: "team" }), "/team/one");
+  assert.equal(appSectionPath("permissions", { sid: "one" }), "/s/one/prefs?tab=agents");
+  assert.equal(appSectionPath("parameters", { sid: "one" }), "/settings");
+});
+
+test("mobile navigation has three work tabs and a complete more menu", () => {
+  assert.equal(mobileSection("/s/one/chats"), "chats");
+  assert.equal(mobileSection("/s/one/tasks"), "chats");
+  assert.equal(mobileSection("/s/one/p/general"), "projects");
+  assert.equal(mobileSection("/s/one/kb/general"), "projects");
+  assert.equal(mobileSection("/s/one/workspace"), "projects");
+  assert.equal(mobileSection("/s/one/prefs"), "models");
+  assert.equal(mobileSection("/modules"), "more");
+  assert.equal(mobileSection("/settings"), "more");
+  assert.equal(mobileSection("/keys/c1"), "more");
+});
+
+test("main menu, conversation and enrollment remain free of work navigation", () => {
+  assert.equal(showMobileNavigation("/"), false);
+  assert.equal(showMobileNavigation("/launch/one"), false);
   assert.equal(showMobileNavigation("/s/one/c/chat"), false);
   assert.equal(showMobileNavigation("/s/one/login"), false);
   assert.equal(showMobileNavigation("/scan"), false);
@@ -24,9 +51,8 @@ test("conversation and enrollment remain full-screen", () => {
 
 test("main tabs preserve the current space and have a safe home fallback", () => {
   assert.equal(mobileSectionPath("chats", "one"), "/s/one/chats");
-  assert.equal(mobileSectionPath("workspace", "one"), "/s/one/workspace");
-  assert.equal(mobileSectionPath("tasks", "one"), "/s/one/tasks");
-  assert.equal(mobileSectionPath("modules", "one"), "/modules");
-  assert.equal(mobileSectionPath("workspace"), "/");
+  assert.equal(mobileSectionPath("projects", "one"), "/s/one");
+  assert.equal(mobileSectionPath("models", "one"), "/s/one/prefs?tab=models");
+  assert.equal(mobileSectionPath("projects"), "/");
   assert.equal(mobileSectionPath("more", "one"), null);
 });

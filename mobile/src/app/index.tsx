@@ -4,7 +4,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { isInsecure, shortFp } from "@/core/invite";
 import type { ServerRecord } from "@/core/types";
-import { listClusters, type ClusterRecord } from "@/state/cluster";
+import { listClusters, spaceSid, type ClusterRecord } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { BrandMark } from "@/ui/BrandMark";
 import { Btn, Card, Chip, Empty, IconBtn, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
@@ -34,7 +34,7 @@ function ServerIcon({ name, active }: { name: string; active: boolean }) {
 
 function ServerCard({ server, desktop = false }: { server: ServerRecord; desktop?: boolean }) {
   const { p } = useTheme();
-  const open = () => router.push(server.device ? `/s/${server.id}` : `/s/${server.id}/login`);
+  const open = () => router.push(server.device ? `/launch/${server.id}` : `/s/${server.id}/login`);
   return (
     <Card accent={server.device ? p.accent : p.line2} onPress={open} style={desktop ? { minWidth: 300 } : undefined}>
       <Row style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -68,7 +68,7 @@ function ServerCard({ server, desktop = false }: { server: ServerRecord; desktop
 function ClusterCard({ cluster }: { cluster: ClusterRecord }) {
   const { p } = useTheme();
   return (
-    <Card accent={cluster.status === "active" ? p.ok : p.line2} onPress={() => router.push({ pathname: "/cluster/[cid]", params: { cid: cluster.id } })}>
+    <Card accent={cluster.status === "active" ? p.ok : p.line2} onPress={() => router.push(cluster.status === "active" ? `/launch/${spaceSid(cluster.id)}` : `/cluster/${cluster.id}`)}>
       <Row style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Row style={{ flex: 1 }}>
           <ServerIcon name={cluster.name} active={cluster.status === "active"} />
@@ -152,7 +152,7 @@ function DesktopHome({ servers, clusters, ready }: { servers: ServerRecord[]; cl
           </View>
           <ScrollView contentContainerStyle={{ padding: 8, gap: 5 }}>
             {servers.map((s) => (
-              <Pressable key={s.id} onPress={() => router.push(s.device ? `/s/${s.id}` : `/s/${s.id}/login`)} style={({ pressed }) => ({ padding: 10, borderRadius: 8, backgroundColor: pressed ? p.panel2 : "transparent", flexDirection: "row", alignItems: "center", gap: 10 })}>
+              <Pressable key={s.id} onPress={() => router.push(s.device ? `/launch/${s.id}` : `/s/${s.id}/login`)} style={({ pressed }) => ({ padding: 10, borderRadius: 8, backgroundColor: pressed ? p.panel2 : "transparent", flexDirection: "row", alignItems: "center", gap: 10 })}>
                 <ServerIcon name={s.name} active={!!s.device} />
                 <View style={{ flex: 1 }}><Txt numberOfLines={1} style={{ fontSize: 13 }}>{s.name}</Txt><Txt kind="small" numberOfLines={1}>{s.device ? "Подключено" : "Нужен вход"}</Txt></View>
               </Pressable>

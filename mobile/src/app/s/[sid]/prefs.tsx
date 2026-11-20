@@ -14,12 +14,13 @@ import { Tabs } from "@/ui/Tabs";
 import { useTheme } from "@/ui/theme";
 
 const GIT: Record<string, string> = { github: "GitHub", gitlab: "GitLab" };
+type PrefsTab = "models" | "repos" | "agents";
 
 export default function SpacePrefs() {
   const { p } = useTheme();
-  const { sid } = useLocalSearchParams<{ sid: string }>();
+  const { sid, tab: requested } = useLocalSearchParams<{ sid: string; tab?: string }>();
   const { api, error: apiError } = useApi(sid);
-  const [tab, setTab] = useState<"models" | "repos" | "agents">("models");
+  const tab: PrefsTab = requested === "repos" || requested === "agents" ? requested : "models";
   const cfg = useLoad(useCallback(() => api?.config() ?? null, [api]));
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
@@ -41,7 +42,7 @@ export default function SpacePrefs() {
       <Tabs<"models" | "repos" | "agents">
         items={[{ id: "models", title: "Модели" }, { id: "repos", title: "Репозитории" }, { id: "agents", title: "Агенты" }]}
         value={tab}
-        onChange={setTab}
+        onChange={(next) => router.setParams({ tab: next })}
         label="Настройки пространства"
       />
       {tab === "agents" && api ? (

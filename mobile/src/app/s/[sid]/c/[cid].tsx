@@ -28,6 +28,7 @@ import { Btn, Card, Chip, errText, IconBtn, Loading, Notice, Row, TopBar, Txt } 
 import { TeamModel } from "@/ui/TeamModel";
 import { ModelPicker } from "@/ui/ModelPicker";
 import { alpha, MONO, useTheme } from "@/ui/theme";
+import { useDesktopLayout } from "@/ui/useDesktopLayout";
 
 type Tool = Extract<Item, { kind: "tool" }>;
 
@@ -309,6 +310,7 @@ function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | n
 
 export default function Chat() {
   const { p } = useTheme();
+  const desktop = useDesktopLayout();
   const { sid, cid } = useLocalSearchParams<{ sid: string; cid: string }>();
   const { get } = useServers();
   const meId = get(sid)?.device?.user.id;
@@ -612,7 +614,7 @@ export default function Chat() {
           ref={list}
           data={items}
           keyExtractor={(i) => i.key}
-          contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 20 }}
+          contentContainerStyle={{ padding: desktop ? 24 : 14, gap: 12, paddingBottom: 20, width: "100%", maxWidth: desktop ? 960 : undefined, alignSelf: "center" }}
           // Пока агент пишет, размер списка растёт десятки раз в секунду. Прокрутка с анимацией на каждый прирост
           // наслаивается сама на себя и дёргает список вверх-вниз — поэтому держим низ мгновенно (animated: false).
           onContentSizeChange={() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }); }}
@@ -655,7 +657,7 @@ export default function Chat() {
         ) : null}
         </View>
         {canWrite && (atts.length > 0 || uploading || attachMenu) ? (
-          <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg }}>
+          <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg, width: "100%", maxWidth: desktop ? 1000 : undefined, alignSelf: "center" }}>
             {attachMenu ? (
               <Row gap={6}>
                 <Btn small title="Камера" kind="ghost" onPress={() => attach("camera")} />
@@ -676,7 +678,7 @@ export default function Chat() {
           </View>
         ) : null}
         {canWrite ? (
-          <View style={{ flexDirection: "row", gap: 9, padding: 12, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg2, alignItems: "flex-end" }}>
+          <View style={{ flexDirection: "row", gap: 9, padding: desktop ? 16 : 12, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg2, alignItems: "flex-end", width: "100%", maxWidth: desktop ? 1000 : undefined, alignSelf: "center", borderRadius: desktop ? 14 : 0, marginBottom: desktop ? 12 : 0 }}>
             {!runId ? (
               <Btn title="+" kind="ghost" onPress={() => setAttachMenu(!attachMenu)} disabled={!!uploading || sending} style={{ minWidth: 46, paddingHorizontal: 0, backgroundColor: p.panel }} />
             ) : null}

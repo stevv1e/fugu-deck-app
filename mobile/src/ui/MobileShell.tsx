@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { mobileSection, mobileSectionPath, showMobileNavigation, type MobileSection } from "@/core/mobileNavigation";
+import { appModulesPath, appSectionPath, SECTION_LABELS } from "@/core/navigation";
 import { clusterOfSid, parseSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 
@@ -14,9 +15,8 @@ import { useDesktopLayout } from "./useDesktopLayout";
 
 const TABS: { id: Exclude<MobileSection, "more">; title: string; glyph: string }[] = [
   { id: "chats", title: "Чаты", glyph: "◫" },
-  { id: "workspace", title: "Workspace", glyph: "⌘" },
-  { id: "tasks", title: "Задачи", glyph: "◷" },
-  { id: "modules", title: "Модули", glyph: "◇" },
+  { id: "projects", title: "Проекты", glyph: "▤" },
+  { id: "models", title: "Модели", glyph: "◇" },
 ];
 
 function MenuLink({ title, text, onPress, accent }: { title: string; text?: string; onPress(): void; accent?: boolean }) {
@@ -45,6 +45,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
   const section = mobileSection(pathname);
   const projectId = /^\/s\/[^/]+\/(?:p|kb|sched)\/([^/]+)/.exec(pathname)?.[1];
   const cluster = activeSid ? clusterOfSid(activeSid) : null;
+  const kind = activeSid && parseSid(activeSid)?.team ? "team" : cluster ? "cluster" : "standalone";
 
   if (desktop || !showMobileNavigation(pathname)) return children;
 
@@ -53,12 +54,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
     setMore(false);
     router.push(path as never);
   };
-  const serverSettings = () => {
-    if (!activeSid) return go("/settings");
-    if (!cluster) return go(`/s/${activeSid}/settings`);
-    const team = parseSid(activeSid)?.team;
-    go(team ? `/team/${activeSid}` : `/cluster/${cluster}`);
-  };
+  const sectionPath = (id: Parameters<typeof appSectionPath>[0]) => appSectionPath(id, { sid: activeSid, cluster, kind });
 
   return (
     <View style={[styles.window, { backgroundColor: p.bg }]}>
@@ -89,41 +85,52 @@ export function MobileShell({ children }: { children: ReactNode }) {
                 <BrandMark size={34} />
                 <View style={{ flex: 1 }}>
                   <Txt kind="h2">Fugu Deck</Txt>
-                  <Txt kind="small" numberOfLines={1}>{current?.name || "Все возможности приложения"}</Txt>
+                  <Txt kind="small" numberOfLines={1}>{current?.name || "Главное меню и возможности"}</Txt>
                 </View>
               </Row>
+              <IconBtn glyph="⌂" label="В главное меню" onPress={() => go("/")} />
               <IconBtn glyph="×" label="Закрыть меню" onPress={() => setMore(false)} />
             </View>
             <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+              <MenuLink title="Главное меню" text="Подключения, вход и регистрация" onPress={() => go("/")} accent />
               {current ? (
                 <>
                   <Row style={{ justifyContent: "space-between" }}>
                     <Txt kind="label">текущее пространство</Txt>
                     <Chip text={current.device ? "подключено" : "нужен вход"} color={current.device ? p.ok : p.warn} />
                   </Row>
-                  <MenuLink title="Проекты и режимы" text="Инжиниринг, общение, создание и перенос проектов" onPress={() => go(`/s/${activeSid}`)} accent />
+                  <MenuLink title={SECTION_LABELS.projects} text="Обзор, режимы, чаты и память" onPress={() => go(sectionPath("projects"))} />
+                  <MenuLink title="Workspace" text="Файлы, Git diff, CI и SSH" onPress={() => go(`/s/${activeSid}/workspace`)} />
                   {projectId ? (
                     <>
                       <MenuLink title="Чаты проекта" onPress={() => go(`/s/${activeSid}/p/${projectId}`)} />
-                      <MenuLink title="База знаний проекта" text="Заметки, связи, поиск и предложения агента" onPress={() => go(`/s/${activeSid}/kb/${projectId}`)} />
-                      <MenuLink title="Расписание проекта" text="Автоматические задания и история запусков" onPress={() => go(`/s/${activeSid}/sched/${projectId}`)} />
+                      <MenuLink title="База знаний проекта" onPress={() => go(`/s/${activeSid}/kb/${projectId}`)} />
+                      <MenuLink title="Расписание проекта" onPress={() => go(`/s/${activeSid}/sched/${projectId}`)} />
                     </>
                   ) : null}
-                  <MenuLink title="Модели, репозитории и агенты" text="Провайдеры, Git и детальные правила согласований" onPress={() => go(`/s/${activeSid}/prefs`)} />
+                  <MenuLink title="Запуски и задачи" onPress={() => go(`/s/${activeSid}/tasks`)} />
+                  <MenuLink title="Репозитории" onPress={() => go(`/s/${activeSid}/prefs?tab=repos`)} />
+                  <MenuLink title={SECTION_LABELS.servers} text="SSH, устройства сервера и журнал" onPress={() => go(sectionPath("servers"))} />
+                  <MenuLink title={SECTION_LABELS.access} text="AI/Git ключи, Drive, MCP и домены" onPress={() => go(sectionPath("access"))} />
+                  {cluster ? (
+                    <>
+                      <MenuLink title="Все интеграции кластера" text="Ключи, Drive, MCP и сетевой доступ" onPress={() => go(`/cluster/${cluster}`)} />
+                      <MenuLink title="MCP" onPress={() => go(`/mcp/${cluster}`)} />
+                      <MenuLink title="Разрешённые домены" onPress={() => go(`/egress/${cluster}`)} />
+                    </>
+                  ) : null}
+                  <MenuLink title={SECTION_LABELS.permissions} text="Агенты, участники, устройства и подтверждения" onPress={() => go(sectionPath("permissions"))} />
                   <MenuLink title="Скилы агента" onPress={() => go(`/s/${activeSid}/skills`)} />
-                  <MenuLink title="Расходы" text="Модели, участники и стоимость запусков" onPress={() => go(`/s/${activeSid}/usage`)} />
-                  <MenuLink title={cluster ? "Кластер, участники и ключи" : "Сервер и устройства"} onPress={serverSettings} />
+                  <MenuLink title="Расходы" onPress={() => go(`/s/${activeSid}/usage`)} />
                 </>
-              ) : (
-                <MenuLink title="Подключить пространство" text="Сканировать QR или вставить приглашение" onPress={() => go("/")} accent />
-              )}
+              ) : <MenuLink title="Подключить пространство" onPress={() => go("/add")} />}
               <Txt kind="label">приложение</Txt>
-              <MenuLink title="Все пространства" onPress={() => go("/")} />
               <Row gap={8}>
                 <View style={{ flex: 1 }}><MenuLink title="Сканировать QR" onPress={() => go("/scan")} /></View>
                 <View style={{ flex: 1 }}><MenuLink title="Добавить ссылку" onPress={() => go("/add")} /></View>
               </Row>
-              <MenuLink title="Настройки и безопасность" text="Темы, ключи устройства и сведения о сборке" onPress={() => go("/settings")} />
+              <MenuLink title="Модули" text="Каталог, конструктор, безопасность и E2EE" onPress={() => go(appModulesPath())} />
+              <MenuLink title={SECTION_LABELS.parameters} text="Темы, уведомления, устройство и сборка" onPress={() => go("/settings")} />
             </ScrollView>
           </SafeAreaView>
         </View>

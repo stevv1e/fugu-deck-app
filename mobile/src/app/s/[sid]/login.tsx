@@ -52,7 +52,7 @@ export default function Login() {
     setError(null);
     try {
       await signIn(sid, { username: username.trim(), password, totp: totp.trim() || undefined, deviceName: deviceName.trim() });
-      router.replace(`/s/${sid}`);
+      router.replace(`/launch/${sid}`);
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -106,6 +106,7 @@ export default function Login() {
         </Card>
       ) : null}
 
+      <Btn title="В главное меню" kind="ghost" onPress={() => router.replace("/")} />
       <Btn
         title="Убрать сервер из приложения"
         kind="ghost"

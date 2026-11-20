@@ -2,6 +2,8 @@ import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, TextInput, View } from "react-native";
 
+import { appModulesPath, appSectionPath, SECTION_LABELS, type AppSection } from "@/core/navigation";
+import { clusterOfSid, parseSid } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { IconBtn, Row, Txt } from "@/ui/kit";
 import { MONO, useTheme } from "@/ui/theme";
@@ -20,19 +22,28 @@ export function DesktopCommandPalette({ visible, sid, onClose }: { visible: bool
   }, [visible]);
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [
-      { title: "Пространства и проекты", hint: "Home", path: "/" },
-      { title: "Git-модули", hint: "Каталог расширений", path: "/modules" },
-      { title: "Настройки приложения", hint: "Тема и локальные параметры", path: "/settings" },
+      { title: "Главное меню", hint: "Подключения, вход и регистрация", path: "/" },
+      { title: "Модули", hint: "Каталог, конструктор и E2EE", path: appModulesPath() },
+      { title: SECTION_LABELS.parameters, hint: "Тема и локальные параметры", path: "/settings" },
     ];
     if (sid) {
-      out.unshift(
-        { title: "Открыть проект", hint: "Чаты и память", path: `/s/${sid}` },
-        { title: "Windows Workspace", hint: "Файлы · diff · CI · SSH", path: `/s/${sid}/workspace` },
-        { title: "Модели и провайдеры", hint: "Поиск · роли · fallback", path: `/s/${sid}/prefs` },
-        { title: "Создать проект", hint: "Ctrl N", path: `/s/${sid}` },
+      const cluster = clusterOfSid(sid);
+      const kind = parseSid(sid)?.team ? "team" : cluster ? "cluster" : "standalone";
+      for (const id of ["chats", "projects", "models", "servers", "access", "permissions"] as AppSection[]) {
+        out.push({ title: SECTION_LABELS[id], hint: "Раздел текущего пространства", path: appSectionPath(id, { sid, cluster, kind }) });
+      }
+      out.push(
+        { title: "Workspace", hint: "Файлы · diff · CI · SSH", path: `/s/${sid}/workspace` },
+        { title: "Запуски и задачи", hint: "Активные и завершённые задания", path: `/s/${sid}/tasks` },
+        { title: "Расходы", hint: "Модели, участники и стоимость", path: `/s/${sid}/usage` },
+      );
+      if (cluster) out.push(
+        { title: "Все интеграции", hint: "Ключи · Drive · MCP · домены", path: `/cluster/${cluster}` },
+        { title: "MCP", hint: "Подключённые MCP-серверы", path: `/mcp/${cluster}` },
+        { title: "Разрешённые домены", hint: "Сетевой доступ агента", path: `/egress/${cluster}` },
       );
     }
-    for (const server of servers) out.push({ title: server.name, hint: "Пространство", path: server.device ? `/s/${server.id}` : `/s/${server.id}/login` });
+    for (const server of servers) out.push({ title: server.name, hint: server.device ? "Запустить пространство" : "Войти", path: server.device ? `/launch/${server.id}` : `/s/${server.id}/login` });
     return out;
   }, [sid, servers]);
   const filtered = commands.filter((item) => `${item.title} ${item.hint}`.toLowerCase().includes(query.toLowerCase()));

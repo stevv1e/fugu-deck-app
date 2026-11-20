@@ -14,6 +14,7 @@
 Полная актуальная документация находится в [`docs/`](docs/README.md):
 
 - [руководство пользователя](docs/USER_GUIDE.md);
+- [интерфейс и маршрутизация](docs/INTERFACE.md);
 - [техническая архитектура и протоколы](docs/TECHNICAL_ARCHITECTURE.md);
 - [эксплуатация, GitHub Actions и образы](docs/OPERATIONS.md);
 - [руководство для ИИ-разработчиков](docs/AI_DEVELOPMENT_GUIDE.md);
