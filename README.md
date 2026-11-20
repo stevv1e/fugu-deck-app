@@ -19,7 +19,7 @@
 - [руководство для ИИ-разработчиков](docs/AI_DEVELOPMENT_GUIDE.md);
 - [план развития](docs/ROADMAP.md).
 
-Быстрые ссылки: [релизы](https://github.com/stevv1e/fugu-deck-app/releases) · [официальные модули](https://github.com/stevv1e/fugu-modules) · [лендинг](https://fugu.ghostixel.io).
+Быстрые ссылки: [серверная платформа](https://github.com/stevv1e/fugu-deck-platform) · [релизы](https://github.com/stevv1e/fugu-deck-app/releases) · [официальные модули](https://github.com/stevv1e/fugu-modules) · [лендинг](https://fugu.ghostixel.io).
 
 ## Рабочие пространства, модели и модули
 

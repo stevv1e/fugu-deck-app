@@ -85,15 +85,15 @@ ghcr.io/stevv1e/deck-keycloak
 ghcr.io/stevv1e/deck-squid
 ```
 
-### release workflow
+### Публичные source repositories и workflows
 
-Приватная монорепа `.github/workflows/release.yaml` собирает space, space-operator, control plane, keyguard и SSH Gateway. Push в main создаёт `main-<sha>`, тег `vX.Y.Z` создаёт `X.Y.Z`.
+- `fugu-deck-platform/.github/workflows/release.yaml` — space-operator, control plane, keyguard и SSH Gateway.
+- `fugu-deck-platform/.github/workflows/platform-images.yaml` — Keycloak и Squid.
+- `fugu-deck-app/.github/workflows/space-image.yaml` — `deck-space` из публичного `backend/`.
 
-Dockerfile выполняет тесты до сборки результата. Образы публикуются в GHCR и подписываются cosign keyless. Kyverno проверяет issuer и точный workflow identity; production может закреплять образ по digest.
+Push в main создаёт `main-<sha>`, тег `vX.Y.Z` создаёт `X.Y.Z` там, где это предусмотрено workflow. Dockerfile Go-сервисов выполняет тесты до сборки результата. Образы публикуются в GHCR и подписываются cosign keyless. Kyverno проверяет issuer и точный workflow identity; production может закреплять образ по digest.
 
-### images workflow
-
-`.github/workflows/images.yaml` собирает Keycloak с custom authenticator/theme и Squid. Keycloak использует версию базового Keycloak как tag; production закрепляется по digest после подписания.
+Приватная монорепа на переходный период сохраняет прежние workflows и overlays, но не является новым каноническим публичным источником.
 
 ### Требование к зелёной сборке
 

@@ -30,13 +30,17 @@
 - `local/` — standalone client.
 - `docs/` — актуальная публичная документация.
 
+### Публичный `fugu-deck-platform`
+
+- `control-plane/` — invites, pairing, users, spaces, Drive OAuth.
+- `keyguard/` — устройства, действия, секреты, egress, media/Drive proxy.
+- `space-operator/`, `ssh-gateway/` — отдельные серверные исполнители.
+- `images/keycloak/`, `images/squid/` — публичные исходники platform images.
+- `kubernetes/platform/` — generic manifests без реальных окружений.
+
 ### Приватная монорепа
 
-- `fugu-deck-control-plane/` — invites, pairing, users, spaces, Drive OAuth.
-- `fugu-deck-keyguard/` — устройства, действия, секреты, egress, media/Drive proxy.
-- `fugu-deck-infra/` — Keycloak, Traefik, GitOps и manifests.
-- `fugu-deck-space-operator/`, `fugu-deck-ssh-gateway/` — отдельные серверные исполнители.
-- `docs/ARCHITECTURE-v2.md` — расширенная приватная архитектура.
+Содержит зеркало компонентов на переходный период, реальные deployment-overlays и расширенную приватную архитектуру. Новый канонический серверный код — публичный `fugu-deck-platform`; изменения синхронизируются туда и в зеркало до завершения переключения GitOps.
 
 Изменения общего приложения сначала проверяются в публичном дереве, затем синхронизируются в `fugu-deck-app/` монорепы. Не позволяйте версиям разойтись.
 
