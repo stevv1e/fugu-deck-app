@@ -11,6 +11,7 @@ export const ROUTE_INVENTORY: RouteInventoryItem[] = [
   { match: "/", section: "home", features: "Подключённые пространства, вход, регистрация, QR и приглашения" },
   { match: "/add,/scan,/join,/oauth,/s/[sid]/login", section: "home", features: "Добавление, авторизация, OAuth и pairing без рабочей навигации" },
   { match: "/launch/[sid]", section: "home", features: "Проверка сессии, запуск пространства, повтор и возврат в меню" },
+  { match: "/teams/[cid]", section: "home", features: "Выбор личного или общего пространства, создание общего пространства без автоматического запуска" },
   { match: "/s/[sid]/chats,/s/[sid]/c/[cid]", section: "chats", features: "Чаты, streaming, вложения, модели чата, отмена и подтверждения" },
   { match: "/s/[sid]/tasks", section: "chats", features: "Активные и завершённые запуски, уведомления и переходы в чат" },
   { match: "/s/[sid],/s/[sid]/p/[pid]", section: "projects", features: "Проекты, режимы, создание, импорт/экспорт, переименование и удаление" },
@@ -22,7 +23,7 @@ export const ROUTE_INVENTORY: RouteInventoryItem[] = [
   { match: "/keys/[cid]", section: "access", features: "AI/Git ключи, шифрование для keyguard, лимиты и удаление" },
   { match: "/mcp/[cid],/egress/[cid]", section: "access", features: "MCP endpoints и разрешённые домены" },
   { match: "/s/[sid]/prefs?tab=agents,/s/[sid]/skills", section: "permissions", features: "Права агентов, auto-write, опасные действия и скилы" },
-  { match: "/cluster/[cid],/team/[sid],/teams/[cid]", section: "permissions", features: "Устройства, pairing, участники, роли и общие пространства" },
+  { match: "/cluster/[cid],/team/[sid]", section: "permissions", features: "Устройства, pairing, участники, роли и настройки общих пространств" },
   { match: "/devices/[cid]", section: "permissions", features: "Подтверждение, отзыв и приглашение устройств" },
   { match: "/settings", section: "parameters", features: "Темы, уведомления, ключи приложения и сведения о сборке" },
   { match: "/modules", section: "parameters", features: "Каталог, конструктор, безопасность, экспорт и E2EE модулей" },
@@ -45,11 +46,11 @@ export function appSection(pathname: string): AppSection {
     if (pathname === "/modules" || pathname === "/settings") return "parameters";
     return "home";
   }
-  if (["/add", "/scan", "/join", "/oauth"].includes(pathname) || pathname.startsWith("/launch/") || /^\/s\/[^/]+\/login/.test(pathname)) return "home";
+  if (["/add", "/scan", "/join", "/oauth"].includes(pathname) || pathname.startsWith("/launch/") || pathname.startsWith("/teams/") || /^\/s\/[^/]+\/login/.test(pathname)) return "home";
   if (pathname === "/modules" || pathname === "/settings" || pathname.includes("/usage")) return "parameters";
   if (pathname.startsWith("/keys/") || pathname.startsWith("/mcp/") || pathname.startsWith("/egress/")) return "access";
   if (pathname.startsWith("/servers/") || /\/settings$/.test(pathname)) return "servers";
-  if (pathname.startsWith("/devices/") || pathname.startsWith("/cluster/") || pathname.startsWith("/team/") || pathname.startsWith("/teams/") || pathname.includes("/skills")) return "permissions";
+  if (pathname.startsWith("/devices/") || pathname.startsWith("/cluster/") || pathname.startsWith("/team/") || pathname.includes("/skills")) return "permissions";
   if (pathname.includes("/workspace") || /\/(p|kb|sched)\//.test(pathname) || /^\/s\/[^/]+$/.test(pathname)) return "projects";
   if (pathname.includes("/prefs")) return "models";
   if (pathname.includes("/tasks") || pathname.includes("/chats") || /\/c\//.test(pathname)) return "chats";

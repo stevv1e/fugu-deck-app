@@ -4,7 +4,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { isInsecure, shortFp } from "@/core/invite";
 import type { ServerRecord } from "@/core/types";
-import { listClusters, spaceSid, type ClusterRecord } from "@/state/cluster";
+import { listClusters, type ClusterRecord } from "@/state/cluster";
 import { useServers } from "@/state/servers";
 import { BrandMark } from "@/ui/BrandMark";
 import { Btn, Card, Chip, Empty, IconBtn, Loading, Notice, Row, Screen, Txt } from "@/ui/kit";
@@ -68,7 +68,7 @@ function ServerCard({ server, desktop = false }: { server: ServerRecord; desktop
 function ClusterCard({ cluster }: { cluster: ClusterRecord }) {
   const { p } = useTheme();
   return (
-    <Card accent={cluster.status === "active" ? p.ok : p.line2} onPress={() => router.push(cluster.status === "active" ? `/launch/${spaceSid(cluster.id)}` : `/cluster/${cluster.id}`)}>
+    <Card accent={cluster.status === "active" ? p.ok : p.line2} onPress={() => router.push(cluster.status === "active" ? `/teams/${cluster.id}` : `/cluster/${cluster.id}`)}>
       <Row style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Row style={{ flex: 1 }}>
           <ServerIcon name={cluster.name} active={cluster.status === "active"} />

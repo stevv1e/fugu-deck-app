@@ -42,6 +42,8 @@ test("mobile navigation has three work tabs and a complete more menu", () => {
 test("main menu, conversation and enrollment remain free of work navigation", () => {
   assert.equal(showMobileNavigation("/"), false);
   assert.equal(showMobileNavigation("/launch/one"), false);
+  assert.equal(showMobileNavigation("/teams/one"), false);
+  assert.equal(appSection("/teams/one"), "home");
   assert.equal(showMobileNavigation("/s/one/c/chat"), false);
   assert.equal(showMobileNavigation("/s/one/login"), false);
   assert.equal(showMobileNavigation("/scan"), false);

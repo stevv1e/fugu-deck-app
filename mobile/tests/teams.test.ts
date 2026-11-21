@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { validateEnvelope } from "../src/core/actions";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
 import { makeKey, type DeviceKeys } from "../src/core/keys";
-import { grantBody, proposeModel, setMember, termsProblem, titleProblem, untilDate, withdrawSponsorship, deleteTeam, type ApiSession } from "../src/core/teams";
+import { createTeam, grantBody, listSpaces, proposeModel, setMember, termsProblem, titleProblem, untilDate, withdrawSponsorship, deleteTeam, type ApiSession } from "../src/core/teams";
 
 function softKeys(): DeviceKeys {
   const s = softKeygen(), c = softKeygen();
@@ -125,4 +125,18 @@ test("состав, удаление и отзыв спонсорства — п
   const space2 = fake({});
   await assert.rejects(withdrawSponsorship(space2.s, cluster2.s, keys, "t-shop000001", "c42", "p7"), /недоступен/);
   assert.equal(space2.calls.length, 0);
+});
+
+test("выбор пространства загружает личное и общие, а создание не подменяет список", async () => {
+  const personal = { id: "anna", kind: "personal", title: "anna", owner: "anna", role: "owner", space: "u-anna", exists: true, phase: "Ready", url: "https://api.x/s/anna" };
+  const team = { id: "t-shop000001", kind: "team", title: "Магазин", owner: "anna", role: "owner", space: "t-shop000001", exists: true, phase: "Sleeping", url: "https://api.x/s/t-shop000001" };
+  const cluster = fake({
+    "GET /v1/spaces": () => ({ spaces: [personal, team] }),
+    "POST /v1/spaces": () => ({ ...team, id: "t-new0000001", title: "Новое", space: "t-new0000001", phase: "Pending" }),
+  });
+  assert.deepEqual((await listSpaces(cluster.s)).map((s) => [s.kind, s.title]), [["personal", "anna"], ["team", "Магазин"]]);
+  const created = await createTeam(cluster.s, "Новое");
+  assert.equal(created.kind, "team");
+  assert.equal(created.phase, "Pending");
+  assert.deepEqual(cluster.calls[1], { method: "POST", path: "/v1/spaces", body: { title: "Новое" } });
 });

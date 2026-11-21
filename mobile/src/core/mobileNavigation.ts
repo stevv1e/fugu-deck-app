@@ -11,7 +11,7 @@ export function mobileSection(pathname: string): MobileSection {
 }
 
 export function showMobileNavigation(pathname: string): boolean {
-  if (pathname === "/" || pathname.startsWith("/launch/")) return false;
+  if (pathname === "/" || pathname.startsWith("/launch/") || pathname.startsWith("/teams/")) return false;
   if (/^\/s\/[^/]+\/c\/[^/]+/.test(pathname)) return false;
   return !["/add", "/scan", "/join", "/oauth"].includes(pathname) && !/^\/s\/[^/]+\/login/.test(pathname);
 }
