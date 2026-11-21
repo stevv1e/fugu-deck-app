@@ -9,12 +9,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { routeFor, startPush } from "@/platform/push";
 import { ServersProvider } from "@/state/servers";
+import { useRememberWorkspace } from "@/state/workspaceContext";
 import { DesktopShell } from "@/ui/DesktopShell";
 import { MobileShell } from "@/ui/MobileShell";
 import { ThemeProvider, useTheme } from "@/ui/theme";
 
 function Themed() {
   const { p } = useTheme();
+  useRememberWorkspace();
   return (
     <>
       <StatusBar style={p.dark ? "light" : "dark"} />

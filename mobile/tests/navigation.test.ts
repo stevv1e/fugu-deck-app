@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { appSection, appSectionPath, ROUTE_INVENTORY, SECTION_LABELS, spaceLaunchKey } from "../src/core/navigation";
 import { mobileSection, mobileSectionPath, showMobileNavigation } from "../src/core/mobileNavigation";
+import { safeWorkspaceRoute, workspaceContextPath, workspaceSid } from "../src/core/workspace";
 
 test("route inventory preserves every product area", () => {
   assert.ok(ROUTE_INVENTORY.length >= 18);
@@ -66,4 +67,25 @@ test("space launch is stable when a cluster rebuilds its derived device record",
   assert.equal(renderedAgain, first);
   assert.notEqual(spaceLaunchKey({ id: "d-other" }), first);
   assert.equal(spaceLaunchKey(undefined), "");
+});
+
+test("workspace context keeps the project, chat and known preferences tab", () => {
+  assert.equal(workspaceSid("/s/one/c/chat"), "one");
+  assert.equal(workspaceSid("/s/one/login"), null);
+  assert.equal(workspaceSid("/launch/one"), null);
+  assert.equal(workspaceContextPath("/s/one/c/chat"), "/s/one/c/chat");
+  assert.equal(workspaceContextPath("/s/one/kb/general"), "/s/one/kb/general");
+  assert.equal(workspaceContextPath("/s/one/prefs", "models"), "/s/one/prefs?tab=models");
+  assert.equal(workspaceContextPath("/s/one/prefs", "other"), "/s/one/prefs");
+  assert.equal(workspaceContextPath("/settings", "models"), null);
+});
+
+test("space launch restores only a validated route of the selected space", () => {
+  assert.equal(safeWorkspaceRoute("one", "/s/one/c/chat"), "/s/one/c/chat");
+  assert.equal(safeWorkspaceRoute("one", "/s/one/p/general"), "/s/one/p/general");
+  assert.equal(safeWorkspaceRoute("one", "/s/one/prefs?tab=agents"), "/s/one/prefs?tab=agents");
+  for (const bad of ["/s/two/c/chat", "https://evil.example", "//evil.example", "/s/one/login", "/s/one/prefs?tab=other", "/s/one/c/chat?x=1"]) {
+    assert.equal(safeWorkspaceRoute("one", bad), "/s/one/chats", bad);
+  }
+  assert.equal(safeWorkspaceRoute("one", undefined), "/s/one/chats");
 });

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 
 import { spaceLaunchKey } from "@/core/navigation";
+import { safeWorkspaceRoute } from "@/core/workspace";
 import { useServers } from "@/state/servers";
 import { Btn, Card, Chip, Notice, Row, Screen, Txt } from "@/ui/kit";
 import { useTheme } from "@/ui/theme";
@@ -10,7 +11,7 @@ import { useTheme } from "@/ui/theme";
 const STEPS = ["Проверяем ключи и сертификат", "Обновляем защищённую сессию", "Запускаем пространство", "Открываем рабочую область"];
 
 export default function LaunchSpace() {
-  const { sid } = useLocalSearchParams<{ sid: string }>();
+  const { sid, next } = useLocalSearchParams<{ sid: string; next?: string }>();
   const { get, ready, api: openApi } = useServers();
   const rec = get(sid);
   const [attempt, setAttempt] = useState(0);
@@ -18,6 +19,7 @@ export default function LaunchSpace() {
   const [error, setError] = useState<string | null>(null);
   const { p } = useTheme();
   const deviceId = spaceLaunchKey(rec?.device);
+  const destination = safeWorkspaceRoute(sid, next);
 
   useEffect(() => {
     if (!ready || !deviceId) return;
@@ -33,7 +35,7 @@ export default function LaunchSpace() {
       if (!alive) return;
       setStep(3);
       timer = setTimeout(() => {
-        if (alive) router.replace(`/s/${sid}/chats`);
+        if (alive) router.replace(destination);
       }, 250);
     }).catch((e) => {
       if (alive) setError(e?.message || String(e));
@@ -42,7 +44,7 @@ export default function LaunchSpace() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [ready, openApi, sid, attempt, deviceId]);
+  }, [ready, openApi, sid, attempt, deviceId, destination]);
 
   if (ready && !rec) {
     return <Screen title="Запуск пространства"><Notice text="Пространство не найдено" /><Btn title="В главное меню" onPress={() => router.replace("/")} /></Screen>;

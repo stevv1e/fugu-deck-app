@@ -9,6 +9,7 @@ import { useServers } from "@/state/servers";
 import { alpha, MONO, useTheme } from "./theme";
 import { DesktopConversationContext, DesktopConversationSidebar } from "./DesktopChatPanels";
 import { DesktopCommandPalette } from "./DesktopCommandPalette";
+import { SpaceSwitcher } from "./SpaceSwitcher";
 import { useDesktopLayout } from "./useDesktopLayout";
 import { WebScrollbarStyle } from "./WebScrollbarStyle";
 
@@ -61,6 +62,7 @@ export function DesktopShell({ children }: { children: ReactNode }) {
   const { p } = useTheme();
   const { servers, get } = useServers();
   const [palette, setPalette] = useState(false);
+  const [switcher, setSwitcher] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const sid = /^\/s\/([^/]+)/.exec(pathname)?.[1];
   const [lastSid, setLastSid] = useState("");
@@ -120,9 +122,11 @@ export function DesktopShell({ children }: { children: ReactNode }) {
       <View style={styles.workspace}>
         {!home ? (
           <View style={[styles.sidebar, { width: collapsed ? 58 : 216, backgroundColor: p.bg2, borderColor: p.line }]}>
-            {!collapsed && current ? <Pressable onPress={() => go("/")} style={[styles.spaceSwitcher, { backgroundColor: p.panel, borderColor: p.line }]}>
-              <Text numberOfLines={1} style={{ color: p.text, fontSize: 12, fontWeight: "600" }}>{current.name}</Text>
-              <Text style={{ color: p.faint, fontSize: 10 }}>Сменить пространство</Text>
+            {current ? <Pressable onPress={() => setSwitcher(true)} accessibilityLabel="Сменить пространство" style={[styles.spaceSwitcher, { backgroundColor: p.panel, borderColor: p.line }]}>
+              {collapsed ? <Text style={{ color: p.accent, fontSize: 18, textAlign: "center" }}>⇄</Text> : <>
+                <Text numberOfLines={1} style={{ color: p.text, fontSize: 12, fontWeight: "600" }}>{current.name}</Text>
+                <Text style={{ color: p.faint, fontSize: 10 }}>Сменить пространство</Text>
+              </>}
             </Pressable> : null}
             <View style={styles.navList}>
               {NAV.map((item) => (
@@ -153,6 +157,7 @@ export function DesktopShell({ children }: { children: ReactNode }) {
         <Text style={[styles.statusText, styles.statusRight, { color: p.faint }]}>Fugu Deck · Windows</Text>
       </View>
       {palette ? <DesktopCommandPalette visible sid={sid} onClose={() => setPalette(false)} /> : null}
+      <SpaceSwitcher visible={switcher} currentSid={activeSid} onClose={() => setSwitcher(false)} />
     </View>
   );
 }

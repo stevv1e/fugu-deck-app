@@ -10,6 +10,7 @@ import { useServers } from "@/state/servers";
 
 import { BrandMark } from "./BrandMark";
 import { Chip, IconBtn, Row, Txt } from "./kit";
+import { SpaceSwitcher } from "./SpaceSwitcher";
 import { alpha, useTheme } from "./theme";
 import { useDesktopLayout } from "./useDesktopLayout";
 
@@ -38,6 +39,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
   const { p } = useTheme();
   const { servers, get } = useServers();
   const [more, setMore] = useState(false);
+  const [switcher, setSwitcher] = useState(false);
   const [lastSid, setLastSid] = useState("");
   const sid = /^\/s\/([^/]+)/.exec(pathname)?.[1];
   const activeSid = sid || lastSid || servers.find((server) => server.device)?.id;
@@ -99,6 +101,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
                     <Txt kind="label">текущее пространство</Txt>
                     <Chip text={current.device ? "подключено" : "нужен вход"} color={current.device ? p.ok : p.warn} />
                   </Row>
+                  <MenuLink title="Сменить пространство" text="Выбрать другое и вернуться к последнему месту" onPress={() => { setMore(false); setSwitcher(true); }} accent />
                   <MenuLink title={SECTION_LABELS.projects} text="Обзор, режимы, чаты и память" onPress={() => go(sectionPath("projects"))} />
                   <MenuLink title="Workspace" text="Файлы, Git diff, CI и SSH" onPress={() => go(`/s/${activeSid}/workspace`)} />
                   {projectId ? (
@@ -135,6 +138,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
           </SafeAreaView>
         </View>
       ) : null}
+      <SpaceSwitcher visible={switcher} currentSid={activeSid} onClose={() => setSwitcher(false)} />
     </View>
   );
 }
