@@ -74,3 +74,6 @@ export function appSectionPath(section: AppSection, o: { sid?: string; cluster?:
 }
 
 export const appModulesPath = () => "/modules";
+
+/** Производные записи кластера создаются заново при рендере; запуск должен зависеть только от стабильного ID. */
+export const spaceLaunchKey = (device?: { id: string }) => device?.id ?? "";

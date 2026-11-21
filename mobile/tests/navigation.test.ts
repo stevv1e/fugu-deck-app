@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { appSection, appSectionPath, ROUTE_INVENTORY, SECTION_LABELS } from "../src/core/navigation";
+import { appSection, appSectionPath, ROUTE_INVENTORY, SECTION_LABELS, spaceLaunchKey } from "../src/core/navigation";
 import { mobileSection, mobileSectionPath, showMobileNavigation } from "../src/core/mobileNavigation";
 
 test("route inventory preserves every product area", () => {
@@ -55,4 +55,13 @@ test("main tabs preserve the current space and have a safe home fallback", () =>
   assert.equal(mobileSectionPath("models", "one"), "/s/one/prefs?tab=models");
   assert.equal(mobileSectionPath("projects"), "/");
   assert.equal(mobileSectionPath("more", "one"), null);
+});
+
+test("space launch is stable when a cluster rebuilds its derived device record", () => {
+  const first = spaceLaunchKey({ id: "d-device" });
+  const renderedAgain = spaceLaunchKey({ id: "d-device" });
+  assert.equal(first, "d-device");
+  assert.equal(renderedAgain, first);
+  assert.notEqual(spaceLaunchKey({ id: "d-other" }), first);
+  assert.equal(spaceLaunchKey(undefined), "");
 });
