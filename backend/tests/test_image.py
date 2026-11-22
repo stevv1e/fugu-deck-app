@@ -49,7 +49,9 @@ async def test_generate_image_attachment(provider, tmp_path: Path, monkeypatch):
     if provider == "openai":
         FakeClient.response = httpx.Response(200, json={"data": [{"b64_json": PNG}]})
     else:
-        FakeClient.response = httpx.Response(200, json={"output_image": {"mime_type": "image/png", "data": PNG}})
+        FakeClient.response = httpx.Response(200, json={"steps": [{"type": "model_output", "content": [
+            {"type": "image", "mime_type": "image/png", "data": PNG}
+        ]}]})
     got = await ImageGenerator(ctx).generate(provider, "Draw an otter", "")
     assert got["attachments"][0]["mime"] == "image/png"
     att = await db.get_attachment(got["attachments"][0]["id"])

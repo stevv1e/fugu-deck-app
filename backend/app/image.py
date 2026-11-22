@@ -97,6 +97,10 @@ class ImageGenerator:
         else:
             image = data.get("output_image") or {}
             images = [(image.get("data", ""), image.get("mime_type") or "image/png")]
+            for step in data.get("steps") or []:
+                for item in step.get("content") or []:
+                    if item.get("type") == "image":
+                        images.append((item.get("data", ""), item.get("mime_type") or "image/png"))
         decoded = [decode_image(encoded, mime) for encoded, mime in images if encoded]
         if not decoded:
             raise ImageError("Провайдер не вернул изображение; измените описание или попробуйте другую модель")
