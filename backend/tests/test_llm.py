@@ -110,6 +110,59 @@ async def test_openai_compat_retries_only_when_safe(monkeypatch):
     assert f.calls == 2
 
 
+async def test_gemini_thought_signature_roundtrip(monkeypatch, tmp_path):
+    from openai.types.chat import ChatCompletionChunk
+
+    from app.config import Settings
+    from app.llm import openai_compat as oc
+
+    chunks = [ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-1", "object": "chat.completion.chunk", "created": 1, "model": "gemini-3.5-flash-lite",
+        "choices": [{"index": 0, "delta": {"tool_calls": [{
+            "index": 0, "id": "call_1", "type": "function",
+            "function": {"name": "get_time", "arguments": "{}"},
+        }]}, "finish_reason": None}],
+    }), ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-1", "object": "chat.completion.chunk", "created": 1, "model": "gemini-3.5-flash-lite",
+        "choices": [{"index": 0, "delta": {"tool_calls": [{
+            "index": 0, "extra_content": {"google": {"thought_signature": "signed-thought"}},
+        }]}, "finish_reason": "tool_calls"}],
+    })]
+
+    class FakeStream:
+        def __init__(self):
+            self.items = iter(chunks)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.items)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeClient:
+        def __init__(self):
+            self.chat = self
+            self.completions = self
+
+        async def create(self, **kwargs):
+            return FakeStream()
+
+    monkeypatch.setattr(oc, "_client", lambda *args: FakeClient())
+    provider = oc.OpenAICompatProvider("google", Settings(data_dir=tmp_path))
+
+    async def nothing(*_args):
+        return None
+
+    result = await provider.stream("key", "gemini-3.5-flash-lite", [], [], nothing, nothing)
+    call = result.tool_calls[0]
+    assert call["extra_content"]["google"]["thought_signature"] == "signed-thought"
+    replayed = oc._strip_meta([{"role": "assistant", "content": "", "tool_calls": [call]}])
+    assert replayed[0]["tool_calls"][0]["extra_content"] == call["extra_content"]
+
+
 def test_deepseek_reasoning_roundtrip():
     from app.config import get_settings
     from app.llm import PROVIDER_TITLES, get_provider, split_model

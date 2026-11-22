@@ -62,3 +62,21 @@ async def test_generate_image_attachment(provider, tmp_path: Path, monkeypatch):
         assert url.endswith("/v1beta/interactions") and call["json"]["model"] == "gemini-3.1-flash-lite-image"
         assert call["headers"]["x-goog-api-key"] == "secret" and call["headers"]["Api-Revision"] == "2026-05-20"
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_google_image_free_tier_error_without_retries(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("app.image.httpx.AsyncClient", FakeClient)
+    FakeClient.response = httpx.Response(429, json={"error": {"message":
+        "Quota exceeded for gemini-3.1-flash-lite-image: limit: 0 for free tier; use a paid tier to access image generation."}})
+    settings = Settings(data_dir=tmp_path)
+    db = Database(str(settings.db_path))
+    await db.connect()
+    await db._exec("INSERT INTO conversations (id,model,created_at,updated_at) VALUES ('c','google:test',1,1)")
+    run = type("Run", (), {"keys": {"google": "secret"}})()
+    ctx = type("Ctx", (), {"settings": settings, "db": db, "conversation_id": "c", "run": run})()
+    before = len(FakeClient.calls)
+    with pytest.raises(ValueError, match="Free Tier"):
+        await ImageGenerator(ctx).generate("google", "Draw an otter", "")
+    assert len(FakeClient.calls) == before + 1
+    await db.close()

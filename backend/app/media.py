@@ -29,7 +29,11 @@ async def post_transient_retry(client: httpx.AsyncClient, url: str, **kwargs) ->
             if attempt == 2:
                 raise
         else:
-            if response.status_code not in {429, 500, 503, 504} or attempt == 2:
+            body = (getattr(response, "text", "") or "").lower()
+            permanent_quota = response.status_code == 429 and (
+                ("free tier" in body and "limit: 0" in body) or "paid tier to access" in body
+            )
+            if permanent_quota or response.status_code not in {429, 500, 503, 504} or attempt == 2:
                 return response
             retry_after = response.headers.get("Retry-After", "")
             delay = min(30, float(retry_after)) if retry_after.isdigit() else 2 ** attempt

@@ -113,6 +113,9 @@ class OpenAICompatProvider:
                         await on_tool(tc.index, c["function"]["name"])
                     if tc.function and tc.function.arguments:
                         c["function"]["arguments"] += tc.function.arguments
+                    extra_content = (tc.model_extra or {}).get("extra_content")
+                    if extra_content:
+                        c["extra_content"] = extra_content
         except APIError as e:
             raise LLMError(f"{self.name}: {getattr(e, 'message', str(e))}") from e
         blocks = [{"reasoning_content": "".join(reasoning)}] if reasoning else None

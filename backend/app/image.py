@@ -74,7 +74,22 @@ class ImageGenerator:
         async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
             response = await post_transient_retry(client, url, headers=headers, json=body)
         if response.status_code != 200:
-            raise ImageError(f"{provider} image: {response.status_code} {response.text[:500]}")
+            detail = response.text[:500]
+            try:
+                error = response.json().get("error") or {}
+                if isinstance(error, dict):
+                    detail = str(error.get("message") or detail)[:500]
+            except ValueError:
+                pass
+            quota = detail.lower()
+            if provider == "google" and response.status_code == 429 and (
+                    "free tier" in quota or "limit: 0" in quota or "paid tier to access" in quota):
+                raise ImageError(
+                    "Google Gemini API: у проекта этого ключа действует Free Tier, а лимит генерации изображений равен 0. "
+                    "Привяжите API-проект к платёжному аккаунту в Google AI Studio и создайте/выберите ключ этого проекта. "
+                    "Подписка Google AI Pro/Ultra отдельно не оплачивает Gemini API."
+                )
+            raise ImageError(f"{provider} image ({model}): {response.status_code} {detail}")
         data = response.json()
         images = []
         if provider == "openai":
