@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     # Папка скилов. По умолчанию внутри data_dir; можно смонтировать отдельный git-репозиторий.
     skills_dir: Path | None = None
     max_upload_mb: int = 25
-    max_media_upload_mb: int = 500
+    max_media_upload_mb: int = 2048
     media_chunk_seconds: int = 600
     media_job_timeout_seconds: int = 3600
     media_transcribe_provider: Literal["auto", "openai", "google"] = "auto"

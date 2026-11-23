@@ -278,3 +278,67 @@ async def test_media_job_cancel_and_restart_recovery(tmp_path: Path):
     assert recovered["status"] == "queued" and recovered["progress"] == 0
     await worker.stop()
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_remote_video_extracts_audio_archive(tmp_path: Path, monkeypatch):
+    import io
+    import tarfile
+    import httpx
+
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        raw = b"opus-audio"
+        info = tarfile.TarInfo("chunk_00000.ogg")
+        info.size = len(raw)
+        tar.addfile(info, io.BytesIO(raw))
+
+    async def handler(request):
+        assert request.read() == b"video"
+        assert request.headers["Authorization"] == "Bearer space-token"
+        assert request.headers["X-Deck-Media-Chunk-Seconds"] == "600"
+        return httpx.Response(200, content=archive.getvalue(), headers={"Content-Type": "application/x-tar"})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def client(*args, **kwargs):
+        return real_client(transport=transport)
+
+    monkeypatch.setattr("app.media.httpx.AsyncClient", client)
+    monkeypatch.setattr("app.media.kgc.token", lambda: "space-token")
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"video")
+    work = tmp_path / "work"
+    work.mkdir()
+    worker = MediaWorker(None, Settings(data_dir=tmp_path, keyguard_url="http://keyguard"))
+    job = {"id": "j", "conversation_id": "c", "created_by": "u"}
+    await worker._remote_extract(job, {"path": str(source)}, work)
+    assert (work / "chunk_00000.ogg").read_bytes() == b"opus-audio"
+    assert not (work / "audio.tar").exists()
+
+
+def test_media_worker_extracts_real_audio(tmp_path: Path, monkeypatch):
+    import shutil
+    import subprocess
+    import tarfile
+    from fastapi.testclient import TestClient
+    from app import media_worker
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("для проверки media-worker нужен FFmpeg")
+    source = tmp_path / "source.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
+                    "-f", "lavfi", "-i", "sine=frequency=1000:duration=1", "-shortest", str(source)], check=True)
+    monkeypatch.setattr(media_worker, "TOKEN", "worker-secret")
+    monkeypatch.setattr(media_worker, "WORK_DIR", tmp_path)
+    client = TestClient(media_worker.app)
+    response = client.post("/extract", content=source.read_bytes(), headers={
+        "Authorization": "Bearer worker-secret", "Content-Type": "application/octet-stream",
+        "X-Deck-Media-Chunk-Seconds": "600"})
+    assert response.status_code == 200, response.text
+    archive = tmp_path / "answer.tar"
+    archive.write_bytes(response.content)
+    with tarfile.open(archive) as tar:
+        assert [x.name for x in tar.getmembers()] == ["chunk_00000.ogg"]
+        assert tar.extractfile("chunk_00000.ogg").read().startswith(b"OggS")

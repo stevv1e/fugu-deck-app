@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import shutil
+import tarfile
 import time
 import uuid
 from pathlib import Path
@@ -197,6 +198,58 @@ class MediaWorker:
             raise MediaError(f"FFmpeg: {stderr.decode(errors='replace')[-500:]}")
         return stdout.decode(errors="replace")
 
+    async def _remote_extract(self, job: dict, att: dict, work: Path) -> None:
+        source = Path(att["path"])
+        url = f"{self.settings.keyguard_url.rstrip('/')}/media/extract"
+        headers = {"Authorization": f"Bearer {kgc.token()}",
+                   **kgc.headers(job["conversation_id"], job["created_by"]),
+                   "Content-Type": "application/octet-stream", "Content-Length": str(source.stat().st_size),
+                   "X-Deck-Media-Chunk-Seconds": str(self.settings.media_chunk_seconds)}
+
+        async def content():
+            with source.open("rb") as f:
+                while chunk := await asyncio.to_thread(f.read, 2 * 1024 * 1024):
+                    yield chunk
+
+        archive = work / "audio.tar"
+        timeout = httpx.Timeout(self.settings.media_job_timeout_seconds, connect=30)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, headers=headers, content=content()) as response:
+                if response.status_code != 200:
+                    await response.aread()
+                    raise MediaError(f"Media worker: {response.status_code} {response.text[:500]}")
+                size = 0
+                with archive.open("wb") as out:
+                    async for chunk in response.aiter_bytes(2 * 1024 * 1024):
+                        size += len(chunk)
+                        if size > 512 * 1024 * 1024:
+                            raise MediaError("Media worker вернул слишком большой архив")
+                        out.write(chunk)
+        try:
+            with tarfile.open(archive, "r:") as tar:
+                members = tar.getmembers()
+                total = sum(m.size for m in members)
+                if not members or len(members) > 1440 or total > 512 * 1024 * 1024:
+                    raise MediaError("Media worker вернул некорректный архив")
+                for member in members:
+                    if not member.isfile() or Path(member.name).name != member.name or not member.name.startswith("chunk_") \
+                            or not member.name.endswith(".ogg"):
+                        raise MediaError("Media worker вернул недопустимый файл")
+                tar.extractall(work, members=members, filter="data")
+        except (tarfile.TarError, OSError) as e:
+            raise MediaError("Media worker вернул повреждённый архив") from e
+        finally:
+            archive.unlink(missing_ok=True)
+
+    async def _extract_audio(self, job: dict, att: dict, work: Path, kind: str) -> None:
+        if kind == "video" and kgc.enabled():
+            await self._remote_extract(job, att, work)
+            return
+        pattern = str(work / "chunk_%05d.ogg")
+        await self._run(job["id"], ["ffmpeg", "-nostdin", "-v", "error", "-protocol_whitelist", "file", "-i", att["path"],
+                                      "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libopus", "-b:a", "24k",
+                                      "-f", "segment", "-segment_time", str(self.settings.media_chunk_seconds), pattern])
+
     async def _process(self, job: dict) -> None:
         jid = job["id"]
         work = self.settings.data_dir / "media" / jid
@@ -204,7 +257,7 @@ class MediaWorker:
             att = await self.db.get_attachment(job["attachment_id"])
             if not att or att["conversation_id"] != job["conversation_id"] or not Path(att["path"]).is_file():
                 raise MediaError("Исходное вложение не найдено")
-            media_kind(att["filename"], att["mime"])
+            kind = media_kind(att["filename"], att["mime"])
             work.mkdir(parents=True, exist_ok=True)
             await self.db.update_media_job(jid, status="running", progress=0.05)
             probe = await self._run(jid, ["ffprobe", "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration",
@@ -215,10 +268,8 @@ class MediaWorker:
                 raise MediaError("Не удалось определить длительность записи") from e
             if not 0 < duration <= 24 * 3600:
                 raise MediaError("Запись должна быть длиной от одной секунды до 24 часов")
-            pattern = str(work / "chunk_%05d.ogg")
-            await self._run(jid, ["ffmpeg", "-nostdin", "-v", "error", "-protocol_whitelist", "file", "-i", att["path"], "-map", "0:a:0", "-vn",
-                                  "-ac", "1", "-ar", "16000", "-c:a", "libopus", "-b:a", "24k",
-                                  "-f", "segment", "-segment_time", str(self.settings.media_chunk_seconds), pattern])
+            await self.db.update_media_job(jid, progress=0.1)
+            await self._extract_audio(job, att, work, kind)
             chunks = sorted(work.glob("chunk_*.ogg"))
             if not chunks:
                 raise MediaError("В файле нет звуковой дорожки")

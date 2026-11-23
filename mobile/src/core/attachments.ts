@@ -5,7 +5,7 @@
 
 /** Пределы сервера для обычных вложений и медиа (загрузка частями). */
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
-export const MAX_MEDIA_ATTACHMENT_BYTES = 500 * 1024 * 1024;
+export const MAX_MEDIA_ATTACHMENT_BYTES = 2048 * 1024 * 1024;
 const MEDIA_EXT = /\.(mp3|wav|flac|ogg|m4a|aac|webm|mp4|mpeg|mov|mkv)$/i;
 export const MAX_ATTACHMENTS = 6;
 /** До этого размера — одним запросом. */
