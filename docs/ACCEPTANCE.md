@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | Backend | 113 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
 | Mobile core | 67 passed, 5 skipped без локального `kgcheck`; typecheck | PASS |
+| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45422205853) |
 | Electron transport | `cd desktop/windows && npm test` | PASS |
 | Android release 0.14.1 | GitHub Actions `apk`, release event | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45249578487) |
 | Windows release 0.14.1 | GitHub Actions `exe`, release event | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45249578908) |

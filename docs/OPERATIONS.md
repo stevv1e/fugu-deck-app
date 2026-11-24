@@ -58,6 +58,7 @@ python -m pytest -q
 
 Репозиторий: https://github.com/stevv1e/fugu-deck-app/actions
 
+- `validate.yaml` — backend tests, mobile lint/typecheck/tests, общие action vectors, настоящий keyguard `kgcheck`, web export и Electron transport на push/PR.
 - `android.yml` — Expo prebuild, arm64 release APK, подпись keystore из Actions secrets, загрузка артефакта и публикация в Release.
 - `windows.yml` — Expo web export, Electron transport tests, NSIS x64 installer и публикация в Release.
 

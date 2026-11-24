@@ -275,11 +275,12 @@ Roadmap не привязан к искусственным датам. Прио
 ## 10. Порядок принятия следующих этапов
 
 1. Завершить P0 и заполнить реальную acceptance matrix.
-2. Выпустить Windows signing/auto-update, бесшовное обновление, загрузку файлов с ПК и Windows Hello после pairing.
-3. Перейти к автоматической E2EE-синхронизации.
-4. Внедрить Context/Budget Harness, baseline evals и актуальность базы знаний.
-5. Добавить PDF/OCR worker и расширять media pipelines.
-6. Выпустить Windows terminal, затем Android app-private shell.
-7. Только затем расширять module capabilities и server execution.
+2. Добавить загрузку файлов с Windows ПК.
+3. Выпустить Windows signing/auto-update и бесшовное обновление клиентов. Windows Hello после pairing можно выполнить небольшим самостоятельным этапом между ними.
+4. Внедрить Context/Budget Harness и baseline evals.
+5. Добавить поиск, доказательства и проверку актуальности базы знаний.
+6. Добавить PDF/OCR worker и расширять media pipelines.
+7. Затем перейти к автоматической E2EE-синхронизации, Windows terminal и Android app-private shell.
+8. Только после этого расширять module capabilities и server execution.
 
 Каждый этап должен иметь отдельный security review, тесты атак, обновлённую документацию и реальный сценарий на опубликованном артефакте.
