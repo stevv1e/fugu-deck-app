@@ -15,6 +15,7 @@ declare class FdSecureModule extends NativeModule<FdSecureEvents> {
   request(req: NativeHttpRequest): Promise<{ status: number; body: string }>;
   openStream(id: string, req: NativeHttpRequest): void;
   closeStream(id: string): void;
+  installApk(uri: string): boolean;
 }
 
 /** null — модуль не собран в это приложение (Expo Go, веб): работаем на программных ключах. */

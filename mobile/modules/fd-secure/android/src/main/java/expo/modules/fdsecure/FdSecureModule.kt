@@ -1,6 +1,7 @@
 package expo.modules.fdsecure
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
@@ -10,6 +11,7 @@ import android.util.Base64
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -24,9 +26,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.IOException
 import java.math.BigInteger
 import java.net.Socket
+import java.net.URI
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -81,6 +85,18 @@ class FdSecureModule : Module() {
       val strongbox = Build.VERSION.SDK_INT >= 28 &&
         context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
       mapOf("platform" to "android", "hardware" to true, "strongbox" to strongbox, "biometry" to bio, "mtls" to true, "appAttest" to false)
+    }
+
+    Function("installApk") { uriString: String ->
+      val file = File(URI(uriString))
+      if (!file.isFile) throw IllegalArgumentException("APK не найден")
+      val uri = FileProvider.getUriForFile(context, "${context.packageName}.fugu-files", file)
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+      true
     }
 
     AsyncFunction("generateKey") { alias: String, requireBiometry: Boolean, challenge: String?, promise: Promise ->

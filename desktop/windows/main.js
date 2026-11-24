@@ -3,9 +3,11 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 const { registerFiles } = require("./files");
 const { registerNetwork } = require("./net");
+const { registerUpdates } = require("./update");
 
 registerNetwork(ipcMain);
 registerFiles(ipcMain, dialog, shell, () => app.getPath("temp"));
+registerUpdates(ipcMain, app);
 
 const dist = path.join(__dirname, "dist");
 

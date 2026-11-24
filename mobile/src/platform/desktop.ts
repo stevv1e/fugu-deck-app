@@ -20,6 +20,10 @@ type DesktopBridge = {
   finishFile(id: string): Promise<string>;
   cancelFile(id: string): Promise<void>;
   openFile(id: string): Promise<void>;
+  downloadUpdate(version: string): Promise<{ id: string; version: string; size: number }>;
+  installUpdate(id: string): Promise<{ installing: boolean }>;
+  cancelUpdate(): void;
+  onUpdateProgress(callback: (progress: { done: number; total: number }) => void): () => void;
 };
 
 const bridge = () => (globalThis as unknown as { fuguDesktop?: DesktopBridge }).fuguDesktop;
@@ -42,6 +46,10 @@ export const desktopWrite = (id: string, data: string) => bridge()!.writeFile(id
 export const desktopFinish = (id: string) => bridge()!.finishFile(id);
 export const desktopCancel = (id: string) => bridge()!.cancelFile(id);
 export const desktopOpen = (id: string) => bridge()!.openFile(id);
+export const desktopDownloadUpdate = (version: string) => bridge()!.downloadUpdate(version);
+export const desktopInstallUpdate = (id: string) => bridge()!.installUpdate(id);
+export const desktopCancelUpdate = () => bridge()!.cancelUpdate();
+export const onDesktopUpdateProgress = (callback: (progress: { done: number; total: number }) => void) => bridge()!.onUpdateProgress(callback);
 
 async function credentials(alias?: string, certPem?: string): Promise<Pick<DesktopRequest, "certPem" | "keyJwk">> {
   if (!alias || !certPem) return {};

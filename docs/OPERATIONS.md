@@ -69,7 +69,7 @@ python -m pytest -q
 1. Скачайте оба опубликованных файла обратно.
 2. Сравните имена и размеры с release assets.
 3. Создайте/проверьте `SHA256SUMS.txt` по скачанным файлам.
-4. Загрузите checksums в тот же Release.
+4. Загрузите checksums в тот же Release. Release workflows также публикуют `update-android.json` и `update-windows.json`, подписанные отдельным Ed25519-ключом из `DECK_UPDATE_PRIVATE_KEY`.
 5. Обновите прямые ссылки лендинга.
 
 ## 5. Серверные образы

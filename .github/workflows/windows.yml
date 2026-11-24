@@ -19,6 +19,10 @@ jobs:
         with: {node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json}
       - run: npm ci
         working-directory: mobile
+      - name: Версия приложения
+        run: |
+          echo "DECK_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+          echo "DECK_COMMIT=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - name: Web export (expo-router web)
         working-directory: mobile
         run: npx expo export --platform web
@@ -37,6 +41,11 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           EXE=$(ls release/*.exe | head -1)
           mv "$EXE" "release/Fugu-Deck-Setup-${VERSION}.exe"
+      - name: Подписанный update manifest
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        env:
+          DECK_UPDATE_PRIVATE_KEY: ${{ secrets.DECK_UPDATE_PRIVATE_KEY }}
+        run: node scripts/sign-update-manifest.mjs windows "$DECK_VERSION" "desktop/windows/release/Fugu-Deck-Setup-${DECK_VERSION}.exe" desktop/windows/release/update-windows.json
       - uses: actions/upload-artifact@v4
         with:
           name: fugu-deck-windows
@@ -47,5 +56,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: desktop/windows/release/*.exe
+          files: |
+            desktop/windows/release/*.exe
+            desktop/windows/release/update-windows.json
           generate_release_notes: true

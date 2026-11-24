@@ -1,12 +1,12 @@
 {
   "name": "fugu-deck-desktop",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "private": true,
   "description": "Fugu Deck desktop client (Electron over Expo web export)",
   "main": "main.js",
   "author": "Fugu Deck",
   "scripts": {
-    "test": "node --test net.test.js files.test.js"
+    "test": "node --test net.test.js files.test.js update.test.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -30,6 +30,7 @@
       "main.js",
       "files.js",
       "net.js",
+      "update.js",
       "preload.js",
       "dist/**/*"
     ],

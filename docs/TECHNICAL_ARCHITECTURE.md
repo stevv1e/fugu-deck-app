@@ -40,7 +40,7 @@
 ### Клиенты
 
 - `mobile/` — общий интерфейс Expo Router и React Native. На Android нативный `fd-secure` работает с StrongBox/TEE и аттестацией.
-- `desktop/windows/` — Electron shell, защищённая схема `fugu-app://`, preload bridge, Node HTTP(S) transport с поддержкой mTLS, deep links `fugudeck://`. File bridge открывает нативные picker/save dialogs, принимает реальные dropped Files через `webUtils`, читает/пишет частями и выдаёт renderer только случайные handles выбранных файлов, а не произвольный доступ к путям.
+- `desktop/windows/` — Electron shell, защищённая схема `fugu-app://`, preload bridge, Node HTTP(S) transport с поддержкой mTLS, deep links `fugudeck://`. File bridge открывает нативные picker/save dialogs, принимает реальные dropped Files через `webUtils`, читает/пишет частями и выдаёт renderer только случайные handles выбранных файлов, а не произвольный доступ к путям. Update bridge проверяет Ed25519-manifest и SHA-256, сохраняет только проверенный installer handle и запускает его по действию пользователя.
 - `local/` — standalone-клиент без кластерного backend.
 
 ### Space backend
