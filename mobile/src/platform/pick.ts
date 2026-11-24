@@ -18,6 +18,7 @@ const picked = (uri: string, name: string, mime: string, size?: number | null): 
 
 /** Фото из галереи, можно несколько (системное окно выбора; разрешение на всю галерею не нужно). */
 export async function pickPhotos(limit: number): Promise<PickedFile[]> {
+  if (desktopAvailable()) return desktopPickFiles(limit);
   const r = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"], quality: 0.85, exif: false, allowsMultipleSelection: limit > 1, selectionLimit: Math.max(1, limit),
   });
