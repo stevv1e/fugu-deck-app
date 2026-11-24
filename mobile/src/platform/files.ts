@@ -1,17 +1,22 @@
 /**
  * Файлы вложений на телефоне: чтение кусками для загрузки, скачивание в кэш (открыть в другом приложении)
- * и сохранение в выбранную папку. base64 считает нативный код: в JS 50 МБ разбирались бы минутами.
+ * и сохранение в выбранной папке. base64 считает нативный код: в JS 50 МБ разбирались бы минутами.
  */
 import { Directory, File, Paths } from "expo-file-system";
 import { readAsStringAsync } from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { Platform } from "react-native";
 
-/** Кусок файла [position, position+length) в base64. */
-export const readChunk = (uri: string, position: number, length: number) =>
-  readAsStringAsync(uri, { encoding: "base64", position, length });
+import { desktopAvailable, desktopCancel, desktopFinish, desktopOpen, desktopRead, desktopSaveStart, desktopWrite } from "./desktop";
 
-export const readAll = (uri: string) => readAsStringAsync(uri, { encoding: "base64" });
+/** Кусок файла [position, position+length) в base64. */
+export async function readChunk(uri: string, position: number, length: number): Promise<string> {
+  return await desktopRead(uri, position, length) ?? readAsStringAsync(uri, { encoding: "base64", position, length });
+}
+
+export async function readAll(uri: string, size?: number): Promise<string> {
+  return await desktopRead(uri, 0, size || 0) ?? readAsStringAsync(uri, { encoding: "base64" });
+}
 
 /** Источник кусков файла с сервера: base64 и признак конца. */
 export type ChunkSource = (offset: number) => Promise<{ data: string; eof: boolean; size: number }>;
@@ -54,8 +59,39 @@ export async function openWithOtherApp(f: File, mime: string, title: string) {
   await Sharing.shareAsync(f.uri, { mimeType: mime || undefined, dialogTitle: title });
 }
 
+async function pumpDesktop(id: string, next: ChunkSource, onProgress: ((d: number, t: number) => void) | undefined, open: boolean) {
+  try {
+    let off = 0;
+    for (;;) {
+      const c = await next(off);
+      await desktopWrite(id, c.data);
+      off += Math.floor((c.data.length * 3) / 4) - (c.data.endsWith("==") ? 2 : c.data.endsWith("=") ? 1 : 0);
+      onProgress?.(off, c.size);
+      if (c.eof) break;
+    }
+    if (open) await desktopOpen(id);
+    else await desktopFinish(id);
+  } catch (e) {
+    await desktopCancel(id).catch(() => {});
+    throw e;
+  }
+}
+
+/** Скачать во временный файл и открыть связанным приложением Windows. */
+export async function openOnDesktop(name: string, next: ChunkSource, onProgress?: (d: number, t: number) => void): Promise<void> {
+  const id = await desktopSaveStart(name, true);
+  if (!id) throw new Error("Не удалось создать временный файл");
+  await pumpDesktop(id, next, onProgress, true);
+}
+
 /** Сохранить в папку, которую человек выберет. false — папку не выбрали. */
 export async function saveToFolder(name: string, mime: string, next: ChunkSource, onProgress?: (d: number, t: number) => void): Promise<boolean> {
+  if (desktopAvailable()) {
+    const id = await desktopSaveStart(name, false);
+    if (!id) return false;
+    await pumpDesktop(id, next, onProgress, false);
+    return true;
+  }
   if (Platform.OS !== "android") throw new Error("Сохранение в папку пока есть только на Android — используйте «Открыть»");
   let dir: Directory;
   try {

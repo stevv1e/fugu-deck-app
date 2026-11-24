@@ -34,7 +34,7 @@ export function attachProblem(f: Pick<PickedFile, "name" | "size">, already: num
   if (already >= MAX_ATTACHMENTS) return `К сообщению можно приложить не больше ${MAX_ATTACHMENTS} файлов`;
   if (f.size <= 0) return `Файл «${f.name}» пустой`;
   const limit = MEDIA_EXT.test(f.name) ? MAX_MEDIA_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
-  if (f.size > limit) return `Файл «${f.name}» — ${sizeText(f.size)}; с телефона можно приложить до ${sizeText(limit)}`;
+  if (f.size > limit) return `Файл «${f.name}» — ${sizeText(f.size)}; можно приложить до ${sizeText(limit)}`;
   return null;
 }
 
@@ -42,34 +42,76 @@ export const uploadBody = (f: Pick<PickedFile, "name" | "mime">, data: string) =
 
 type Req = <T>(method: string, path: string, body?: unknown, opts?: { timeoutMs?: number }) => Promise<T>;
 /** Чтение файла в base64: целиком или кусок [position, position+length). */
-export type FileReader = { all(uri: string): Promise<string>; chunk(uri: string, position: number, length: number): Promise<string> };
+export type FileReader = { all(uri: string, size?: number): Promise<string>; chunk(uri: string, position: number, length: number): Promise<string> };
+export type UploadOptions = {
+  signal?: AbortSignal;
+  resumeId?: string;
+  onUploadId?: (id: string | null) => void;
+};
+
+function checkUploadAbort(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error("Загрузка отменена");
+  error.name = "AbortError";
+  throw error;
+}
 
 /** Загрузить файл в чат: маленький — одним запросом, большой — частями; onProgress(загружено, всего). */
-export async function uploadFile(req: Req, cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void): Promise<Uploaded> {
+export async function uploadFile(req: Req, cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void, options: UploadOptions = {}): Promise<Uploaded> {
   const enc = encodeURIComponent;
+  checkUploadAbort(options.signal);
   if (f.size <= SMALL_UPLOAD) {
-    const up = await req<Uploaded>("POST", `/api/conversations/${enc(cid)}/attachments/json`, uploadBody(f, await read.all(f.uri)), { timeoutMs: 120000 });
+    const up = await req<Uploaded>("POST", `/api/conversations/${enc(cid)}/attachments/json`, uploadBody(f, await read.all(f.uri, f.size)), { timeoutMs: 120000 });
+    checkUploadAbort(options.signal);
     onProgress?.(f.size, f.size);
     return up;
   }
-  const st = await req<{ upload_id: string; chunk_bytes: number }>("POST", `/api/conversations/${enc(cid)}/uploads`, { filename: f.name.slice(0, 255) || "file", mime: f.mime || "", size: f.size });
-  let got = 0;
-  for (let tries = 0; got < f.size; ) {
-    const data = await read.chunk(f.uri, got, Math.min(st.chunk_bytes, f.size - got));
-    // файл на телефоне короче, чем было заявлено (или изменился во время загрузки): повторять бессмысленно
-    if (!data) throw new Error(`Файл «${f.name}» прочитан не целиком (${got} из ${f.size} байт) — выберите его заново`);
+  let st: { upload_id: string; chunk_bytes: number; got: number; size: number } | null = null;
+  if (options.resumeId) {
     try {
-      const r = await req<{ got: number }>("POST", `/api/uploads/${enc(st.upload_id)}/chunk`, { offset: got, data }, { timeoutMs: 90000 });
-      if (r.got <= got) throw new Error("Сервер не принял часть файла");
-      got = r.got;
-      tries = 0;
-      onProgress?.(got, f.size);
+      st = await req<{ upload_id: string; chunk_bytes: number; got: number; size: number }>("GET", `/api/uploads/${enc(options.resumeId)}`);
+      if (st.size !== f.size || st.got < 0 || st.got > f.size) throw new Error("Сохранённая загрузка не соответствует файлу");
     } catch (e) {
-      // обрыв сети — повторяем ту же часть (сервер повтор уже принятой не задвоит), но не бесконечно
-      if (++tries >= 3) throw e;
+      if ((e as { status?: number })?.status !== 404) throw e;
     }
   }
-  return req<Uploaded>("POST", `/api/uploads/${enc(st.upload_id)}/finish`);
+  if (!st) {
+    const started = await req<{ upload_id: string; chunk_bytes: number }>("POST", `/api/conversations/${enc(cid)}/uploads`, { filename: f.name.slice(0, 255) || "file", mime: f.mime || "", size: f.size });
+    st = { ...started, got: 0, size: f.size };
+  }
+  options.onUploadId?.(st.upload_id);
+  let got = st.got;
+  onProgress?.(got, f.size);
+  try {
+    for (let tries = 0; got < f.size; ) {
+      checkUploadAbort(options.signal);
+      const data = await read.chunk(f.uri, got, Math.min(st.chunk_bytes, f.size - got));
+      checkUploadAbort(options.signal);
+      // файл на телефоне короче, чем было заявлено (или изменился во время загрузки): повторять бессмысленно
+      if (!data) throw new Error(`Файл «${f.name}» прочитан не целиком (${got} из ${f.size} байт) — выберите его заново`);
+      try {
+        const r = await req<{ got: number }>("POST", `/api/uploads/${enc(st!.upload_id)}/chunk`, { offset: got, data }, { timeoutMs: 90000 });
+        if (r.got <= got) throw new Error("Сервер не принял часть файла");
+        got = r.got;
+        tries = 0;
+        onProgress?.(got, f.size);
+      } catch (e) {
+        checkUploadAbort(options.signal);
+        // обрыв сети — повторяем ту же часть (сервер повтор уже принятой не задвоит), но не бесконечно
+        if (++tries >= 3) throw e;
+      }
+    }
+    checkUploadAbort(options.signal);
+    const uploaded = await req<Uploaded>("POST", `/api/uploads/${enc(st.upload_id)}/finish`);
+    options.onUploadId?.(null);
+    return uploaded;
+  } catch (e) {
+    if (options.signal?.aborted) {
+      await req("DELETE", `/api/uploads/${enc(st.upload_id)}`).catch(() => {});
+      options.onUploadId?.(null);
+    }
+    throw e;
+  }
 }
 
 export const isImage = (mime: string) => /^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime);

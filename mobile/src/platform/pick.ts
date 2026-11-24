@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import type { PickedFile } from "@/core/attachments";
 
+import { desktopAvailable, desktopPickFiles } from "./desktop";
 import { sizeOf } from "./files";
 
 // Размер — у самого файла на диске: галерея сообщает размер исходного фото, а выбранное фото уже пережато
@@ -40,6 +41,7 @@ export async function takePhoto(): Promise<PickedFile | null> {
 
 /** Любые файлы через системное окно выбора (архивы, документы…), можно несколько. */
 export async function pickFiles(limit: number): Promise<PickedFile[]> {
+  if (desktopAvailable()) return desktopPickFiles(limit);
   const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: limit > 1 });
   if (r.canceled) return [];
   return (r.assets ?? []).slice(0, limit).map((a) => picked(a.uri, a.name || "file", a.mimeType || "", a.size));

@@ -1,9 +1,11 @@
-const { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
+const { registerFiles } = require("./files");
 const { registerNetwork } = require("./net");
 
 registerNetwork(ipcMain);
+registerFiles(ipcMain, dialog, shell, () => app.getPath("temp"));
 
 const dist = path.join(__dirname, "dist");
 

@@ -34,10 +34,19 @@ function fakeServer(failOnce?: number) {
   const calls: string[] = [];
   let buf = Buffer.alloc(0);
   let failed = false;
+  let expected = 0;
   const req = async <T,>(method: string, path: string, body?: any): Promise<T> => {
     calls.push(`${method} ${path.replace(/[0-9a-f]{6,}/, "ID")}`);
     if (path.endsWith("/attachments/json")) return { id: "small", filename: body.filename, mime: body.mime, size: Buffer.from(body.data, "base64").length } as T;
-    if (path.endsWith("/uploads")) return { upload_id: "u1", chunk_bytes: 1000 } as T;
+    if (path.endsWith("/uploads")) {
+      expected = body.size;
+      return { upload_id: "u1", chunk_bytes: 1000 } as T;
+    }
+    if (path.endsWith("/uploads/u1") && method === "GET") return { upload_id: "u1", chunk_bytes: 1000, got: buf.length, size: expected } as T;
+    if (path.endsWith("/uploads/u1") && method === "DELETE") {
+      buf = Buffer.alloc(0);
+      return { ok: true } as T;
+    }
     if (path.endsWith("/chunk")) {
       if (failOnce !== undefined && body.offset === failOnce && !failed) {
         failed = true;
@@ -85,4 +94,39 @@ test("загрузка: файл короче заявленного — пон�
     /photo\.jpg.*не целиком/,
   );
   assert.equal(s.calls.filter((c) => c.endsWith("/chunk")).length, Math.ceil(file.length / 1000));
+});
+
+
+test("загрузка продолжается с принятого сервером offset", async () => {
+  const file = Buffer.alloc(SMALL_UPLOAD + 2500, 3);
+  const s = fakeServer();
+  await s.req("POST", "/api/conversations/c1/uploads", { filename: "b.bin", size: file.length });
+  const first = file.subarray(0, 1000);
+  await s.req("POST", "/api/uploads/u1/chunk", { offset: 0, data: first.toString("base64") });
+  const read = {
+    all: async () => "",
+    chunk: async (_u: string, pos: number, len: number) => file.subarray(pos, pos + len).toString("base64"),
+  };
+  const seen: number[] = [];
+  const result = await uploadFile(s.req, "c1", { name: "b.bin", mime: "", size: file.length, uri: "file:///b" }, read, (d) => seen.push(d), { resumeId: "u1" });
+  assert.equal(result.id, "big");
+  assert.equal(s.calls.filter((c) => c.endsWith("/uploads")).length, 1, "есть только исходная загрузка, новая не создаётся");
+  assert.equal(s.calls.filter((c) => c.endsWith("/chunk")).length, Math.ceil(file.length / 1000), "первый серверный chunk плюс оставшиеся");
+  assert.equal(seen[0], 1000);
+  assert.ok(s.data().equals(file));
+});
+
+test("отмена прекращает части и удаляет незавершённую серверную загрузку", async () => {
+  const file = Buffer.alloc(SMALL_UPLOAD + 2500, 4);
+  const s = fakeServer();
+  const controller = new AbortController();
+  const read = {
+    all: async () => "",
+    chunk: async (_u: string, pos: number, len: number) => file.subarray(pos, pos + len).toString("base64"),
+  };
+  await assert.rejects(uploadFile(s.req, "c1", { name: "b.bin", mime: "", size: file.length, uri: "file:///b" }, read, (d) => {
+    if (d > 0) controller.abort();
+  }, { signal: controller.signal }), (e: any) => e.name === "AbortError");
+  assert.ok(s.calls.includes("DELETE /api/uploads/u1"));
+  assert.equal(s.data().length, 0);
 });

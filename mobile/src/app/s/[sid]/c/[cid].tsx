@@ -17,6 +17,7 @@ import { approvalActionTitle, APPROVAL_MODES } from "@/core/agentPolicies";
 import { fallbackChain, nameOfModel, resolveScenario, type ModelPreferences } from "@/core/models";
 import { applyEvent, fromStored, type Item } from "@/core/timeline";
 import type { ConversationFull, RunEvent } from "@/core/types";
+import { desktopAvailable, desktopDropFiles } from "@/platform/desktop";
 import { readAll, readChunk } from "@/platform/files";
 import { pickFiles, pickPhotos, takePhoto } from "@/platform/pick";
 import { useApi } from "@/state/hooks";
@@ -417,7 +418,55 @@ export default function Chat() {
     };
   }, [api, cid, meId, follow]);
 
-  // Вложение: выбрать → сразу загрузить в чат → приложить к следующему сообщению.
+  // Вложение: выбрать или перетащить → сразу загрузить → приложить к следующему сообщению.
+  const uploadAbort = useRef<AbortController | null>(null);
+  const currentUploadId = useRef<string | null>(null);
+  const [failedUpload, setFailedUpload] = useState<{ file: PickedFile; uploadId: string | null } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const uploadOne = async (f: PickedFile, resumeId?: string): Promise<boolean> => {
+    if (!api) return false;
+    setFailedUpload(null);
+    setError(null);
+    setUploading(`${f.name} · ${sizeText(f.size)}`);
+    const controller = new AbortController();
+    uploadAbort.current = controller;
+    try {
+      const up = await api.upload(cid, f, { all: readAll, chunk: readChunk }, (d, t) =>
+        setUploading(`${f.name} · ${Math.round((d / t) * 100)}% из ${sizeText(t)}`), {
+        signal: controller.signal,
+        resumeId,
+        onUploadId: (id) => { currentUploadId.current = id; },
+      });
+      if (!desktopAvailable() && isImage(up.mime) && up.size <= PREVIEW_MAX) rememberPreviewUri(up.id, up.mime, f.uri);
+      setAtts((prev) => [...prev, up]);
+      return true;
+    } catch (e) {
+      if ((e as { name?: string })?.name !== "AbortError") {
+        setError(`${errText(e)}. Можно повторить с принятой сервером позиции.`);
+        setFailedUpload({ file: f, uploadId: currentUploadId.current });
+      }
+      return false;
+    } finally {
+      uploadAbort.current = null;
+      currentUploadId.current = null;
+      setUploading(null);
+    }
+  };
+
+  const uploadPicked = async (picked: PickedFile[]) => {
+    let n = atts.length;
+    for (const f of picked) {
+      const bad = attachProblem(f, n);
+      if (bad) {
+        setError(bad);
+        continue;
+      }
+      if (!await uploadOne(f)) break;
+      n++;
+    }
+  };
+
   const attach = async (kind: "photo" | "camera" | "file") => {
     if (!api || uploading) return;
     setAttachMenu(false);
@@ -426,24 +475,21 @@ export default function Chat() {
       const room = MAX_ATTACHMENTS - atts.length;
       if (room <= 0) return setError(`К сообщению можно приложить не больше ${MAX_ATTACHMENTS} файлов`);
       const picked: PickedFile[] = kind === "photo" ? await pickPhotos(room) : kind === "camera" ? [await takePhoto()].filter((x): x is PickedFile => !!x) : await pickFiles(room);
-      let n = atts.length;
-      for (const f of picked) {
-        const bad = attachProblem(f, n);
-        if (bad) {
-          setError(bad);
-          continue;
-        }
-        setUploading(`${f.name} · ${sizeText(f.size)}`);
-        const up = await api.upload(cid, f, { all: readAll, chunk: readChunk }, (d, t) =>
-          setUploading(`${f.name} · ${Math.round((d / t) * 100)}% из ${sizeText(t)}`));
-        if (isImage(up.mime) && up.size <= PREVIEW_MAX) rememberPreviewUri(up.id, up.mime, f.uri); // своя картинка — с диска телефона
-        setAtts((prev) => [...prev, up]);
-        n++;
-      }
+      await uploadPicked(picked);
     } catch (e) {
       setError(errText(e));
-    } finally {
-      setUploading(null);
+    }
+  };
+
+  const attachDropped = async (files: FileList | File[]) => {
+    if (!api || uploading || !desktopAvailable()) return;
+    setError(null);
+    try {
+      const room = MAX_ATTACHMENTS - atts.length;
+      if (room <= 0) return setError(`К сообщению можно приложить не больше ${MAX_ATTACHMENTS} файлов`);
+      await uploadPicked(await desktopDropFiles(files, room));
+    } catch (e) {
+      setError(errText(e));
     }
   };
 
@@ -544,9 +590,19 @@ export default function Chat() {
   const pending = items.filter((i): i is Tool => i.kind === "tool" && i.status === "pending" && !!i.approval);
   const scenarioModels = catalog ? resolveScenario(modelPrefs || { favorites: [], recent: [], roles: { code: "", review: "", summary: "" }, fallbacks: [] }, conv?.model || catalog.default_model, catalog.models, catalog.llm_ready) : null;
   const canWrite = conv?.my_role !== "viewer";
+  const dropProps = desktopAvailable() && canWrite ? {
+    onDragEnter: (e: any) => { e.preventDefault(); setDragging(true); },
+    onDragOver: (e: any) => { e.preventDefault(); },
+    onDragLeave: (e: any) => { if (e.currentTarget === e.target) setDragging(false); },
+    onDrop: (e: any) => {
+      e.preventDefault();
+      setDragging(false);
+      if (e.dataTransfer?.files?.length) void attachDropped(e.dataTransfer.files);
+    },
+  } : {};
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]} {...dropProps}>
       <TopBar title={conv?.title || "Чат"} back right={<IconBtn glyph="⋮" label="Контекст и переходы чата" onPress={() => { setModels(null); setChatMenu(!chatMenu); }} />} />
       {chatMenu && conv ? (
         <ScrollView style={{ flexGrow: 0, maxHeight: "60%", borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }} contentContainerStyle={{ padding: 12, gap: 10 }} keyboardShouldPersistTaps="handled">
@@ -656,7 +712,7 @@ export default function Chat() {
           </Pressable>
         ) : null}
         </View>
-        {canWrite && (atts.length > 0 || uploading || attachMenu) ? (
+        {canWrite && (atts.length > 0 || uploading || attachMenu || failedUpload) ? (
           <View style={{ paddingHorizontal: 10, paddingTop: 8, gap: 6, borderTopWidth: 1, borderTopColor: p.line, backgroundColor: p.bg, width: "100%", maxWidth: desktop ? 1000 : undefined, alignSelf: "center" }}>
             {attachMenu ? (
               <Row gap={6}>
@@ -674,7 +730,23 @@ export default function Chat() {
                 </Pressable>
               </Row>
             ))}
-            {uploading ? <Txt kind="small" color={p.accent}>загружается: {uploading}…</Txt> : null}
+            {uploading ? (
+              <Row style={{ justifyContent: "space-between" }}>
+                <Txt kind="small" color={p.accent} style={{ flex: 1 }}>загружается: {uploading}…</Txt>
+                <Btn small kind="ghost" title="Отмена" onPress={() => uploadAbort.current?.abort()} />
+              </Row>
+            ) : null}
+            {failedUpload && !uploading ? (
+              <Row style={{ justifyContent: "space-between" }}>
+                <Txt kind="small" style={{ flex: 1 }}>{failedUpload.file.name}</Txt>
+                <Btn small title="Повторить" onPress={() => {
+                  const bad = attachProblem(failedUpload.file, atts.length);
+                  if (bad) setError(bad);
+                  else void uploadOne(failedUpload.file, failedUpload.uploadId || undefined);
+                }} />
+                <Btn small kind="ghost" title="Убрать" onPress={() => setFailedUpload(null)} />
+              </Row>
+            ) : null}
           </View>
         ) : null}
         {canWrite ? (
@@ -711,6 +783,12 @@ export default function Chat() {
           </View>
         ) : null}
       </KeyboardAvoidingView>
+      {dragging ? (
+        <View pointerEvents="none" style={{ position: "absolute", inset: 12, borderWidth: 2, borderStyle: "dashed", borderColor: p.accent, borderRadius: 16, backgroundColor: alpha(p.bg, 0.9), alignItems: "center", justifyContent: "center" }}>
+          <Txt kind="h2">Отпустите файлы, чтобы приложить их</Txt>
+          <Txt kind="dim">Можно выбрать до {MAX_ATTACHMENTS} файлов; большие загрузятся частями</Txt>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }

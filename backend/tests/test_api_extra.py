@@ -91,6 +91,14 @@ def test_chunked_upload_and_download(client):
     big = client.post(f"/api/conversations/{c['id']}/uploads", json={"filename": "x", "size": 51 * 1024 * 1024})
     assert big.status_code == 413
 
+    partial = client.post(f"/api/conversations/{c['id']}/uploads", json={"filename": "resume.bin", "size": 10}).json()
+    assert client.get(f"/api/uploads/{partial['upload_id']}").json()["got"] == 0
+    chunk = {"offset": 0, "data": base64.b64encode(b"1234").decode()}
+    assert client.post(f"/api/uploads/{partial['upload_id']}/chunk", json=chunk).status_code == 200
+    assert client.get(f"/api/uploads/{partial['upload_id']}").json()["got"] == 4
+    assert client.delete(f"/api/uploads/{partial['upload_id']}").status_code == 200
+    assert client.get(f"/api/uploads/{partial['upload_id']}").status_code == 404
+
 
 async def test_create_file_tool_and_janitor(client):
     import time

@@ -1,5 +1,5 @@
 /** API сервера Fugu Deck для приложения. Всё идёт через DeviceSession (DPoP + подписи). */
-import { uploadFile, type FileReader, type PickedFile, type Uploaded } from "./attachments";
+import { uploadFile, type FileReader, type PickedFile, type Uploaded, type UploadOptions } from "./attachments";
 import { argsHash } from "./crypto";
 import type { DeviceSession } from "./session";
 import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } from "./types";
@@ -158,8 +158,8 @@ export class DeckApi {
       fallback_models: options.fallbackModels || [], scenario: options.scenario || null,
     });
   /** Загрузить вложение в чат: маленький файл — одним запросом, большой — частями (attachments.ts, uploadFile). */
-  upload = (cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void) =>
-    uploadFile((m, p, b, o) => this.s.request(m, p, b, o), cid, f, read, onProgress);
+  upload = (cid: string, f: PickedFile, read: FileReader, onProgress?: (done: number, total: number) => void, options?: UploadOptions) =>
+    uploadFile((m, p, b, o) => this.s.request(m, p, b, o), cid, f, read, onProgress, options);
   /** Кусок вложения (base64) — для скачивания на телефон. */
   attachmentChunk = (aid: string, offset: number) =>
     this.s.request<Uploaded & { data: string; offset: number; eof: boolean }>("GET", `/api/attachments/${enc(aid)}/chunk?offset=${offset}`, undefined, { timeoutMs: 90000 });

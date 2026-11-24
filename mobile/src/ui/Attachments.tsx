@@ -9,7 +9,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { DeckApi } from "@/core/api";
 import { cachedPreview, isImage, PREVIEW_MAX, rememberPreview, sizeText } from "@/core/attachments";
 import type { Attachment } from "@/core/types";
-import { downloadToCache, openWithOtherApp, saveToFolder, type ChunkSource } from "@/platform/files";
+import { desktopAvailable } from "@/platform/desktop";
+import { downloadToCache, openOnDesktop, openWithOtherApp, saveToFolder, type ChunkSource } from "@/platform/files";
 
 import { Btn, errText, Notice, Row, Txt } from "./kit";
 import { useTheme } from "./theme";
@@ -72,8 +73,11 @@ function FileActions({ a, api }: { a: Attachment; api: DeckApi | null }) {
     }
   };
   const open = () => run("скачивается", async () => {
-    const f = await downloadToCache(a.id, a.filename, a.size, src, progress("скачивается"));
-    await openWithOtherApp(f, a.mime, a.filename);
+    if (desktopAvailable()) await openOnDesktop(a.filename, src, progress("скачивается"));
+    else {
+      const f = await downloadToCache(a.id, a.filename, a.size, src, progress("скачивается"));
+      await openWithOtherApp(f, a.mime, a.filename);
+    }
     return null;
   });
   const save = () => run("сохраняется", async () => (await saveToFolder(a.filename, a.mime, src, progress("сохраняется"))) ? `Сохранено: ${a.filename}` : null);

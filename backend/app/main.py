@@ -1467,6 +1467,20 @@ def _upload_of(upid: str, u: dict) -> dict:
     return up
 
 
+@app.get("/api/uploads/{upid}")
+async def upload_status(upid: str, u: dict = Me):
+    up = _upload_of(upid, u)
+    return {"upload_id": upid, "chunk_bytes": CHUNK_BYTES, "got": up["got"], "size": up["size"]}
+
+
+@app.delete("/api/uploads/{upid}")
+async def upload_cancel(upid: str, u: dict = Me):
+    up = _upload_of(upid, u)
+    uploads.pop(upid, None)
+    Path(up["path"]).unlink(missing_ok=True)
+    return {"ok": True}
+
+
 @app.post("/api/uploads/{upid}/chunk")
 async def upload_chunk(upid: str, body: UploadChunk, u: dict = Me):
     up = _upload_of(upid, u)
