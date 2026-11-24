@@ -58,6 +58,26 @@ async def transcribe_media(ctx, a):
             "note": "Транскрипт готов и приложен к чату в форматах TXT, JSON и SRT"}
 
 
+@tool("process_pdf",
+      "Обработать PDF-вложение на выделенном worker: текст с номерами страниц, OCR для сканов, таблицы и число изображений. "
+      "Создаёт Markdown и JSON. Используй для сканов и больших PDF; для маленького текстового PDF можно read_attachment.",
+      obj({"attachment_id": {"type": "string"}}, ["attachment_id"]), risk="write", group="files", title="Обработка PDF")
+async def process_pdf(ctx, a):
+    att = await ctx.db.get_attachment(a["attachment_id"])
+    if not att or att["conversation_id"] != ctx.conversation_id:
+        raise ProviderError("Вложение не найдено")
+    if Path(att["filename"]).suffix.lower() != ".pdf" and att["mime"] != "application/pdf":
+        raise ProviderError("Нужен PDF")
+    job = await _worker(ctx).submit_pdf(ctx.conversation_id, att["id"], ctx.user.get("id", ""))
+
+    async def progress(current):
+        if ctx.run:
+            await ctx.run.emit("media_progress", job_id=job["id"], status=current["status"], progress=current["progress"])
+
+    done = await _worker(ctx).wait(job["id"], progress)
+    return {"job_id": job["id"], **done["result"], "note": "PDF обработан, Markdown и JSON приложены к чату"}
+
+
 @tool("media_jobs", "Список задач обработки медиа в этом чате: статус, прогресс, ошибка и готовые файлы.",
       obj({"active": {"type": "boolean", "default": False}}), group="media", title="Задачи обработки медиа")
 async def media_jobs(ctx, a):

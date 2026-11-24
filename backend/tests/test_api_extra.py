@@ -154,7 +154,7 @@ async def test_talk_agent_tools_and_prompt(client):
     talk = Run(id="r1", conversation_id="c", model="sakana:x", project_id="talk")
     assert {t.name for t in ag.tools_for(talk)} == {
         "list_attachments", "read_attachment", "create_file", "transcribe_media", "media_jobs", "media_report",
-        "generate_image", "media_cancel", "drive_search", "drive_import", "drive_upload", "drive_create_folder",
+        "generate_image", "media_cancel", "drive_search", "drive_import", "drive_upload", "drive_create_folder", "process_pdf",
     }
     eng = Run(id="r2", conversation_id="c", model="sakana:x", project_id="general", git_status={"github": None})
     names = {t.name for t in ag.tools_for(eng)}

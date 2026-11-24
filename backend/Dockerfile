@@ -2,7 +2,7 @@ FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data
 WORKDIR /app
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-rus && rm -rf /var/lib/apt/lists/* \
     && pip install -r requirements.txt
 COPY app ./app
 RUN useradd -r -u 10001 fugu && mkdir -p /data && chown fugu /data

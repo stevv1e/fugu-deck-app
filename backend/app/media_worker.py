@@ -1,10 +1,12 @@
-"""Отдельный FFmpeg-воркер: принимает видео потоком и возвращает tar с аудиофрагментами."""
+"""Выделенный worker: извлечение аудио из видео и текст/OCR из PDF без внешнего egress."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import shutil
+import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
@@ -104,3 +106,86 @@ async def extract(request: Request):
         slots.release()
         if work != Path():
             shutil.rmtree(work, ignore_errors=True)
+
+
+PDF_MAX_BYTES = int(os.getenv("PDF_WORKER_MAX_MB", "200")) * 1024 * 1024
+PDF_MAX_PAGES = int(os.getenv("PDF_WORKER_MAX_PAGES", "400"))
+PDF_OUTPUT_MAX = 16 * 1024 * 1024
+
+
+def ocr_image(png: bytes) -> str:
+    result = subprocess.run(["tesseract", "stdin", "stdout", "-l", "rus+eng", "--psm", "3"], input=png,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=False)
+    if result.returncode:
+        raise RuntimeError("OCR: " + result.stderr.decode(errors="replace")[-300:])
+    return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def pdf_document(path: Path) -> dict:
+    import pymupdf
+
+    doc = pymupdf.open(path)
+    try:
+        if doc.needs_pass:
+            raise ValueError("PDF защищён паролем")
+        total = len(doc)
+        if total < 1 or total > PDF_MAX_PAGES:
+            raise ValueError(f"PDF должен содержать 1..{PDF_MAX_PAGES} страниц")
+        pages = []
+        for index, page in enumerate(doc):
+            text = page.get_text("text").strip()
+            method = "text"
+            if not text:
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
+                text = ocr_image(pix.tobytes("png"))
+                method = "ocr"
+            tables = []
+            if method == "text" and hasattr(page, "find_tables"):
+                try:
+                    tables = [table.extract() for table in page.find_tables().tables]
+                except Exception:
+                    tables = []
+            pages.append({"page": index + 1, "method": method, "text": text,
+                          "tables": tables, "images": len(page.get_images(full=True))})
+        markdown = "\n\n".join(f"## Страница {p['page']}\n\n{p['text']}" for p in pages) + "\n"
+        result = {"source_pages": total, "pages": pages, "text": "\n\n".join(p["text"] for p in pages),
+                  "markdown": markdown, "ocr_pages": sum(p["method"] == "ocr" for p in pages)}
+        if len(json.dumps(result, ensure_ascii=False).encode()) > PDF_OUTPUT_MAX:
+            raise ValueError("Результат PDF превышает 16 МБ — обработайте документ по частям")
+        return result
+    finally:
+        doc.close()
+
+
+@app.post("/pdf")
+async def pdf(request: Request):
+    if not TOKEN or not secrets.compare_digest(request.headers.get("authorization", ""), f"Bearer {TOKEN}"):
+        return JSONResponse({"error": "нужен токен media-worker"}, status_code=401)
+    length = request.headers.get("content-length", "")
+    if request.headers.get("content-type", "").split(";", 1)[0] != "application/octet-stream":
+        return JSONResponse({"error": "нужен application/octet-stream"}, status_code=400)
+    if not length.isdigit() or not 0 < int(length) <= PDF_MAX_BYTES:
+        return JSONResponse({"error": f"нужен PDF до {PDF_MAX_BYTES // 1024 // 1024} МБ"}, status_code=413)
+    if slots.locked():
+        return JSONResponse({"error": "media-worker занят, повторите позже"}, status_code=503)
+    await slots.acquire()
+    work = Path(tempfile.mkdtemp(dir=WORK_DIR))
+    source = work / "source.pdf"
+    try:
+        size = 0
+        with source.open("wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > int(length) or size > PDF_MAX_BYTES:
+                    return JSONResponse({"error": "размер PDF не совпадает с Content-Length"}, status_code=400)
+                out.write(chunk)
+        if size != int(length):
+            return JSONResponse({"error": "загрузка оборвалась"}, status_code=400)
+        try:
+            result = await asyncio.wait_for(asyncio.to_thread(pdf_document, source), JOB_TIMEOUT)
+            return JSONResponse(result)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)[:500]}, status_code=422)
+    finally:
+        slots.release()
+        shutil.rmtree(work, ignore_errors=True)

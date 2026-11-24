@@ -342,3 +342,58 @@ def test_media_worker_extracts_real_audio(tmp_path: Path, monkeypatch):
     with tarfile.open(archive) as tar:
         assert [x.name for x in tar.getmembers()] == ["chunk_00000.ogg"]
         assert tar.extractfile("chunk_00000.ogg").read().startswith(b"OggS")
+
+
+def test_pdf_worker_text_and_scanned_pages(tmp_path: Path, monkeypatch):
+    import pymupdf
+    from fastapi.testclient import TestClient
+    from app import media_worker
+
+    monkeypatch.setattr(media_worker, "TOKEN", "worker-secret")
+    monkeypatch.setattr(media_worker, "WORK_DIR", tmp_path)
+    monkeypatch.setattr(media_worker, "ocr_image", lambda _png: "распознанный скан")
+    client = TestClient(media_worker.app)
+    source = tmp_path / "mixed.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "PDF text page")
+    doc.new_page().draw_rect(pymupdf.Rect(20, 20, 100, 100), fill=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+    response = client.post("/pdf", content=source.read_bytes(), headers={
+        "Authorization": "Bearer worker-secret", "Content-Type": "application/octet-stream"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["source_pages"] == 2 and data["ocr_pages"] == 1
+    assert data["pages"][0]["text"] == "PDF text page"
+    assert data["pages"][1]["text"] == "распознанный скан"
+    assert "## Страница 2" in data["markdown"]
+    assert not list(tmp_path.glob("*/source.pdf"))
+    assert client.post("/pdf", content=b"%PDF").status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_pdf_job_creates_markdown_and_json_attachments(tmp_path: Path):
+    import pymupdf
+
+    settings = Settings(data_dir=tmp_path)
+    db = Database(str(settings.db_path))
+    await db.connect()
+    await db._exec("INSERT INTO conversations (id,model,created_at,updated_at) VALUES ('c','openai:test',1,1)")
+    source = tmp_path / "source.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "PDF evidence")
+    doc.save(source)
+    doc.close()
+    att = await db.add_attachment("c", "report.pdf", "application/pdf", source.stat().st_size, str(source))
+    worker = MediaWorker(db, settings)
+    await worker.start()
+    job = await worker.submit_pdf("c", att["id"], "user-1")
+    done = await worker.wait(job["id"])
+    assert done["status"] == "done" and done["result"]["pages"] == 1
+    assert "PDF evidence" in done["result"]["text"]
+    assert len(done["result"]["attachments"]) == 2
+    markdown = next(x for x in done["result"]["attachments"] if x["filename"].endswith(".md"))
+    stored = await db.get_attachment(markdown["id"])
+    assert "PDF evidence" in Path(stored["path"]).read_text()
+    await worker.stop()
+    await db.close()

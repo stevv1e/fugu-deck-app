@@ -141,6 +141,11 @@ class MediaWorker:
         self._wake.set()
         return job
 
+    async def submit_pdf(self, cid: str, attachment_id: str, user_id: str) -> dict:
+        job = await self.db.create_media_job(cid, attachment_id, "pdf", "worker", user_id)
+        self._wake.set()
+        return job
+
     async def cancel(self, jid: str, cid: str) -> dict:
         job = await self.db.get_media_job(jid)
         if not job or job["conversation_id"] != cid:
@@ -257,9 +262,13 @@ class MediaWorker:
             att = await self.db.get_attachment(job["attachment_id"])
             if not att or att["conversation_id"] != job["conversation_id"] or not Path(att["path"]).is_file():
                 raise MediaError("Исходное вложение не найдено")
-            kind = media_kind(att["filename"], att["mime"])
             work.mkdir(parents=True, exist_ok=True)
             await self.db.update_media_job(jid, status="running", progress=0.05)
+            if job["kind"] == "pdf":
+                result = await self._process_pdf(job, att)
+                await self.db.update_media_job(jid, status="done", progress=1, result=result)
+                return
+            kind = media_kind(att["filename"], att["mime"])
             probe = await self._run(jid, ["ffprobe", "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration",
                                           "-of", "default=noprint_wrappers=1:nokey=1", att["path"]])
             try:
@@ -295,6 +304,56 @@ class MediaWorker:
             self._credentials.pop(jid, None)
             self._cancelled.discard(jid)
             shutil.rmtree(work, ignore_errors=True)
+
+    async def _process_pdf(self, job: dict, att: dict) -> dict:
+        source = Path(att["path"])
+        if kgc.enabled():
+            url = f"{self.settings.keyguard_url.rstrip('/')}/media/pdf"
+            headers = {"Authorization": f"Bearer {kgc.token()}",
+                       **kgc.headers(job["conversation_id"], job["created_by"]),
+                       "Content-Type": "application/octet-stream", "Content-Length": str(source.stat().st_size)}
+
+            async def content():
+                with source.open("rb") as f:
+                    while chunk := await asyncio.to_thread(f.read, 2 * 1024 * 1024):
+                        yield chunk
+
+            timeout = httpx.Timeout(self.settings.media_job_timeout_seconds, connect=30)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", url, headers=headers, content=content()) as response:
+                    raw = await response.aread()
+                    if response.status_code != 200:
+                        raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
+                    if len(raw) > 16 * 1024 * 1024:
+                        raise MediaError("PDF worker вернул слишком большой результат")
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise MediaError("PDF worker вернул не-JSON результат") from e
+        else:
+            from .media_worker import pdf_document
+            data = await asyncio.wait_for(asyncio.to_thread(pdf_document, source), self.settings.media_job_timeout_seconds)
+        await self.db.update_media_job(job["id"], progress=0.85)
+        return await self._pdf_artifacts(job, att, data)
+
+    async def _pdf_artifacts(self, job: dict, att: dict, data: dict) -> dict:
+        base = re.sub(r"[^\w.-]+", "_", Path(att["filename"]).stem).strip("._") or "document"
+        directory = self.settings.data_dir / "attachments" / job["conversation_id"]
+        directory.mkdir(parents=True, exist_ok=True)
+        text = str(data.get("text") or "")
+        markdown = str(data.get("markdown") or text)
+        values = {
+            f"{base}.md": ("text/markdown; charset=utf-8", markdown.encode()),
+            f"{base}.json": ("application/json", json.dumps({"source": att["filename"], **data}, ensure_ascii=False, indent=2).encode()),
+        }
+        attachments = []
+        for name, (mime, raw) in values.items():
+            dest = directory / f"{uuid.uuid4().hex[:16]}_{name}"
+            dest.write_bytes(raw)
+            made = await self.db.add_attachment(job["conversation_id"], name, mime, len(raw), str(dest), origin="agent")
+            attachments.append({k: made[k] for k in ("id", "filename", "mime", "size")})
+        return {"attachments": attachments, "pages": data.get("source_pages", 0), "ocr_pages": data.get("ocr_pages", 0),
+                "text": text[:60000], "truncated": len(text) > 60000}
 
     async def _transcribe_chunk(self, job: dict, path: Path, seconds: float) -> list[dict]:
         try:
