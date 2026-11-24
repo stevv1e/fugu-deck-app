@@ -3,7 +3,7 @@ const path = require("node:path");
 const { createHash, createPublicKey, randomUUID, verify } = require("node:crypto");
 const { spawn } = require("node:child_process");
 
-const UPDATE_PUBLIC_KEY = "nLtRi9S68m8927EbNYQZ0EZ5DEKPenOL8PjvivWYRRI=";
+const UPDATE_PUBLIC_KEY = "h5JyYoZt7BKWxmCAPylZ41927mr9t6wlIAiciSwfVTw=";
 const PUBLIC_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const MAX_MANIFEST = 64 * 1024;
 

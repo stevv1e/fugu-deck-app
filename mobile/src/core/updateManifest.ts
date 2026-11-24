@@ -2,7 +2,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 
 import { fromUtf8, unb64 } from "./bytes";
 
-export const UPDATE_PUBLIC_KEY = "nLtRi9S68m8927EbNYQZ0EZ5DEKPenOL8PjvivWYRRI=";
+export const UPDATE_PUBLIC_KEY = "h5JyYoZt7BKWxmCAPylZ41927mr9t6wlIAiciSwfVTw=";
 export type UpdatePlatform = "android" | "windows";
 export type UpdatePayload = {
   format: "fugu-deck-update/1";
