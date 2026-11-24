@@ -1,10 +1,12 @@
 """Сверка заметок с файлами-источниками: изменился, удалён, вернулся прежний текст, ошибка доступа, пометка человека."""
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from app import kb_watch
 from app.db import Database
+from app.tools import memory_tools
 from app.tools.providers import ProviderError
 
 
@@ -78,3 +80,25 @@ def test_source_file_validation():
     for bad in ({"provider": "svn", "repo": "x", "path": "y", "version": "sha256:" + "a" * 16},
                 {"provider": "github", "repo": "x", "path": "y", "version": "abc"}, "строка", None):
         assert kb_watch.source_file(bad) is None
+
+
+async def test_verification_metadata_distinguishes_fresh_stale_and_unavailable(db):
+    git = FakeGit()
+    git.files = {"a.md": b"one"}
+    mid = await note(db, "a.md", kb_watch.version_of(b"one"))
+    now = 1_000_000_000.0
+    await kb_watch.check_once(db, {"github": git}, now=now)
+    ctx = SimpleNamespace(project_id="general")
+    fresh = memory_tools._fmt(await db.get_memory(mid), ctx)["verification"]
+    assert fresh["state"] == "fresh" and fresh["last_verified"] == now
+    assert fresh["source"] == "me/app/a.md" and fresh["revision"] == kb_watch.version_of(b"one")
+
+    git.down = True
+    await kb_watch.check_once(db, {"github": git}, now=now + kb_watch.CHECK_EVERY + 1)
+    unavailable = memory_tools._fmt(await db.get_memory(mid), ctx)["verification"]
+    assert unavailable["state"] == "unavailable" and unavailable["last_verified"] is None
+    assert "не подтверждены" in unavailable["note"]
+
+    await db.update_memory(mid, stale=False, stale_reason="", verification_error=None, src_checked=now + 10)
+    recovered = memory_tools._fmt(await db.get_memory(mid), ctx)["verification"]
+    assert recovered["state"] == "fresh" and recovered["note"] == ""

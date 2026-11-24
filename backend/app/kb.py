@@ -153,6 +153,10 @@ def graph(project: dict, memories: list[dict], links: list[dict], now: float | N
                 m.get("source") or "", m.get("author") or "заметка"),
             "src": origin_of(m), "stale": bool(m.get("stale")), "ext": bool(m.get("external")),
             "stale_reason": m.get("stale_reason") or "",
+            "last_checked": m.get("src_checked"),
+            "last_verified": m.get("src_checked") if not m.get("stale") and not m.get("verification_error") else None,
+            "valid_from": m.get("created_at"), "revision": m.get("src_version"),
+            "verification_error": m.get("verification_error") or "",
             "pinned": bool(m.get("pinned")), "tags": m.get("tags") or "",
         })
         groups[area].setdefault(group_of(m.get("tags") or "", m.get("grp")), []).append(nid)

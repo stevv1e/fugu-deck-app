@@ -373,6 +373,10 @@ SCHEMA = [
         updated_at REAL NOT NULL
     );
     """,
+    # v27: недоступный источник отличается от подтверждённой или устаревшей записи
+    """
+    ALTER TABLE memories ADD COLUMN verification_error TEXT;
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -1107,9 +1111,9 @@ class Database:
         return await self.get_memory(mid)  # type: ignore[return-value]
 
     async def update_memory(self, mid: int, **fields: Any) -> None:
-        allowed = {"content", "tags", "pinned", *NOTE_FIELDS, "stale", "stale_reason", "src_checked"}
+        allowed = {"content", "tags", "pinned", *NOTE_FIELDS, "stale", "stale_reason", "src_checked", "verification_error"}
         fields = {k: (int(v) if k in ("pinned", "external", "stale") else v) for k, v in fields.items()
-                  if v is not None and k in allowed}
+                  if (v is not None or k == "verification_error") and k in allowed}
         if not fields:
             return
         fields["updated_at"] = time.time()
@@ -1128,9 +1132,10 @@ class Database:
     async def mark_source(self, mid: int, *, stale: bool | None, reason: str | None, now: float) -> None:
         """Итог сверки с источником: stale None — проверить не удалось (повторим в следующий раз)."""
         if stale is None:
-            await self._exec("UPDATE memories SET src_checked=? WHERE id=?", (now, mid))
+            await self._exec("UPDATE memories SET src_checked=?, verification_error=? WHERE id=?",
+                             (now, "источник недоступен — сведения не подтверждены", mid))
         else:
-            await self._exec("UPDATE memories SET src_checked=?, stale=?, stale_reason=? WHERE id=?",
+            await self._exec("UPDATE memories SET src_checked=?, stale=?, stale_reason=?, verification_error=NULL WHERE id=?",
                              (now, int(stale), reason, mid))
 
     # ================================================================ база знаний: связи и использование

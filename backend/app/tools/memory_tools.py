@@ -1,6 +1,7 @@
 """Память проекта: агент сам сохраняет важное и ищет по своей памяти и памяти связанных проектов."""
 from __future__ import annotations
 
+import json
 import time
 
 from .. import kb, kb_watch
@@ -11,6 +12,18 @@ from .registry import ToolContext, obj, tool
 def _fmt(m: dict, ctx: ToolContext) -> dict:
     out = {"id": m["id"], "title": kb.title_of(m["content"], m.get("title")), "content": m["content"], "tags": m["tags"],
            "pinned": bool(m["pinned"])}
+    if m.get("src_file") or m.get("source_ref"):
+        source = m.get("source_ref") or ""
+        if m.get("src_file"):
+            try:
+                src = json.loads(m["src_file"])
+                source = f"{src['repo']}/{src['path']}"
+            except (ValueError, KeyError):
+                source = "файл-источник"
+        state = "stale" if m.get("stale") else "unavailable" if m.get("verification_error") else "fresh" if m.get("src_checked") and m.get("src_file") else "unverified"
+        out["verification"] = {"state": state, "source": source, "revision": m.get("src_version"),
+                               "last_checked": m.get("src_checked"), "last_verified": m.get("src_checked") if state == "fresh" else None,
+                               "valid_from": m.get("created_at"), "note": m.get("verification_error") or m.get("stale_reason") or ""}
     if m.get("stale"):
         out["stale"] = "устарела: " + (m.get("stale_reason") or "источник мог измениться") + " — перепроверь и обнови заметку"
     if m.get("external"):
@@ -142,7 +155,8 @@ async def memory_update(ctx, a):
     src = kb_watch.source_file(a.get("source_file")) if a.get("source_file") else None
     if a.get("source_file") and not src:
         raise ProviderError("source_file: нужны provider (github|gitlab), repo, path и version из read_file")
-    extra = {"src_file": src[0], "src_version": src[1], "stale": False, "stale_reason": "", "src_checked": time.time()} if src else {}
+    extra = {"src_file": src[0], "src_version": src[1], "stale": False, "stale_reason": "", "src_checked": time.time(),
+             "verification_error": None} if src else {}
     await ctx.db.update_memory(a["id"], content=a["content"].strip(), tags=a.get("tags"), **extra)
     m = await ctx.db.get_memory(a["id"])
     await _changed(ctx, "updated", memory=m)

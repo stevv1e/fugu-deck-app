@@ -60,6 +60,10 @@ async def check_once(db, providers: dict, now: float | None = None) -> dict[str,
                     stale, reason = True, f"файл-источник изменился: {f['repo']}/{f['path']}"
                 elif m["stale"] and m.get("stale_reason"):
                     stale = False  # файл снова как при записи — снимаем свою же пометку
+                elif m["stale"]:
+                    stale, reason = True, m.get("stale_reason")
+                else:
+                    stale = False
         await db.mark_source(m["id"], stale=stale, reason=reason, now=now)
         n["stale" if stale else "fresh" if seen else "skipped"] += 1
     return n

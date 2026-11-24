@@ -38,6 +38,7 @@
 | Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.16.1 | PENDING на EXE 0.16.1 |
 | Официальный и custom Git module, сетевые блокировки и журнал | module sandbox/signature/journal tests | PENDING | PENDING |
 | E2EE в обе стороны, неверная фраза и конфликт версий | backup round-trip, authentication и optimistic conflict tests | PENDING | PENDING |
+| База знаний: источник, ревизия, fresh/stale/unavailable и ручная пометка | FTS5/BM25 и source-check tests | PENDING на 0.17.0 | PENDING на 0.17.0 |
 
 ## 3. Порядок ручного прогона
 

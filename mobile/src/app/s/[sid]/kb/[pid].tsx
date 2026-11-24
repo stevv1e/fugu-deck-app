@@ -168,6 +168,7 @@ export default function KnowledgeBase() {
       setBusy(false);
     }
   };
+  const draftNote = draft?.mid !== null && draft ? graph?.notes.find((n) => n.mid === draft.mid) : undefined;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]}>
@@ -265,6 +266,10 @@ export default function KnowledgeBase() {
           })() : null}
           {draft.mid !== null ? (
             <>
+              {draftNote?.source ? <Txt kind="small">Источник: {draftNote.source}</Txt> : null}
+              {draftNote?.revision ? <Txt kind="small">Ревизия: {draftNote.revision}</Txt> : null}
+              {draftNote?.last_verified ? <Txt kind="small">Подтверждено: {new Date(draftNote.last_verified * 1000).toLocaleString()}</Txt> : null}
+              {draftNote?.verification_error ? <Txt kind="small" color={p.warn}>{draftNote.verification_error}</Txt> : null}
               <Btn small kind="ghost" title={draft.stale ? "Отмечена устаревшей — снять отметку" : "Отметить устаревшей"} onPress={() => setDraft({ ...draft, stale: !draft.stale })} />
               {draft.stale && draft.reason ? <Txt kind="small" color={p.warn}>{draft.reason}</Txt> : null}
             </>
