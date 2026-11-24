@@ -12,7 +12,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { buildKeyPut } from "../src/core/apikeys";
 import { b64u, randomId } from "../src/core/bytes";
 import {
-  authorizeUrl, browserPairUrl, browserStartUrl, buildEnroll, claims, clusterDeviceId, clusterJoinParams, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, signClusterAction, startDesktopPair, statusRequest,
+  authorizeUrl, browserPairUrl, browserStartUrl, buildEnroll, claims, clusterDeviceId, clusterJoinParams, exchangeCode, fetchChallenge, newPkce, parseClusterInvite, parseRedirect, refresh, registerPasskeyUrl, signClusterAction, startDesktopPair, statusRequest,
   type ClusterInvite,
 } from "../src/core/cluster";
 import { jwkFromPoint, softKeygen, softSign } from "../src/core/crypto";
@@ -92,6 +92,10 @@ test("Windows pairing: код привязан к ключам ПК, мобил�
   assert.equal(url.searchParams.get("pair_secret"), pair.secret);
   assert.ok(url.searchParams.get("next")!.startsWith(c.issuer));
   assert.equal(new URL(browserStartUrl(c, pkce)).searchParams.get("pair"), null);
+  const hello = new URL(registerPasskeyUrl(c, pkce));
+  assert.equal(hello.searchParams.get("kc_action"), "webauthn-register-passwordless");
+  assert.equal(hello.searchParams.get("code_challenge"), pkce.challenge);
+  assert.equal(hello.searchParams.get("pair_secret"), null);
 });
 
 // ---------------- настоящий Keycloak + keyguard ----------------

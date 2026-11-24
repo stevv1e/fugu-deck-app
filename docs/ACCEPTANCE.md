@@ -28,6 +28,7 @@
 | --- | --- | --- | --- |
 | Pairing: положительный путь и обязательный `device_approve` | mobile/platform tests | Подтверждён ранее; повторить на 0.15.1 | Подтверждён ранее; повторить на 0.15.1 |
 | Pairing: неверный и истёкший код, повтор и отмена | mobile/control-plane negative tests | PENDING | PENDING |
+| Windows Hello после pairing, повторный PIN/биометрический вход и recovery | PKCE/AIA unit tests; нужен реальный ПК | Не применимо | PENDING на 0.17.1 |
 | Повторный запуск и DPoP refresh без браузера | session/core tests | PENDING | PENDING |
 | Revoke устройства и восстановление новым pairing | integration tests отзыва и повторной регистрации | PENDING | PENDING |
 | Личные и общие пространства, проекты и участники | navigation/team tests | Общие данные подтверждены ранее; повторить на 0.15.1 | Общие данные подтверждены ранее; повторить на 0.15.1 |

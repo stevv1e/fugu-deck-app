@@ -2,6 +2,14 @@
 
 Здесь публикуются заметные пользовательские и технические изменения. Планы на будущее находятся в [ROADMAP.md](ROADMAP.md), а не в списке завершённых изменений.
 
+## 0.17.1 — 24 ноября 2026
+
+[Скачать релиз](https://github.com/stevv1e/fugu-deck-app/releases/tag/v0.17.1)
+
+- После успешного Windows pairing появляется необязательная кнопка **Создать Windows Hello**.
+- Локальный passkey регистрируется через штатный Keycloak AIA `webauthn-register-passwordless` с PKCE.
+- Телефонный passkey сохраняется, pairing по коду остаётся recovery; мобильный flow не изменён.
+
 ## Space 0.18.0 / Keyguard 0.13.0 — 24 ноября 2026
 
 - Добавлен выделенный PDF/OCR worker в Малайзии: до 200 МБ и 400 страниц.

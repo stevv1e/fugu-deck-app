@@ -81,6 +81,12 @@ export function authorizeUrl(c: ClusterInvite, p: Pkce): string {
   return `${c.issuer}/protocol/openid-connect/auth?${q}`;
 }
 
+export function registerPasskeyUrl(c: ClusterInvite, p: Pkce): string {
+  const url = new URL(authorizeUrl(c, p));
+  url.searchParams.set("kc_action", "webauthn-register-passwordless");
+  return url.toString();
+}
+
 export type DesktopPair = { id: string; code: string; user: string; name: string; deviceId: string; sessionJkt: string; secret: string; expires: string };
 
 /** Куда открыть системный браузер: join проверит приглашение, поставит cookie и уведёт в Keycloak. */

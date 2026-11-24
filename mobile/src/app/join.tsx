@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 
 import {
   browserPairUrl, browserStartUrl, buildEnroll, clusterDeviceId, fetchChallenge, exchangeCode, joinHeaders, newPkce, parseClusterInvite, parseRedirect, REDIRECT_URI,
+  registerPasskeyUrl,
   startDesktopPair, type DesktopPair,
 } from "@/core/cluster";
 import { errorFrom } from "@/core/http";
@@ -25,6 +26,8 @@ export default function Join() {
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState("");
   const [pair, setPair] = useState<DesktopPair | null>(null);
+  const [helloUrl, setHelloUrl] = useState<string | null>(null);
+  const [helloDone, setHelloDone] = useState(false);
 
   const inv = useMemo(() => {
     try {
@@ -99,7 +102,12 @@ export default function Join() {
       await saveCluster({ ...rec, user: out.user, status: out.status });
       // новая регистрация принята — ключи прежней больше не нужны
       if (prev && prev.alias !== alias) await provider.remove(prev.alias).catch(() => {});
-      router.replace({ pathname: "/cluster/[cid]", params: { cid: id } });
+      if (desktop) {
+        setPair(null);
+        setHelloUrl(registerPasskeyUrl(inv, newPkce()));
+      } else {
+        router.replace({ pathname: "/cluster/[cid]", params: { cid: id } });
+      }
     } catch (e) {
       // Попытка не удалась до ответа сервера «принято»: ключи этой попытки не нужны. Запись не трогаем, только если
       // запрос регистрации ушёл, а ответа нет (replaced): устройство могло зарегистрироваться — покажет проверка статуса.
@@ -108,6 +116,21 @@ export default function Join() {
     } finally {
       setBusy(false);
       setStep("");
+    }
+  };
+
+  const registerHello = async () => {
+    if (!helloUrl || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await desktopAuth(helloUrl);
+      if (result.type !== "success") throw new Error("Регистрация Windows Hello отменена");
+      setHelloDone(true);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -124,7 +147,7 @@ export default function Join() {
           ? "На этом ПК появится код. Введите его на телефоне в разделе «Устройства» и подтвердите вход — Bluetooth, USB и passkey на ПК не нужны."
           : "Откроется браузер: войдите по passkey. Телефон создаст два ключа в защищённом чипе, токен будет привязан к ним. После регистрации устройство подтвердит тот, кто вас пригласил."}
       </Txt>
-      <Field label="Название устройства" value={name} onChangeText={setName} maxLength={40} />
+      {!helloUrl ? <Field label="Название устройства" value={name} onChangeText={setName} maxLength={40} /> : null}
       {pair ? (
         <Card>
           <Txt kind="dim">Код для подтверждения на телефоне</Txt>
@@ -132,9 +155,17 @@ export default function Join() {
           <Txt kind="small">Действует до {new Date(pair.expires).toLocaleTimeString()}. После входа подтвердите новый ПК в списке устройств.</Txt>
         </Card>
       ) : null}
+      {helloUrl ? (
+        <Card>
+          <Txt kind="h2">{helloDone ? "Windows Hello создан" : "Вход на этом ПК выполнен"}</Txt>
+          <Txt kind="small">Можно добавить локальный passkey с PIN или биометрией Windows Hello. Телефонный passkey не удаляется, а вход по коду остаётся запасным способом.</Txt>
+          {!helloDone ? <Btn title="Создать Windows Hello" onPress={registerHello} busy={busy} /> : null}
+          <Btn title="Продолжить" kind="ghost" onPress={() => router.replace({ pathname: "/cluster/[cid]", params: { cid: clusterId(inv) } })} />
+        </Card>
+      ) : null}
       {error ? <Notice text={error} /> : null}
       {step ? <Notice kind="info" text={step} /> : null}
-      <Btn title="Войти" onPress={start} busy={busy} />
+      {!helloUrl ? <Btn title="Войти" onPress={start} busy={busy} /> : null}
     </Screen>
   );
 }
