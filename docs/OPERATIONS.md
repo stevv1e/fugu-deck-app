@@ -46,6 +46,8 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
+Лимиты одного agent run задаются `MAX_AGENT_STEPS`, `AGENT_MAX_RUN_SECONDS`, `AGENT_MAX_TOTAL_TOKENS`, `AGENT_MAX_COST_USD` и `AGENT_MAX_TOOL_CALLS`. Ноль для параметров `AGENT_*` отключает соответствующий дополнительный лимит; `MAX_AGENT_STEPS` остаётся обязательным.
+
 ## 3. Интеграционные проверки
 
 - Keycloak image test поднимает одноразовый Keycloak, создаёт пользователя, проверяет passkey и pairing pending/approved → OAuth code.

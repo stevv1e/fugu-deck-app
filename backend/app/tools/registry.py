@@ -54,6 +54,7 @@ class Tool:
     title: str = ""
     # подтверждение человеком всегда, даже если подтверждения в настройках выключены
     always_confirm: bool = False
+    readonly: bool = False
 
     def schema(self) -> dict:
         return {"type": "function",
@@ -75,7 +76,7 @@ def tool(name: str, description: str, parameters: dict, *, risk: Risk | Callable
         REGISTRY[name] = Tool(
             name=name, description=description, parameters=parameters, handler=fn,
             risk=risk if callable(risk) else _const(risk), group=group, title=title or name,
-            always_confirm=always_confirm,
+            always_confirm=always_confirm, readonly=risk == "read",
         )
         return fn
     return deco

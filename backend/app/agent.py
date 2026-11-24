@@ -130,6 +130,9 @@ class Run:
     mcp_tools: dict = field(default_factory=dict, repr=False)  # инструменты MCP-серверов владельца на этот запуск
     fallback_models: list[str] = field(default_factory=list)
     scenario: dict | None = None
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    tool_call_count: int = 0
     children: list[Run] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
     status: str = "running"
@@ -695,6 +698,17 @@ class Agent:
             return [*long[1:], *base[len(long) - 1:]]
         return base
 
+    def budget_problem(self, run: Run) -> str | None:
+        if self.settings.agent_max_run_seconds > 0 and time.time() - run.started_at >= self.settings.agent_max_run_seconds:
+            return f"Достигнут лимит времени запуска ({self.settings.agent_max_run_seconds} с) — напишите «продолжай»."
+        if self.settings.agent_max_total_tokens > 0 and run.total_tokens >= self.settings.agent_max_total_tokens:
+            return f"Достигнут лимит токенов запуска ({run.total_tokens}) — напишите «продолжай»."
+        if self.settings.agent_max_cost_usd > 0 and run.total_cost_usd >= self.settings.agent_max_cost_usd:
+            return f"Достигнут лимит стоимости запуска (${run.total_cost_usd:.4f}) — напишите «продолжай»."
+        if self.settings.agent_max_tool_calls > 0 and run.tool_call_count >= self.settings.agent_max_tool_calls:
+            return f"Достигнут лимит вызовов инструментов ({run.tool_call_count}) — напишите «продолжай»."
+        return None
+
     async def _record_usage(self, run: Run, usage) -> None:
         if not usage:
             return
@@ -706,10 +720,12 @@ class Agent:
             pcache = price[2] if len(price) > 2 else pin
             pwrite = price[3] if len(price) > 3 else pin
             cost = ((p - cached - cw) * pin + cached * pcache + cw * pwrite + c * pout) / 1_000_000
+        run.total_tokens += p + c
+        run.total_cost_usd += cost
         await self.db.add_usage(run.conversation_id, run.model, p, c, cached, cost,
                                 run.user.get("id"), run.payer_id)
         await run.emit("usage", prompt_tokens=p, completion_tokens=c, cached_tokens=cached, cost_usd=cost,
-                       by=run.user.get("display_name"))
+                       total_tokens=run.total_tokens, total_cost_usd=run.total_cost_usd, by=run.user.get("display_name"))
         if run.payer_id and run.payer_id != run.user.get("id"):  # платит спонсор — сообщить о порогах расхода
             if hit := await self.db.sponsor_threshold(run.conversation_id):
                 outbox.add(hit[0], "sponsor", run.conversation_id, run.project_id, percent=hit[1])
@@ -727,6 +743,9 @@ class Agent:
         if not tool or tool not in self.tools_for(run):
             # модель могла вызвать инструмент, которого ей в этом режиме не давали (например, Git в «Общении»)
             return json.dumps({"error": f"Инструмент {name} здесь недоступен"}, ensure_ascii=False)
+        if why := self.budget_problem(run):
+            return json.dumps({"error": why}, ensure_ascii=False)
+        run.tool_call_count += 1
 
         ctx.ssh_need, ctx.approval_jws, ctx.ssh_preview = "", "", None
         risk = await tool.risk(ctx, args)
@@ -895,6 +914,9 @@ class Agent:
             if run.project_id != TALK_PROJECT and mcp_client.enabled() and self.settings.space_kind != "team" and "mcp" in agent_tools:
                 run.mcp_tools = await mcp_client.tools()
             for step in range(self.settings.max_agent_steps):
+                if why := self.budget_problem(run):
+                    await run.emit("notice", text=why)
+                    break
                 if run.budget and (why := await run.budget()):
                     await run.emit("notice", text=why)
                     break
@@ -920,10 +942,11 @@ class Agent:
                 await run.emit("message_saved", has_tools=bool(tool_calls))
                 if not tool_calls:
                     break
-                for call in tool_calls:
-                    result = await self._exec_tool(run, call)
-                    await self.db.add_message(cid, "tool", result, tool_call_id=call["id"],
-                                              name=call["function"]["name"])
+                for group in _tool_groups(run, tool_calls):
+                    results = await asyncio.gather(*(self._exec_tool(run, call) for call in group))
+                    for call, result in zip(group, results):
+                        await self.db.add_message(cid, "tool", result, tool_call_id=call["id"],
+                                                  name=call["function"]["name"])
             else:
                 await run.emit("notice", text="Достигнут лимит шагов агента — напишите «продолжай».")
             run.status = "done"
@@ -965,6 +988,21 @@ class Agent:
                 await self._publish("run.finished", run)
             except Exception:
                 traceback.print_exc()
+
+
+def _tool_groups(run: Run, calls: list[dict]) -> list[list[dict]]:
+    groups: list[list[dict]] = []
+    last_readonly = False
+    for call in calls:
+        name = call["function"]["name"]
+        tool = REGISTRY.get(name) or run.mcp_tools.get(name)
+        readonly = bool(tool and getattr(tool, "readonly", False))
+        if readonly and last_readonly:
+            groups[-1].append(call)
+        else:
+            groups.append([call])
+        last_readonly = readonly
+    return groups
 
 
 def _repair_tool_pairs(msgs: list[dict]) -> list[dict]:
