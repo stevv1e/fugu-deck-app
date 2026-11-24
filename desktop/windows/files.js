@@ -50,12 +50,13 @@ async function grantPaths(event, paths, limit) {
   const result = [];
   for (const filePath of paths) {
     if (typeof filePath !== "string" || !path.isAbsolute(filePath)) throw new Error("Некорректный путь к файлу");
-    const stat = await fs.promises.stat(filePath);
+    const stat = await fs.promises.stat(filePath, { bigint: true });
     if (!stat.isFile()) throw new Error("Выбранный объект не является файлом");
     const id = randomUUID();
     const name = path.basename(filePath);
-    state.reads.set(id, { path: filePath, size: stat.size, mtimeMs: stat.mtimeMs });
-    result.push({ id, name, mime: MIME[path.extname(name).toLowerCase()] || "application/octet-stream", size: stat.size, uri: `desktop-file://${id}` });
+    const size = Number(stat.size);
+    state.reads.set(id, { path: filePath, size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs });
+    result.push({ id, name, mime: MIME[path.extname(name).toLowerCase()] || "application/octet-stream", size, uri: `desktop-file://${id}` });
   }
   return result;
 }
@@ -90,8 +91,8 @@ function registerFiles(ipcMain, dialog, shell, tempDir) {
     if (!Number.isInteger(position) || !Number.isInteger(length) || position < 0 || length < 1 || length > MAX_CHUNK || position + length > item.size) {
       throw new Error("Некорректный диапазон чтения");
     }
-    const stat = await fs.promises.stat(item.path);
-    if (!stat.isFile() || stat.size !== item.size || stat.mtimeMs !== item.mtimeMs) throw new Error("Файл изменился после выбора — выберите его заново");
+    const stat = await fs.promises.stat(item.path, { bigint: true });
+    if (!stat.isFile() || stat.size !== BigInt(item.size) || stat.mtimeNs !== item.mtimeNs || stat.ctimeNs !== item.ctimeNs) throw new Error("Файл изменился после выбора — выберите его заново");
     const handle = await fs.promises.open(item.path, "r");
     try {
       const buffer = Buffer.alloc(length);

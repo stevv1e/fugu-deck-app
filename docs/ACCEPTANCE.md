@@ -34,7 +34,7 @@
 | Чат, streaming, остановка ответа и multi-model | backend/mobile tests | Модели подтверждены ранее; полный сценарий PENDING | Модели подтверждены ранее; полный сценарий PENDING |
 | Drive: read, write и create folder | backend tests с моками API | Create folder подтверждён ранее; read/write PENDING | PENDING |
 | Media больше 250 МБ: загрузка, отмена и восстановление частей | chunk upload tests и production worker 582 МБ | PENDING | PENDING |
-| Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.0 |
+| Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.1 |
 | Официальный и custom Git module, сетевые блокировки и журнал | module sandbox/signature/journal tests | PENDING | PENDING |
 | E2EE в обе стороны, неверная фраза и конфликт версий | backup round-trip, authentication и optimistic conflict tests | PENDING | PENDING |
 
