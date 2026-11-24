@@ -1,7 +1,8 @@
 /**
  * Общие векторы подписанных действий для приложения (TypeScript) и keyguard (Go).
- *   npx tsx tests/vectors.ts            — пересоздать ../../fugu-deck-keyguard/testdata/action-vectors.json
+ *   npx tsx tests/vectors.ts            — пересоздать action-vectors.json в keyguard
  *   npx tsx tests/vectors.ts --check    — проверить, что файл совпадает с тем, что даёт текущий код
+ *   DECK_KEYGUARD_DIR задаёт каталог keyguard; без него используется прежний путь монорепы.
  * Канонические байты и JWS делает ровно тот код, что работает в приложении (actions.ts, canonical.ts, cluster.ts).
  * Ключ и nonce фиксированы, подпись детерминирована (RFC 6979) — файл воспроизводится байт в байт.
  * Go-тест (vectors_test.go) обязан принять каждый vectors[] и отклонить каждый invalid[]; здесь проверяется то же
@@ -17,7 +18,8 @@ import { clusterDeviceId, signClusterAction } from "../src/core/cluster";
 import { jwkFromPoint, softPoint, softSign } from "../src/core/crypto";
 import { makeKey, type DeviceKeys } from "../src/core/keys";
 
-const FILE = path.join(import.meta.dirname, "../../../fugu-deck-keyguard/testdata/action-vectors.json");
+const KEYGUARD_DIR = process.env.DECK_KEYGUARD_DIR || path.join(import.meta.dirname, "../../../fugu-deck-keyguard");
+const FILE = path.join(KEYGUARD_DIR, "testdata/action-vectors.json");
 const TS = 1790856000; // 2026-10-01T12:00:00Z
 const CT = "a".repeat(64);
 const TARGET = "d-Zm9vYmFyMTIzNDU2";

@@ -49,16 +49,7 @@ export default function ClusterDevice() {
     return k;
   }, [rec]);
 
-  // Подтверждённое устройство без сертификата: забираем его сами, как только экран открыт.
-  const autoChecked = useRef(false);
-  useEffect(() => {
-    if (rec && rec.status === "active" && !rec.certPem && !autoChecked.current) {
-      autoChecked.current = true;
-      void check();
-    }
-  });
-
-  const check = async () => {
+  const check = useCallback(async () => {
     if (!rec) return;
     setBusy(true);
     setMsg(null);
@@ -80,7 +71,16 @@ export default function ClusterDevice() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [keys, rec]);
+
+  // Подтверждённое устройство без сертификата: забираем его сами, как только экран открыт.
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (rec && rec.status === "active" && !rec.certPem && !autoChecked.current) {
+      autoChecked.current = true;
+      void check();
+    }
+  }, [check, rec]);
 
   // Личное пространство: место в кластере, где работает агент. Создаёт его space-operator по запросу control-plane;
   // пока агент запускается, состояние опрашиваем раз в 3 секунды (не дольше двух минут).
@@ -119,7 +119,7 @@ export default function ClusterDevice() {
       spaceLoaded.current = true;
       spaceState(rec, false).then(setSpace).catch(() => {});
     }
-  });
+  }, [rec]);
 
   const deleteSpace = async () => {
     if (!rec) return;

@@ -59,7 +59,8 @@ export default function KnowledgeBase() {
   }, [api, pid]);
 
   useEffect(() => {
-    void load();
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   const [showAll, setShowAll] = useState(false); // сотни заметок: страница свернула менее нужные, человек попросил все

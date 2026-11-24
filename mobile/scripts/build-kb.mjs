@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(join(root, "kb/kb.html"), "utf8");
 const out = "// Собрано из kb/kb.html командой `node scripts/build-kb.mjs` — руками не править.\n" +
-  "/* eslint-disable */\nexport const KB_HTML: string = " + JSON.stringify(html) + ";\n";
+  "export const KB_HTML: string = " + JSON.stringify(html) + ";\n";
 const target = join(root, "src/kb/kbHtml.ts");
 if (process.argv.includes("--check")) {
   let cur = "";

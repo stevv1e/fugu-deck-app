@@ -81,6 +81,8 @@ Roadmap не привязан к искусственным датам. Прио
 
 ### 2.1. Device-to-device acceptance matrix
 
+Текущие результаты и незакрытые ручные сценарии: [ACCEPTANCE.md](ACCEPTANCE.md).
+
 Проверить на реальных Android и Windows:
 
 - pairing положительный путь, неверный/истёкший код, повтор и отмена;
