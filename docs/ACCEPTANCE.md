@@ -10,13 +10,15 @@
 | --- | --- | --- |
 | Backend | 120 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
 | Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
-| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45436411065) |
+| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681966701) |
 | Electron files/transport/updates | 7 passed, включая beta и явный Windows rollback: `cd desktop/windows && npm test` | PASS |
-| Android release 0.15.1 | GitHub Actions `apk`, release event; asset скачан и проверен | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437713799) |
-| Windows release 0.15.1 | GitHub Actions `exe`, release event; asset скачан и проверен | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437714189) |
-| Space image 0.15.1 | GHCR build, push, cosign sign/verify | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437705801) |
-| Platform images | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/44804818638) |
-| Platform validation | Go race tests для четырёх компонентов и disposable Keycloak | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/44805580530) |
+| Android release 0.18.1 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681555105) |
+| Windows release 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
+| Space image 0.19.0 | GHCR build, push, cosign sign/verify; отдельный migration smoke schema v28 в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45679566246) |
+| Platform images 0.12.0 | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/45679572685) |
+| Platform validation | Go race tests для четырёх компонентов и disposable Keycloak; failed Maven job перезапущен успешно | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/45679465787) |
+| Production rollout | `deck-services` и `landing` Synced/Healthy; Control Plane 0.12.0, latest 0.18.1, previous 0.17.1, Space image 0.19.0 | PASS |
+| Production chat mode | Личные Space спят; сквозной запуск и переключение на production ещё не выполнены | PENDING |
 | Большое видео | Production-видео 582 МБ → keyguard → FFmpeg worker → корректные OGG-фрагменты | PASS |
 | Space → worker | Реальный вызов через keyguard, получен корректный OGG | PASS |
 
