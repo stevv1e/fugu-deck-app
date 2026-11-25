@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 25.11.2026, клиент 0.18.0, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты.
+Снимок: 25.11.2026, клиент 0.18.1, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -33,12 +33,12 @@
 | Revoke устройства и восстановление новым pairing | integration tests отзыва и повторной регистрации | PENDING | PENDING |
 | Личные и общие пространства, проекты и участники | navigation/team tests | Общие данные подтверждены ранее; повторить на 0.15.1 | Общие данные подтверждены ранее; повторить на 0.15.1 |
 | Чат, streaming, остановка ответа и multi-model | backend/mobile tests | Модели подтверждены ранее; полный сценарий PENDING | Модели подтверждены ранее; полный сценарий PENDING |
-| Переключатель Инжиниринг/Общение с историей и возвратом исходного проекта | backend migration/move test и typecheck | PENDING на 0.18.0 | PENDING на 0.18.0 |
+| Переключатель Инжиниринг/Общение с историей и возвратом исходного проекта | backend migration/move test и typecheck | PENDING на 0.18.1 | PENDING на 0.18.1 |
 | Drive: read, write и create folder | backend tests с моками API | Create folder подтверждён ранее; read/write PENDING | PENDING |
 | Media больше 250 МБ: загрузка, отмена и восстановление частей | chunk upload tests и production worker 582 МБ | PENDING | PENDING |
 | Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.1 |
-| Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.18.0 | PENDING на EXE 0.18.0 |
-| Beta channel и явный rollback на предыдущий stable | отдельные signed-manifest и Windows IPC tests | Beta update PENDING; downgrade поверх не поддерживается ОС | PENDING на EXE 0.18.0 |
+| Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.18.1 | PENDING на EXE 0.18.1 |
+| Beta channel и явный rollback на предыдущий stable | отдельные signed-manifest и Windows IPC tests | Beta update PENDING; downgrade поверх не поддерживается ОС | PENDING на EXE 0.18.1 |
 | Официальный и custom Git module, сетевые блокировки и журнал | module sandbox/signature/journal tests | PENDING | PENDING |
 | E2EE в обе стороны, неверная фраза и конфликт версий | backup round-trip, authentication и optimistic conflict tests | PENDING | PENDING |
 | База знаний: источник, ревизия, fresh/stale/unavailable и ручная пометка | FTS5/BM25 и source-check tests | PENDING на 0.17.0 | PENDING на 0.17.0 |
