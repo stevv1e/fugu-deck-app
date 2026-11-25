@@ -1267,16 +1267,21 @@ async def update_conv(cid: str, body: ConvIn, u: dict = Me):
     if body.title is not None and not title:
         raise HTTPException(400, "Название чата не может быть пустым")
     to = body.project_id if body.project_id and body.project_id != c["project_id"] else None
+    eng_project = None
     if to:
         await need(u, to, "editor")
         if (r := agent().active_run(cid)) and r.status == "running":
             raise HTTPException(409, "В чате идёт выполнение — перенесите его, когда агент закончит")
+        if to == TALK_PROJECT and c["project_id"] != TALK_PROJECT:
+            eng_project = c["project_id"]
+        elif c["project_id"] == TALK_PROJECT and to != TALK_PROJECT:
+            eng_project = ""
     if body.agent_id and not await db().get_agent(body.agent_id):
         raise HTTPException(400, "Нет такого агента")
     if body.agent_id and (r := agent().active_run(cid)) and r.status == "running":
         raise HTTPException(409, "Сменить агента можно, когда он закончит")
     await db().update_conversation(cid, title=title, model=_check_model(body.model) if body.model else None, project_id=to,
-                                   agent_id=body.agent_id)
+                                   eng_project_id=eng_project, agent_id=body.agent_id)
     await broker().publish("conversation", c["project_id"], action="updated", conversation_id=cid)
     if to:
         await broker().publish("conversation", to, action="created", conversation_id=cid, by=u["display_name"])

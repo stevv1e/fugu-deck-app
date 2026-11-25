@@ -2,9 +2,9 @@ import { createHash, createPrivateKey, sign } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 
-const [platform, version, asset, output] = process.argv.slice(2);
-if (!["android", "windows"].includes(platform) || !/^\d+\.\d+\.\d+$/.test(version || "") || !asset || !output) {
-  throw new Error("Использование: DECK_UPDATE_PRIVATE_KEY=… sign-update-manifest.mjs <android|windows> <version> <asset> <output>");
+const [platform, version, asset, output, channel = "stable"] = process.argv.slice(2);
+if (!["android", "windows"].includes(platform) || !["stable", "beta"].includes(channel) || !/^\d+\.\d+\.\d+$/.test(version || "") || !asset || !output) {
+  throw new Error("Использование: DECK_UPDATE_PRIVATE_KEY=… sign-update-manifest.mjs <android|windows> <version> <asset> <output> [stable|beta]");
 }
 const expected = platform === "android" ? `Fugu-Deck-Android-${version}-arm64.apk` : `Fugu-Deck-Setup-${version}.exe`;
 if (basename(asset) !== expected) throw new Error("Имя установщика не соответствует платформе и версии");
@@ -18,7 +18,7 @@ const privateKey = createPrivateKey({
 const payload = Buffer.from(JSON.stringify({
   format: "fugu-deck-update/1",
   platform,
-  channel: "stable",
+  channel,
   version,
   url: `https://github.com/stevv1e/fugu-deck-app/releases/download/v${version}/${expected}`,
   size: statSync(asset).size,

@@ -22,6 +22,10 @@ def test_rename_and_move_chat(client):
     assert r.status_code == 200 and r.json()["project_id"] == b["id"]
     assert [x["id"] for x in client.get(f"/api/projects/{b['id']}/conversations").json()] == [c["id"]]
     assert client.get(f"/api/projects/{a['id']}/conversations").json() == []
+    r = client.patch(f"/api/conversations/{c['id']}", json={"project_id": "talk"})
+    assert r.status_code == 200 and r.json()["project_id"] == "talk" and r.json()["eng_project_id"] == b["id"]
+    r = client.patch(f"/api/conversations/{c['id']}", json={"project_id": b["id"]})
+    assert r.status_code == 200 and r.json()["project_id"] == b["id"] and r.json()["eng_project_id"] == ""
     assert client.patch(f"/api/conversations/{c['id']}", json={"project_id": "нет-такого"}).status_code == 404
 
 

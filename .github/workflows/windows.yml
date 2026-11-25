@@ -46,9 +46,12 @@ jobs:
         shell: bash
         env:
           DECK_UPDATE_PRIVATE_KEY: ${{ secrets.DECK_UPDATE_PRIVATE_KEY }}
+          DECK_UPDATE_CHANNEL: ${{ github.event.release.prerelease && 'beta' || 'stable' }}
         run: |
           VERSION=$(cat VERSION)
-          node scripts/sign-update-manifest.mjs windows "$VERSION" "desktop/windows/release/Fugu-Deck-Setup-${VERSION}.exe" desktop/windows/release/update-windows.json
+          MANIFEST=update-windows.json
+          if [ "$DECK_UPDATE_CHANNEL" = beta ]; then MANIFEST=update-windows-beta.json; fi
+          node scripts/sign-update-manifest.mjs windows "$VERSION" "desktop/windows/release/Fugu-Deck-Setup-${VERSION}.exe" "desktop/windows/release/$MANIFEST" "$DECK_UPDATE_CHANNEL"
       - uses: actions/upload-artifact@v4
         with:
           name: fugu-deck-windows

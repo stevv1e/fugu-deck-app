@@ -3,17 +3,17 @@ import { Directory, File, Paths } from "expo-file-system";
 import { createDownloadResumable } from "expo-file-system/legacy";
 
 import { isNewer } from "@/core/version";
-import { verifyUpdateManifest } from "@/core/updateManifest";
+import { updateManifestName, verifyUpdateManifest, type UpdateChannel } from "@/core/updateManifest";
 import { FdSecure } from "fd-secure";
 
 let active: ReturnType<typeof createDownloadResumable> | null = null;
 
-export async function downloadAndroidUpdate(version: string, current: string, onProgress: (done: number, total: number) => void): Promise<{ id: string; version: string; size: number }> {
+export async function downloadAndroidUpdate(version: string, current: string, onProgress: (done: number, total: number) => void, channel: UpdateChannel = "stable"): Promise<{ id: string; version: string; size: number }> {
   if (active) throw new Error("Обновление уже скачивается");
-  const manifestUrl = `https://github.com/stevv1e/fugu-deck-app/releases/download/v${version}/update-android.json`;
+  const manifestUrl = `https://github.com/stevv1e/fugu-deck-app/releases/download/v${version}/${updateManifestName("android", channel)}`;
   const response = await fetch(manifestUrl);
   if (!response.ok) throw new Error(`Манифест обновления недоступен: HTTP ${response.status}`);
-  const manifest = verifyUpdateManifest(await response.text(), "android");
+  const manifest = verifyUpdateManifest(await response.text(), "android", undefined, channel);
   if (manifest.version !== version || !isNewer(manifest.version, current)) throw new Error("Эта версия не новее установленной");
   const dir = new Directory(Paths.cache, "updates");
   if (!dir.exists) dir.create({ intermediates: true });

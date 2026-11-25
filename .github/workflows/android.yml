@@ -80,7 +80,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         env:
           DECK_UPDATE_PRIVATE_KEY: ${{ secrets.DECK_UPDATE_PRIVATE_KEY }}
-        run: node scripts/sign-update-manifest.mjs android "$DECK_VERSION" "mobile/android/app/build/outputs/apk/release/Fugu-Deck-Android-${DECK_VERSION}-arm64.apk" mobile/android/app/build/outputs/apk/release/update-android.json
+          DECK_UPDATE_CHANNEL: ${{ github.event.release.prerelease && 'beta' || 'stable' }}
+        run: |
+          MANIFEST=update-android.json
+          if [ "$DECK_UPDATE_CHANNEL" = beta ]; then MANIFEST=update-android-beta.json; fi
+          node scripts/sign-update-manifest.mjs android "$DECK_VERSION" "mobile/android/app/build/outputs/apk/release/Fugu-Deck-Android-${DECK_VERSION}-arm64.apk" "mobile/android/app/build/outputs/apk/release/$MANIFEST" "$DECK_UPDATE_CHANNEL"
       - uses: actions/upload-artifact@v4
         with:
           name: fugu-deck-android

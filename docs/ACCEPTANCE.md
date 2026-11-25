@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 24.11.2026, опубликованный клиент и Space 0.15.1, platform components 0.12.x.
+Снимок: 25.11.2026, клиент 0.18.0, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -8,10 +8,10 @@
 
 | Область | Проверено | Результат |
 | --- | --- | --- |
-| Backend | 113 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
-| Mobile core | 69 passed, 5 skipped без локального `kgcheck`; typecheck | PASS |
+| Backend | 120 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
+| Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
 | Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45436411065) |
-| Electron files/transport | 4 passed: `cd desktop/windows && npm test` | PASS |
+| Electron files/transport/updates | 7 passed, включая beta и явный Windows rollback: `cd desktop/windows && npm test` | PASS |
 | Android release 0.15.1 | GitHub Actions `apk`, release event; asset скачан и проверен | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437713799) |
 | Windows release 0.15.1 | GitHub Actions `exe`, release event; asset скачан и проверен | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437714189) |
 | Space image 0.15.1 | GHCR build, push, cosign sign/verify | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45437705801) |
@@ -33,10 +33,12 @@
 | Revoke устройства и восстановление новым pairing | integration tests отзыва и повторной регистрации | PENDING | PENDING |
 | Личные и общие пространства, проекты и участники | navigation/team tests | Общие данные подтверждены ранее; повторить на 0.15.1 | Общие данные подтверждены ранее; повторить на 0.15.1 |
 | Чат, streaming, остановка ответа и multi-model | backend/mobile tests | Модели подтверждены ранее; полный сценарий PENDING | Модели подтверждены ранее; полный сценарий PENDING |
+| Переключатель Инжиниринг/Общение с историей и возвратом исходного проекта | backend migration/move test и typecheck | PENDING на 0.18.0 | PENDING на 0.18.0 |
 | Drive: read, write и create folder | backend tests с моками API | Create folder подтверждён ранее; read/write PENDING | PENDING |
 | Media больше 250 МБ: загрузка, отмена и восстановление частей | chunk upload tests и production worker 582 МБ | PENDING | PENDING |
 | Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.1 |
-| Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.16.1 | PENDING на EXE 0.16.1 |
+| Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.18.0 | PENDING на EXE 0.18.0 |
+| Beta channel и явный rollback на предыдущий stable | отдельные signed-manifest и Windows IPC tests | Beta update PENDING; downgrade поверх не поддерживается ОС | PENDING на EXE 0.18.0 |
 | Официальный и custom Git module, сетевые блокировки и журнал | module sandbox/signature/journal tests | PENDING | PENDING |
 | E2EE в обе стороны, неверная фраза и конфликт версий | backup round-trip, authentication и optimistic conflict tests | PENDING | PENDING |
 | База знаний: источник, ревизия, fresh/stale/unavailable и ручная пометка | FTS5/BM25 и source-check tests | PENDING на 0.17.0 | PENDING на 0.17.0 |

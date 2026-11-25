@@ -1,8 +1,6 @@
-/** Как версия показывается человеку: до выпуска все сборки — alpha. */
-export const CHANNEL = "alpha";
-
+/** Номер версии и коммит без привязки к каналу: stable/beta выбираются в центре обновлений. */
 export function versionLabel(version: string | undefined | null, commit?: string | null): string {
-  const v = version ? `${CHANNEL}-${version}` : CHANNEL;
+  const v = version || "development";
   return commit ? `${v} (${commit})` : v;
 }
 

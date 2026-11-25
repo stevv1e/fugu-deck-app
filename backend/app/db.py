@@ -377,6 +377,10 @@ SCHEMA = [
     """
     ALTER TABLE memories ADD COLUMN verification_error TEXT;
     """,
+    # v28: чат, переключённый в «Общение», помнит инженерный проект для возврата на любом устройстве
+    """
+    ALTER TABLE conversations ADD COLUMN eng_project_id TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"

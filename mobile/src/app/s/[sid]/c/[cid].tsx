@@ -28,6 +28,7 @@ import { AttachmentList } from "@/ui/Attachments";
 import { Btn, Card, Chip, errText, IconBtn, Loading, Notice, Row, TopBar, Txt } from "@/ui/kit";
 import { TeamModel } from "@/ui/TeamModel";
 import { ModelPicker } from "@/ui/ModelPicker";
+import { ModeSwitch, type Mode } from "@/ui/Modes";
 import { alpha, MONO, useTheme } from "@/ui/theme";
 import { useDesktopLayout } from "@/ui/useDesktopLayout";
 
@@ -555,6 +556,30 @@ export default function Chat() {
     }
   };
 
+  const changeMode = async (next: Mode) => {
+    if (!api || !conv || runId || switching || !canWrite || (next === "talk") === (conv.project_id === "talk")) return;
+    setSwitching(true);
+    setError(null);
+    try {
+      let target = "talk";
+      if (next === "eng") {
+        const projects = await api.projects();
+        const remembered = typeof conv.eng_project_id === "string" ? conv.eng_project_id : "";
+        target = projects.some((p) => p.id === remembered) ? remembered : projects.some((p) => p.id === "general") ? "general" : projects[0]?.id || "";
+        if (!target) throw new Error("Сначала создайте инженерный проект");
+      }
+      const moved = await api.moveConversation(cid, target);
+      setConv({ ...conv, ...moved });
+      setScenarioEnabled(false);
+      setModels(null);
+      setChatMenu(false);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   // Состояние чата (модель, спонсор, предложение) перечитываем после действий с моделью общего чата.
   const refresh = useCallback(() => {
     api?.conversation(cid).then(
@@ -604,6 +629,11 @@ export default function Chat() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: p.bg }} edges={["top", "left", "right", "bottom"]} {...dropProps}>
       <TopBar title={conv?.title || "Чат"} back right={<IconBtn glyph="⋮" label="Контекст и переходы чата" onPress={() => { setModels(null); setChatMenu(!chatMenu); }} />} />
+      {conv && !conv.parent_id ? (
+        <View style={{ paddingHorizontal: desktop ? 24 : 12, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: p.line, width: "100%", maxWidth: desktop ? 1008 : undefined, alignSelf: "center" }}>
+          <ModeSwitch compact mode={conv.project_id === "talk" ? "talk" : "eng"} disabled={!!runId || switching || !canWrite} onChange={(next) => { void changeMode(next); }} />
+        </View>
+      ) : null}
       {chatMenu && conv ? (
         <ScrollView style={{ flexGrow: 0, maxHeight: "60%", borderBottomWidth: 1, borderBottomColor: p.line, backgroundColor: p.bg2 }} contentContainerStyle={{ padding: 12, gap: 10 }} keyboardShouldPersistTaps="handled">
           <Row style={{ justifyContent: "space-between" }}><Txt kind="label">контекст задачи</Txt><Chip text={runId ? "агент работает" : "готов"} color={runId ? p.ok : p.dim} /></Row>
@@ -649,8 +679,8 @@ export default function Chat() {
               </Row>
             </>
           ) : null}
-          <Btn small kind="ghost" title={scenarioEnabled ? "✓ Multi-model: работа → ревью → сводка" : "Multi-model сценарий…"} onPress={() => setScenarioEnabled(!scenarioEnabled)} />
-          {scenarioEnabled && scenarioModels ? <Card accent={p.accent} style={{ padding: 12 }}>
+          {conv.project_id !== "talk" ? <Btn small kind="ghost" title={scenarioEnabled ? "✓ Multi-model: работа → ревью → сводка" : "Multi-model сценарий…"} onPress={() => setScenarioEnabled(!scenarioEnabled)} /> : null}
+          {conv.project_id !== "talk" && scenarioEnabled && scenarioModels ? <Card accent={p.accent} style={{ padding: 12 }}>
             <Txt kind="small">Исполнитель: {nameOfModel(scenarioModels.code)}</Txt>
             <Txt kind="small">Ревью без инструментов: {nameOfModel(scenarioModels.review)}</Txt>
             <Txt kind="small">Сводка: {nameOfModel(scenarioModels.summary)}</Txt>

@@ -15,7 +15,10 @@ function newer(a, b) {
   return false;
 }
 
-function verifyManifest(raw, requested, current, publicKey = UPDATE_PUBLIC_KEY) {
+function verifyManifest(raw, requested, current, publicKey = UPDATE_PUBLIC_KEY, options = {}) {
+  const channel = options.channel || "stable";
+  const mode = options.mode || "upgrade";
+  if (!["stable", "beta"].includes(channel) || !["upgrade", "rollback"].includes(mode)) throw new Error("Неизвестный режим обновления");
   if (Buffer.byteLength(raw) > MAX_MANIFEST) throw new Error("Манифест обновления слишком большой");
   const envelope = JSON.parse(raw);
   if (typeof envelope.payload !== "string" || typeof envelope.signature !== "string") throw new Error("Манифест обновления неполный");
@@ -26,8 +29,9 @@ function verifyManifest(raw, requested, current, publicKey = UPDATE_PUBLIC_KEY) 
   const payload = JSON.parse(payloadBytes.toString("utf8"));
   const filename = `Fugu-Deck-Setup-${payload.version}.exe`;
   const expectedUrl = `https://github.com/stevv1e/fugu-deck-app/releases/download/v${payload.version}/${filename}`;
-  if (payload.format !== "fugu-deck-update/1" || payload.platform !== "windows" || payload.channel !== "stable" ||
-    payload.version !== requested || !newer(payload.version, current) || payload.url !== expectedUrl ||
+  const versionMatches = mode === "rollback" ? newer(current, payload.version) : newer(payload.version, current);
+  if (payload.format !== "fugu-deck-update/1" || payload.platform !== "windows" || payload.channel !== channel ||
+    payload.version !== requested || !versionMatches || payload.url !== expectedUrl ||
     !Number.isSafeInteger(payload.size) || payload.size <= 0 || payload.size > 512 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(payload.sha256)) {
     throw new Error("Манифест обновления не соответствует этой версии приложения");
   }
@@ -52,15 +56,21 @@ function registerUpdates(ipcMain, app, options = {}) {
     parts.delete(id);
   }
 
-  ipcMain.handle("update:download", async (event, version) => {
+  ipcMain.handle("update:download", async (event, version, requested = {}) => {
     const sender = event.senderFrame?.url || event.sender.getURL();
     if (!sender.startsWith("fugu-app://bundle")) throw new Error("Обновление не из окна Fugu Deck");
-    if (!/^\d+\.\d+\.\d+$/.test(version) || !newer(version, app.getVersion())) throw new Error("Эта версия не новее установленной");
+    const channel = requested.channel || "stable";
+    const mode = requested.mode || "upgrade";
+    if (!["stable", "beta"].includes(channel) || !["upgrade", "rollback"].includes(mode)) throw new Error("Неизвестный режим обновления");
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Некорректная версия обновления");
+    if (mode === "upgrade" && !newer(version, app.getVersion())) throw new Error("Эта версия не новее установленной");
+    if (mode === "rollback" && !newer(app.getVersion(), version)) throw new Error("Откат возможен только на более раннюю версию");
     if (parts.has(event.sender.id)) throw new Error("Обновление уже скачивается");
-    const manifestUrl = `https://github.com/stevv1e/fugu-deck-app/releases/download/v${version}/update-windows.json`;
+    const manifestName = `update-windows${channel === "beta" ? "-beta" : ""}.json`;
+    const manifestUrl = `https://github.com/stevv1e/fugu-deck-app/releases/download/v${version}/${manifestName}`;
     const response = await fetchImpl(manifestUrl, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`Манифест обновления недоступен: HTTP ${response.status}`);
-    const manifest = verifyManifest(await response.text(), version, app.getVersion(), publicKey);
+    const manifest = verifyManifest(await response.text(), version, app.getVersion(), publicKey, { channel, mode });
     const part = path.join(tempDir(), `fugu-update-${randomUUID()}.part`);
     parts.set(event.sender.id, part);
     event.sender.once("destroyed", () => cleanupSender(event.sender.id));

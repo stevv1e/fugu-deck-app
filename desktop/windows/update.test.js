@@ -18,7 +18,7 @@ function manifest(version, data, changes = {}) {
   return JSON.stringify({ payload: payload.toString("base64"), signature: sign(null, payload, pair.privateKey).toString("base64") });
 }
 
-function fixture(data, changes = {}) {
+function fixture(data, changes = {}, remoteVersion = "1.0.0") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fugu-update-test-"));
   const handlers = new Map();
   const listeners = new Map();
@@ -28,7 +28,7 @@ function fixture(data, changes = {}) {
   const event = { senderFrame: { url: "fugu-app://bundle/" }, sender };
   let quit = false;
   const app = { getVersion: () => "0.15.0", getPath: () => dir, quit: () => { quit = true; } };
-  const fetchImpl = async (url) => url.endsWith(".json") ? new Response(manifest("1.0.0", data, changes)) : new Response(data);
+  const fetchImpl = async (url) => url.endsWith(".json") ? new Response(manifest(remoteVersion, data, changes)) : new Response(data);
   const spawned = [];
   const spawnImpl = (...args) => {
     spawned.push(args);
@@ -68,4 +68,22 @@ test("wrong hash, wrong URL, old version and foreign window are rejected", async
   assert.equal(newer("1.0.1", "1.0.0"), true);
   assert.equal(newer("1.0.0", "1.0.0"), false);
   fs.rmSync(f.dir, { recursive: true, force: true });
+});
+
+
+test("beta channel and explicit rollback require their own signed manifests", async () => {
+  const beta = fixture(Buffer.from("beta installer"), { channel: "beta" });
+  await assert.rejects(beta.handlers.get("update:download")(beta.event, "1.0.0"), /не соответствует/);
+  const downloadedBeta = await beta.handlers.get("update:download")(beta.event, "1.0.0", { channel: "beta" });
+  assert.equal(downloadedBeta.version, "1.0.0");
+  fs.rmSync(beta.dir, { recursive: true, force: true });
+
+  const previous = fixture(Buffer.from("previous stable installer"), {}, "0.14.0");
+  await assert.rejects(previous.handlers.get("update:download")(previous.event, "0.14.0"), /не новее/);
+  const downloaded = await previous.handlers.get("update:download")(previous.event, "0.14.0", { mode: "rollback" });
+  assert.equal(downloaded.version, "0.14.0");
+  assert.equal(previous.handlers.get("update:install")(previous.event, downloaded.id).installing, true);
+  assert.equal(previous.spawned[0][1][0], "/S");
+  await assert.rejects(previous.handlers.get("update:download")(previous.event, "1.0.0", { mode: "rollback" }), /более раннюю/);
+  fs.rmSync(previous.dir, { recursive: true, force: true });
 });

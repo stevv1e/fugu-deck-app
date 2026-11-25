@@ -71,8 +71,12 @@ python -m pytest -q
 1. Скачайте оба опубликованных файла обратно.
 2. Сравните имена и размеры с release assets.
 3. Создайте/проверьте `SHA256SUMS.txt` по скачанным файлам.
-4. Загрузите checksums в тот же Release. Release workflows также публикуют `update-android.json` и `update-windows.json`, подписанные отдельным Ed25519-ключом из `DECK_UPDATE_PRIVATE_KEY`.
+4. Загрузите checksums в тот же Release. Release workflows также публикуют подписанные отдельным Ed25519-ключом из `DECK_UPDATE_PRIVATE_KEY` манифесты: `update-android.json`/`update-windows.json` для stable и `update-android-beta.json`/`update-windows-beta.json` для pre-release.
 5. Обновите прямые ссылки лендинга.
+
+Stable Release и Beta pre-release используют один формат `fugu-deck-update/1`, но разные значения `channel` и разные имена манифестов. Клиент принимает beta только после явного выбора канала; подмена канала или Release URL отклоняется. Control Plane получает `DECK_APP_LATEST`, `DECK_APP_URL`, необязательные `DECK_APP_BETA`, `DECK_APP_BETA_URL`, а также `DECK_APP_PREVIOUS`, `DECK_APP_PREVIOUS_URL` для восстановления Windows.
+
+Windows rollback является отдельной операцией: предыдущий stable скачивается и проверяется так же, как обновление, но запускается только кнопкой подтверждения. Не выдавайте его за автоматический атомарный откат: установка поверх и сохранение состояния проверяются на реальном ПК. Android не поддерживает обычную установку APK с меньшим `versionCode`; для него нужен отдельный recovery-пакет с новым номером сборки, которого пока нет.
 
 ## 5. Серверные образы
 

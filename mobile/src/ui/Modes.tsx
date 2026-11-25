@@ -35,21 +35,21 @@ export function useMode(sid: string): [Mode | null, (m: Mode) => void] {
   return [mode, set];
 }
 
-/** Рубильник вверху экрана пространства. */
-export function ModeSwitch({ mode, onChange }: { mode: Mode; onChange(m: Mode): void }) {
+/** Переключатель режима на экране пространства или компактно внутри чата. */
+export function ModeSwitch({ mode, onChange, compact = false, disabled = false }: { mode: Mode; onChange(m: Mode): void; compact?: boolean; disabled?: boolean }) {
   const { p } = useTheme();
   const item = (m: Mode, title: string, subtitle: string) => {
     const on = mode === m;
     return (
-      <Pressable key={m} onPress={() => onChange(m)} accessibilityRole="button" accessibilityState={{ selected: on }}
-        style={{ flex: 1, paddingVertical: 10, paddingHorizontal: 8, alignItems: "center", backgroundColor: on ? p.panel2 : "transparent", borderRadius: 9, borderWidth: 1, borderColor: on ? p.accent : "transparent" }}>
-        <Txt style={{ fontWeight: "600", color: on ? p.accent : p.text, fontSize: 13 }}>{title}</Txt>
-        <Txt kind="small" style={{ fontSize: 10, color: on ? p.dim : p.faint }}>{subtitle}</Txt>
+      <Pressable key={m} onPress={() => onChange(m)} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected: on, disabled }}
+        style={{ flex: 1, paddingVertical: compact ? 7 : 10, paddingHorizontal: 8, alignItems: "center", backgroundColor: on ? p.panel2 : "transparent", borderRadius: 9, borderWidth: 1, borderColor: on ? p.accent : "transparent", opacity: disabled ? 0.55 : 1 }}>
+        <Txt style={{ fontWeight: "600", color: on ? p.accent : p.text, fontSize: compact ? 12 : 13 }}>{title}</Txt>
+        {compact ? null : <Txt kind="small" style={{ fontSize: 10, color: on ? p.dim : p.faint }}>{subtitle}</Txt>}
       </Pressable>
     );
   };
   return (
-    <View style={{ flexDirection: "row", margin: 16, marginBottom: 0, padding: 4, gap: 4, borderWidth: 1, borderColor: p.line, borderRadius: 12, backgroundColor: p.bg2 }}>
+    <View style={{ flexDirection: "row", margin: compact ? 0 : 16, marginBottom: 0, padding: 4, gap: 4, borderWidth: 1, borderColor: p.line, borderRadius: 12, backgroundColor: p.bg2 }}>
       {item("eng", "Инжиниринг", "код и инфраструктура")}
       {item("talk", "Общение", "быстрые ответы")}
     </View>

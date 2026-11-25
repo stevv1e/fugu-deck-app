@@ -15,6 +15,14 @@ const payload = {
 const encoded = b64(utf8(JSON.stringify(payload)));
 const manifest = JSON.stringify({ payload: encoded, signature: b64(ed25519.sign(utf8(JSON.stringify(payload)), privateKey)) });
 
+test("beta uses a separately signed manifest and cannot replace stable", () => {
+  const beta = { ...payload, channel: "beta" };
+  const signed = JSON.stringify({ payload: b64(utf8(JSON.stringify(beta))), signature: b64(ed25519.sign(utf8(JSON.stringify(beta)), privateKey)) });
+  assert.deepEqual(verifyUpdateManifest(signed, "android", b64(publicKey), "beta"), beta);
+  assert.throws(() => verifyUpdateManifest(signed, "android", b64(publicKey)), /не соответствует/);
+  assert.throws(() => verifyUpdateManifest(manifest, "android", b64(publicKey), "beta"), /не соответствует/);
+});
+
 test("update manifest verifies signature and exact release asset", () => {
   assert.deepEqual(verifyUpdateManifest(manifest, "android", b64(publicKey)), payload);
   assert.throws(() => verifyUpdateManifest(manifest, "windows", b64(publicKey)), /не соответствует/);

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("fuguDesktop", {
   finishFile: (id) => ipcRenderer.invoke("files:finish", id),
   cancelFile: (id) => ipcRenderer.invoke("files:cancel", id),
   openFile: (id) => ipcRenderer.invoke("files:open", id),
-  downloadUpdate: (version) => ipcRenderer.invoke("update:download", version),
+  downloadUpdate: (version, options) => ipcRenderer.invoke("update:download", version, options),
   installUpdate: (id) => ipcRenderer.invoke("update:install", id),
   cancelUpdate: () => ipcRenderer.send("update:cancel"),
   onUpdateProgress: (callback) => {
