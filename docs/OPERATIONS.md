@@ -46,7 +46,31 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Лимиты одного agent run задаются `MAX_AGENT_STEPS`, `AGENT_MAX_RUN_SECONDS`, `AGENT_MAX_TOTAL_TOKENS`, `AGENT_MAX_COST_USD` и `AGENT_MAX_TOOL_CALLS`. Ноль для параметров `AGENT_*` отключает соответствующий дополнительный лимит; `MAX_AGENT_STEPS` остаётся обязательным.
+Лимиты одного agent run задаются `MAX_AGENT_STEPS`, `AGENT_MAX_RUN_SECONDS`, `AGENT_MAX_TOTAL_TOKENS`, `AGENT_MAX_COST_USD` и `AGENT_MAX_TOOL_CALLS`. Ноль для параметров `AGENT_*` отключает соответствующий дополнительный лимит; `MAX_AGENT_STEPS` остаётся обязательным. При ручном resume выдаётся новый интервал времени и новый лимит шагов, но суммарные токены, стоимость и число вызовов инструментов сохраняются.
+
+### Context/Budget Harness
+
+- `repo_map` возвращает каталоги и сигнатуры, `read_symbol` — конкретную функцию/класс. Не выгружайте репозиторий целиком для локальной правки.
+- Runs, события и tool checkpoints хранятся в SQLite schema v29 без API-ключей, DPoP/mTLS-ключей и approval JWS. После перезапуска активный run получает статус `interrupted`, а существующий «Повторить» вызывает resume с тем же `run_id`.
+- `done` tool result возвращается из checkpoint. `running` read-only можно повторить; `running` write/danger блокирует resume, потому что неизвестно, успела ли сторона применить действие. Проверьте внешний результат отдельным чатом.
+- `auto:auto` появляется в каталоге личных/standalone-пространств только при настройке `MODEL_ROUTER_JSON`. Пример:
+
+  ```bash
+  MODEL_ROUTER_JSON='{"simple":"google:gemini-3.5-flash-lite","code":"kimi:kimi-for-coding","complex":"anthropic:claude-sonnet-5-5","media":"google:gemini-3.8-flash"}'
+  ```
+
+  Все назначения должны присутствовать в каталоге; отсутствие ключа выбранного провайдера — явная ошибка, а не скрытый fallback. В team-пространствах auto отключён, поскольку спонсорское разрешение выдаётся на точную модель.
+
+### Quality/cost/latency evals
+
+```bash
+cd backend
+python -m evals.harness_eval offline
+python -m evals.harness_eval live --model google:gemini-3.5-flash-lite --output /tmp/fugu-eval.json
+python -m evals.harness_eval live --model google:gemini-3.5-flash-lite --model kimi:kimi-for-coding
+```
+
+Offline проверяет разметку router и размер контекста на синтетическом fixture. Live использует существующие provider adapters и ключи окружения, выполняет только задачи из `evals/tasks.json` с `live=true`, сохраняет verdict, токены, стоимость, latency и SHA-256 ответа, но не сам текст. Сравнение моделей нужно делать на одном наборе; synthetic context reduction не является доказательством качества или экономии production. Внешний Inspect AI не добавлен: runner использует текущие adapters без новой зависимости.
 
 ## 3. Интеграционные проверки
 

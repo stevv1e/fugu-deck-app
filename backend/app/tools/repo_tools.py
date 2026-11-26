@@ -13,6 +13,7 @@ from .. import filetools, kb_watch
 
 from .providers import FileChange, GitProvider, ProviderError
 from .registry import ToolContext, obj, tool
+from .repo_map import directory_summary, extract_symbols, selected_files, symbol_range
 
 MAX_READ_CHARS = 60_000
 MAX_LIST_FILES = 1500
@@ -59,6 +60,42 @@ async def list_files(ctx, a):
     return res
 
 
+@tool("repo_map",
+      "Компактная карта репозитория: основные каталоги, важные исходники и сигнатуры классов/функций. Начинайте с неё "
+      "знакомство с кодом; затем используйте read_symbol или read_file с диапазоном строк вместо чтения всех файлов.",
+      obj({"provider": PROVIDER, "repo": REPO,
+           "ref": {"type": "string"}, "path": {"type": "string", "description": "Подпапка (необязательно)"},
+           "query": {"type": "string", "description": "Приоритет файлам, чей путь содержит эту строку"},
+           "max_files": {"type": "integer", "minimum": 1, "maximum": 40, "default": 24}}, ["provider", "repo"]),
+      group="git", title="Карта репозитория")
+async def repo_map(ctx, a):
+    provider = _provider(ctx, a["provider"])
+    listed = await provider.list_files(a["repo"], a.get("ref"), a.get("path"))
+    files = listed.get("files") or []
+    selected = selected_files(files, a.get("query") or "", a.get("max_files", 24))
+    semaphore = asyncio.Semaphore(6)
+
+    async def inspect(path):
+        async with semaphore:
+            try:
+                raw = await provider.read_file(a["repo"], path, listed.get("ref"))
+                if len(raw) > 300_000:
+                    return {"path": path, "symbols": [], "note": "файл больше 300 КБ — используйте search_code/read_file"}
+                text = raw.decode("utf-8")
+                return {"path": path, "symbols": extract_symbols(path, text, 12)}
+            except Exception as error:
+                return {"path": path, "symbols": [], "error": str(error)[:160]}
+
+    inspected = await asyncio.gather(*(inspect(path) for path in selected))
+    remaining = 300
+    for item in inspected:
+        item["symbols"] = item["symbols"][:remaining]
+        remaining -= len(item["symbols"])
+    return {"ref": listed.get("ref"), "total_files": len(files), "directories": directory_summary(files),
+            "files": inspected, "files_truncated": listed.get("truncated", False) or len(files) > MAX_LIST_FILES,
+            "hint": "Нужную функцию/класс читайте через read_symbol; остальной контекст — read_file со start_line/end_line"}
+
+
 @tool("read_file", "Прочитать файл из репозитория. Для больших файлов используйте start_line/end_line.",
       obj({"provider": PROVIDER, "repo": REPO, "path": {"type": "string"},
            "ref": {"type": "string"},
@@ -83,6 +120,25 @@ async def read_file(ctx, a):
         out["truncated"] = True
         out["hint"] = "Файл обрезан — дочитайте через start_line/end_line"
     return out
+
+
+@tool("read_symbol",
+      "Прочитать конкретную функцию, класс или тип по имени из repo_map/search_code. Возвращает только его диапазон строк.",
+      obj({"provider": PROVIDER, "repo": REPO, "path": {"type": "string"}, "symbol": {"type": "string"},
+           "ref": {"type": "string"}, "max_lines": {"type": "integer", "minimum": 20, "maximum": 300, "default": 240}},
+          ["provider", "repo", "path", "symbol"]),
+      group="git", title="Чтение символа")
+async def read_symbol(ctx, a):
+    raw = await _provider(ctx, a["provider"]).read_file(a["repo"], a["path"], a.get("ref"))
+    if len(raw) > 2_000_000:
+        raise ProviderError("файл больше 2 МБ — используйте search_code и read_file с диапазоном")
+    try:
+        text = raw.decode("utf-8")
+        _, result = symbol_range(a["path"], text, a["symbol"], a.get("max_lines", 240))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ProviderError(str(error) if str(error) else "файл не является UTF-8 текстом")
+    result.update({"path": a["path"], "total_lines": len(text.splitlines()), "version": kb_watch.version_of(raw)})
+    return result
 
 
 @tool("search_code",

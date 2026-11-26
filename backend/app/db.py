@@ -381,6 +381,50 @@ SCHEMA = [
     """
     ALTER TABLE conversations ADD COLUMN eng_project_id TEXT NOT NULL DEFAULT '';
     """,
+    # v29: durable agent runs — границы шагов, события и результаты инструментов переживают перезапуск
+    """
+    CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL,
+        requested_model TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        payer_id TEXT,
+        agent_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        total_cost_usd REAL NOT NULL DEFAULT 0,
+        tool_call_count INTEGER NOT NULL DEFAULT 0,
+        fallback_models TEXT NOT NULL DEFAULT '[]',
+        scenario TEXT,
+        state TEXT NOT NULL DEFAULT '{}',
+        started_at REAL NOT NULL,
+        finished_at REAL,
+        updated_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_conv ON agent_runs(conversation_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+    CREATE TABLE IF NOT EXISTS agent_run_events (
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        event TEXT NOT NULL,
+        PRIMARY KEY (run_id, seq)
+    );
+    CREATE TABLE IF NOT EXISTS agent_run_tools (
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        call_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        args TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT,
+        updated_at REAL NOT NULL,
+        PRIMARY KEY (run_id, call_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_tools_status ON agent_run_tools(status);
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -509,6 +553,95 @@ class Database:
             "AND NOT EXISTS (SELECT 1 FROM messages n WHERE n.conversation_id=m.conversation_id AND n.role='note' "
             " AND n.id>m.id)", (since,))
         return [r["cid"] for r in rows if self._open_turn(r)]
+
+    # --- durable agent runs ---
+    @staticmethod
+    def _run_record(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        row = dict(row)
+        row["fallback_models"] = json.loads(row.get("fallback_models") or "[]")
+        row["scenario"] = json.loads(row["scenario"]) if row.get("scenario") else None
+        row["state"] = json.loads(row.get("state") or "{}")
+        return row
+
+    async def save_run(self, run) -> None:
+        now = time.time()
+        values = (run.id, run.conversation_id, run.project_id, run.model, getattr(run, "requested_model", ""),
+                  run.user.get("id", ""), run.payer_id, (run.agent or {}).get("id", ""), run.status, run.step,
+                  run.total_tokens, run.total_cost_usd, run.tool_call_count,
+                  json.dumps(run.fallback_models, ensure_ascii=False),
+                  json.dumps(run.scenario, ensure_ascii=False) if run.scenario else None,
+                  json.dumps(run.state, ensure_ascii=False, default=str), run.started_at, run.finished_at, now)
+        await self._exec(
+            "INSERT INTO agent_runs (id,conversation_id,project_id,model,requested_model,user_id,payer_id,agent_id,status,step,"
+            "total_tokens,total_cost_usd,tool_call_count,fallback_models,scenario,state,started_at,finished_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "model=excluded.model,requested_model=excluded.requested_model,payer_id=excluded.payer_id,agent_id=excluded.agent_id,"
+            "status=excluded.status,step=excluded.step,total_tokens=excluded.total_tokens,total_cost_usd=excluded.total_cost_usd,"
+            "tool_call_count=excluded.tool_call_count,fallback_models=excluded.fallback_models,scenario=excluded.scenario,"
+            "state=excluded.state,finished_at=excluded.finished_at,updated_at=excluded.updated_at", values)
+
+    async def get_run(self, rid: str) -> dict | None:
+        return self._run_record(await self._one("SELECT * FROM agent_runs WHERE id=?", (rid,)))
+
+    async def latest_run(self, cid: str, resumable: bool = False) -> dict | None:
+        status = " AND status IN ('interrupted','paused','error') AND model<>'terminal'" if resumable else ""
+        return self._run_record(await self._one(
+            f"SELECT * FROM agent_runs WHERE conversation_id=?{status} ORDER BY updated_at DESC LIMIT 1", (cid,)))
+
+    async def list_runs(self, limit: int = 200) -> list[dict]:
+        rows = await self._all("SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT ?", (limit,))
+        return [self._run_record(row) for row in rows]
+
+    async def add_run_event(self, run_id: str, event: dict) -> None:
+        await self._exec("INSERT OR REPLACE INTO agent_run_events (run_id,seq,event) VALUES (?,?,?)",
+                         (run_id, event["seq"], json.dumps(event, ensure_ascii=False, default=str)))
+
+    async def run_events(self, rid: str) -> list[dict]:
+        rows = await self._all("SELECT event FROM agent_run_events WHERE run_id=? ORDER BY seq", (rid,))
+        return [json.loads(row["event"]) for row in rows]
+
+    async def save_run_tool(self, run_id: str, call_id: str, name: str, args: dict, risk: str,
+                            status: str, result: str | None = None) -> None:
+        await self._exec(
+            "INSERT INTO agent_run_tools (run_id,call_id,name,args,risk,status,result,updated_at) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(run_id,call_id) DO UPDATE SET name=excluded.name,args=excluded.args,risk=excluded.risk,"
+            "status=excluded.status,result=excluded.result,updated_at=excluded.updated_at",
+            (run_id, call_id, name, json.dumps(args, ensure_ascii=False), risk, status, result, time.time()))
+
+    @staticmethod
+    def _tool_record(row: dict | None) -> dict | None:
+        if row:
+            row = dict(row)
+            row["args"] = json.loads(row["args"])
+        return row
+
+    async def run_tool(self, rid: str, call_id: str) -> dict | None:
+        return self._tool_record(await self._one("SELECT * FROM agent_run_tools WHERE run_id=? AND call_id=?", (rid, call_id)))
+
+    async def run_tools(self, rid: str) -> list[dict]:
+        return [self._tool_record(row) for row in await self._all("SELECT * FROM agent_run_tools WHERE run_id=?", (rid,))]
+
+    async def uncertain_tools(self, cid: str) -> list[dict]:
+        rows = await self._all(
+            "SELECT t.* FROM agent_run_tools t JOIN agent_runs r ON r.id=t.run_id "
+            "LEFT JOIN conversations c ON c.id=r.conversation_id "
+            "WHERE (r.conversation_id=? OR c.parent_id=?) AND t.status='running' AND t.risk IN ('write','dangerous')",
+            (cid, cid))
+        return [self._tool_record(row) for row in rows]
+
+    async def interrupt_runs(self) -> list[dict]:
+        rows = await self._all("SELECT * FROM agent_runs WHERE status='running'")
+        now = time.time()
+        for row in rows:
+            await self._exec("UPDATE agent_runs SET status='interrupted',finished_at=?,updated_at=? WHERE id=? AND status='running'",
+                             (now, now, row["id"]))
+            count = await self._one("SELECT COALESCE(MAX(seq)+1,0) AS seq FROM agent_run_events WHERE run_id=?", (row["id"],))
+            event = {"seq": count["seq"], "type": "interrupted", "ts": now,
+                     "message": "Сервер перезапустился. Продолжите с сохранённого шага."}
+            await self.add_run_event(row["id"], event)
+        return [self._run_record(row) for row in rows]
 
     # --- messages ---
     async def add_message(

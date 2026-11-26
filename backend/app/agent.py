@@ -32,7 +32,7 @@ SYSTEM_PROMPT = """Ты — Fugu Deck, ИИ-ассистент разработ�
 Подключено: {providers}
 
 Правила работы:
-- Прежде чем менять существующий код, посмотри структуру репозитория (list_files) и прочитай нужные файлы.
+- Прежде чем менять существующий код, получи repo_map и читай конкретные символы через read_symbol или нужные строки через read_file. Не выгружай целый репозиторий.
 - В существующих репозиториях по умолчанию работай в новой ветке (commit_files с base_branch) и открывай Pull/Merge Request.
   Коммить прямо в основную ветку, только если пользователь просит об этом или репозиторий только что создан.
 - Группируй связанные изменения в один коммит. В content передавай полный текст файла, а не фрагмент.
@@ -113,6 +113,7 @@ class Run:
     id: str
     conversation_id: str
     model: str
+    requested_model: str = ""
     project_id: str = ""
     user: dict = field(default_factory=dict)
     # копия ключей автора запуска (только в памяти; стирается по окончании)
@@ -131,6 +132,9 @@ class Run:
     mcp_tools: dict = field(default_factory=dict, repr=False)  # инструменты MCP-серверов владельца на этот запуск
     fallback_models: list[str] = field(default_factory=list)
     scenario: dict | None = None
+    state: dict = field(default_factory=dict)
+    step: int = 0
+    steps_at_resume: int = 0
     total_tokens: int = 0
     total_cost_usd: float = 0.0
     tool_call_count: int = 0
@@ -138,17 +142,22 @@ class Run:
     events: list[dict] = field(default_factory=list)
     status: str = "running"
     started_at: float = field(default_factory=time.time)
+    resumed_at: float | None = None
     finished_at: float | None = None
     task: asyncio.Task | None = None
     approvals: dict[str, asyncio.Future] = field(default_factory=dict)
     approval_sigs: dict[str, str] = field(default_factory=dict)  # подпись человека для исполнителя (ssh-gateway)
     approval_meta: dict[str, dict] = field(default_factory=dict)  # что именно подтверждают: для проверки подписи с телефона
     cond: asyncio.Condition = field(default_factory=asyncio.Condition)
+    on_event: Any = field(default=None, repr=False)
 
     async def emit(self, type_: str, **data: Any) -> None:
+        event = {"seq": len(self.events), "type": type_, "ts": time.time(), **data}
         async with self.cond:
-            self.events.append({"seq": len(self.events), "type": type_, "ts": time.time(), **data})
+            self.events.append(event)
             self.cond.notify_all()
+        if self.on_event:
+            await self.on_event(self, event)
 
     async def wait_events(self, after: int, timeout: float = 15.0) -> list[dict]:
         async with self.cond:
@@ -175,6 +184,76 @@ class Agent:
     def active_run(self, cid: str) -> Run | None:
         rid = self.active.get(cid)
         return self.runs.get(rid) if rid else None
+
+    async def _persist_event(self, run: Run, event: dict) -> None:
+        await self.db.add_run_event(run.id, event)
+
+    async def get_run(self, rid: str) -> Run | None:
+        if rid in self.runs:
+            return self.runs[rid]
+        record = await self.db.get_run(rid)
+        if not record:
+            return None
+        run = Run(id=record["id"], conversation_id=record["conversation_id"], model=record["model"],
+                  requested_model=record["requested_model"], project_id=record["project_id"],
+                  user={"id": record["user_id"]}, payer_id=record["payer_id"],
+                  fallback_models=record["fallback_models"], scenario=record["scenario"], state=record["state"],
+                  step=record["step"], total_tokens=record["total_tokens"], total_cost_usd=record["total_cost_usd"],
+                  tool_call_count=record["tool_call_count"], status=record["status"], started_at=record["started_at"],
+                  finished_at=record["finished_at"], on_event=self._persist_event)
+        run.agent = await self.db.get_agent(record["agent_id"]) if record["agent_id"] else None
+        run.repairs = dict(run.state.get("repairs") or {})
+        run.events = await self.db.run_events(rid)
+        self.runs[rid] = run
+        return run
+
+    async def list_runs(self) -> list[Run]:
+        records = await self.db.list_runs()
+        for record in records:
+            if record["id"] not in self.runs:
+                await self.get_run(record["id"])
+        return sorted(self.runs.values(), key=lambda run: run.started_at, reverse=True)
+
+    async def resume(self, rid: str, user: dict, keys: dict | None = None, llm_key: str | None = None,
+                     budget=None, payer_id: str | None = None, agent_override: dict | None = None) -> Run:
+        self._gc()
+        run = await self.get_run(rid)
+        if not run:
+            raise RuntimeError("Запуск не найден")
+        if (active := self.active_run(run.conversation_id)) and active.status == "running":
+            raise RuntimeError("В этом чате уже идёт выполнение")
+        if run.status not in ("interrupted", "paused", "error"):
+            raise RuntimeError("Этот запуск уже завершён или отменён")
+        if run.model == "terminal":
+            raise RuntimeError("Ручной терминал не возобновляется автоматически")
+        if not await self.db.unanswered(run.conversation_id):
+            raise RuntimeError("На последнее сообщение агент уже ответил")
+        if await self.db.uncertain_tools(run.conversation_id):
+            raise RuntimeError("Сервер остановился во время изменяющего действия. Проверьте результат отдельно: "
+                               "автоматически повторять его небезопасно")
+        run.keys = dict(keys or {})
+        run.git = self._git_for(run.keys, run.conversation_id, user.get("id", ""))
+        run.llm_key = llm_key
+        run.budget = budget
+        run.payer_id = payer_id or run.payer_id or user.get("id")
+        run.user = user
+        run.agent = agent_override or run.agent
+        run.status = "running"
+        run.finished_at = None
+        run.resumed_at = time.time()
+        run.steps_at_resume = run.step
+        run.task = None
+        run.approvals.clear()
+        run.approval_sigs.clear()
+        run.approval_meta.clear()
+        run.children.clear()
+        run.on_event = self._persist_event
+        self.active[run.conversation_id] = run.id
+        await self.db.save_run(run)
+        await run.emit("resumed", step=run.step, total_tokens=run.total_tokens, total_cost_usd=run.total_cost_usd)
+        run.task = asyncio.create_task(self._run(run))
+        await self._publish("run.started", run, resumed=True)
+        return run
 
     def llm_key(self, provider: str, keys: dict) -> str | None:
         if kgc.enabled():  # кластер v2: вместо ключа — токен пространства, ключ подставит keyguard
@@ -224,17 +303,21 @@ class Agent:
     async def start(self, cid: str, model: str, user: dict | None = None, project_id: str = "",
                     keys: dict | None = None, llm_key: str | None = None, budget=None,
                     payer_id: str | None = None, fallback_models: list[str] | None = None,
-                    scenario: dict | None = None, agent_override: dict | None = None) -> Run:
+                    scenario: dict | None = None, agent_override: dict | None = None,
+                    requested_model: str = "", route: dict | None = None) -> Run:
         if (r := self.active_run(cid)) and r.status == "running":
             raise RuntimeError("В этом чате уже идёт выполнение")
         self._gc()
         keys = dict(keys or {})
-        run = Run(id=new_id(), conversation_id=cid, model=model, project_id=project_id, user=user or {},
-                  keys=keys, git=self._git_for(keys, cid, (user or {}).get("id", "")), llm_key=llm_key, budget=budget,
+        run = Run(id=new_id(), conversation_id=cid, model=model, requested_model=requested_model or model,
+                  project_id=project_id, user=user or {}, keys=keys,
+                  git=self._git_for(keys, cid, (user or {}).get("id", "")), llm_key=llm_key, budget=budget,
                   payer_id=payer_id or (user or {}).get("id"), fallback_models=list(fallback_models or []),
-                  scenario=scenario, agent=agent_override)
+                  scenario=scenario, agent=agent_override, state={"route": route} if route else {},
+                  on_event=self._persist_event)
         self.runs[run.id] = run
         self.active[cid] = run.id
+        await self.db.save_run(run)
         run.task = asyncio.create_task(self._run(run))
         await self._publish("run.started", run)
         return run
@@ -628,6 +711,8 @@ class Agent:
             if kind == "cont":
                 scid, aid, model = key, obj.get("agent_id") or DEFAULT_AGENT, obj.get("model") or run.model
                 run.repairs[scid] = run.repairs.get(scid, 0) + 1
+                run.state["repairs"] = dict(run.repairs)
+                await self.db.save_run(run)
             else:
                 aid, model = key, obj.get("model") or run.model
                 title = (task[:57] + "…") if len(task) > 58 else task
@@ -700,7 +785,7 @@ class Agent:
         return base
 
     def budget_problem(self, run: Run) -> str | None:
-        if self.settings.agent_max_run_seconds > 0 and time.time() - run.started_at >= self.settings.agent_max_run_seconds:
+        if self.settings.agent_max_run_seconds > 0 and time.time() - (run.resumed_at or run.started_at) >= self.settings.agent_max_run_seconds:
             return f"Достигнут лимит времени запуска ({self.settings.agent_max_run_seconds} с) — напишите «продолжай»."
         if self.settings.agent_max_total_tokens > 0 and run.total_tokens >= self.settings.agent_max_total_tokens:
             return f"Достигнут лимит токенов запуска ({run.total_tokens}) — напишите «продолжай»."
@@ -723,6 +808,7 @@ class Agent:
             cost = ((p - cached - cw) * pin + cached * pcache + cw * pwrite + c * pout) / 1_000_000
         run.total_tokens += p + c
         run.total_cost_usd += cost
+        await self.db.save_run(run)
         await self.db.add_usage(run.conversation_id, run.model, p, c, cached, cost,
                                 run.user.get("id"), run.payer_id)
         await run.emit("usage", prompt_tokens=p, completion_tokens=c, cached_tokens=cached, cost_usd=cost,
@@ -744,12 +830,20 @@ class Agent:
         if not tool or tool not in self.tools_for(run):
             # модель могла вызвать инструмент, которого ей в этом режиме не давали (например, Git в «Общении»)
             return json.dumps({"error": f"Инструмент {name} здесь недоступен"}, ensure_ascii=False)
+        previous = await self.db.run_tool(run.id, call["id"])
+        if previous and (previous["name"] != name or previous["args"] != args):
+            return json.dumps({"error": "ID вызова уже использован для другого инструмента или аргументов"}, ensure_ascii=False)
+        if previous and previous["status"] == "done" and previous["result"] is not None:
+            return previous["result"]
+        if previous and previous["status"] == "running" and previous["risk"] != "read":
+            raise RuntimeError("Изменяющее действие уже начиналось — сначала проверьте его результат")
         if why := self.budget_problem(run):
             return json.dumps({"error": why}, ensure_ascii=False)
-        run.tool_call_count += 1
 
         ctx.ssh_need, ctx.approval_jws, ctx.ssh_preview = "", "", None
         risk = await tool.risk(ctx, args)
+        if not previous:
+            run.tool_call_count += 1
         approved: bool | None = None
         # Сначала правило конкретного действия, затем общая настройка агента и режим сервера.
         mode, signed = approval_mode(run.agent, self.policy.mode, name)
@@ -757,7 +851,10 @@ class Agent:
         # Команду на сервере исполняет ssh-gateway, и подпись человека нужна ему, а не нам: настройка «не спрашивать
         # подтверждений» на неё не действует. sign — действие, которое телефон подпишет вместо обычного разрешения.
         sign = ssh_tools.sign_request(ctx, args) if name == "ssh_exec" else None
-        if policy.needs_approval(risk) or sign or tool.always_confirm:
+        waiting = policy.needs_approval(risk) or sign or tool.always_confirm
+        await self.db.save_run(run)
+        await self.db.save_run_tool(run.id, call["id"], name, args, risk, "waiting_approval" if waiting else "pending")
+        if waiting:
             aid = new_id()
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
             run.approvals[aid] = fut
@@ -785,33 +882,41 @@ class Agent:
                 msg = "Пользователь отклонил это действие."
                 if comment:
                     msg += f" Комментарий: {comment}"
-                return json.dumps({"error": msg}, ensure_ascii=False)
+                out = json.dumps({"error": msg}, ensure_ascii=False)
+                await self.db.save_run_tool(run.id, call["id"], name, args, risk, "done", out)
+                return out
 
+        await self.db.save_run_tool(run.id, call["id"], name, args, risk, "running")
         await run.emit("tool_start", call_id=call["id"], name=name, title=tool.title, args=args, risk=risk)
         try:
             data = await tool.handler(ctx, args)
             out = json.dumps(data, ensure_ascii=False, default=str)
+            await self.db.save_run_tool(run.id, call["id"], name, args, risk, "done", out)
             await run.emit("tool_end", call_id=call["id"], name=name, ok=True, result=_preview(data))
             await self.db.audit(run.conversation_id, name, args, approved, True, out[:500])
             return out
         except Exception as e:  # ошибку отдаём модели, чтобы она могла поправиться
             err = str(e) or e.__class__.__name__
+            out = json.dumps({"error": err}, ensure_ascii=False)
+            await self.db.save_run_tool(run.id, call["id"], name, args, risk, "done", out)
             await run.emit("tool_end", call_id=call["id"], name=name, ok=False, error=err)
             await self.db.audit(run.conversation_id, name, args, approved, False, err)
-            return json.dumps({"error": err}, ensure_ascii=False)
+            return out
 
     # ------------------------------------------------------------ ручная SSH-команда Windows Workspace
     async def start_terminal(self, cid: str, user: dict, server: str, command: str,
                              why: str = "", preview: str = "") -> Run:
         conv = await self.db.get_conversation(cid) or {}
         keys: dict = {}  # ключи моделей не нужны ручному SSH-запуску
-        run = Run(id=new_id(), conversation_id=cid, model="terminal", project_id=conv.get("project_id") or "",
-                  user=user, keys=keys, git=self._git_for(keys, cid, user.get("id", "")),
-                  agent=await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT))
+        run = Run(id=new_id(), conversation_id=cid, model="terminal", requested_model="terminal",
+                  project_id=conv.get("project_id") or "", user=user, keys=keys,
+                  git=self._git_for(keys, cid, user.get("id", "")),
+                  agent=await self.db.get_agent(conv.get("agent_id") or DEFAULT_AGENT), on_event=self._persist_event)
         args = {"server": server, "command": command, "why": why}
         if preview:
             args["preview"] = preview
         self.runs[run.id] = run
+        await self.db.save_run(run)
         run.task = asyncio.create_task(self._run_terminal(run, args))
         await self._publish("run.started", run)
         return run
@@ -836,6 +941,7 @@ class Agent:
             await run.emit("error", message=f"{e.__class__.__name__}: {e}")
         finally:
             run.finished_at = time.time()
+            await self.db.save_run(run)
             run.keys.clear()
             for git in run.git.values():
                 if git not in self.providers.values():
@@ -877,15 +983,24 @@ class Agent:
         rows = await self.db.get_messages(run.conversation_id)
         original = next((m.get("content") or "" for m in reversed(rows) if m["role"] == "user"), "")
         models = run.scenario or {}
-        worker = await self._scenario_step(run, "work", models["worker"], original)
+        results = run.state.setdefault("scenario_results", {})
+
+        async def stage_result(stage: str, task: str) -> str:
+            if stage not in results:
+                role = {"work": "worker", "review": "review", "summary": "summary"}[stage]
+                results[stage] = await self._scenario_step(run, stage, models[role], task)
+                await self.db.save_run(run)
+            return results[stage]
+
+        worker = await stage_result("work", original)
         review_task = ("Независимо проверь результат другого ИИ. Ничего не изменяй и не вызывай инструменты. "
                        "Укажи конкретные ошибки, пробелы и риски; если всё хорошо, скажи почему.\n\n"
                        f"Исходная задача:\n{original}\n\nРезультат исполнителя:\n{worker}")
-        review = await self._scenario_step(run, "review", models["review"], review_task)
+        review = await stage_result("review", review_task)
         summary_task = ("Сделай краткую сводку работы по-русски: результат, важные замечания ревью и следующий шаг. "
                         "Ничего не изменяй и не вызывай инструменты.\n\n"
                         f"Результат:\n{worker}\n\nРевью:\n{review}")
-        summary = await self._scenario_step(run, "summary", models["summary"], summary_task)
+        summary = await stage_result("summary", summary_task)
         content = f"{worker}\n\n## Независимое ревью\n{review}\n\n## Сводка\n{summary}"
         meta = {"model": "multi:code-review-summary", "scenario": "code-review-summary",
                 "models": [models["worker"], models["review"], models["summary"]]}
@@ -893,12 +1008,22 @@ class Agent:
         await run.emit("text", delta=content)
         await run.emit("message_saved", has_tools=False)
 
+    async def _execute_calls(self, run: Run, calls: list[dict]) -> None:
+        rows = await self.db.get_messages(run.conversation_id)
+        answered = {row["tool_call_id"] for row in rows if row["role"] == "tool"}
+        for group in _tool_groups(run, calls):
+            pending = [call for call in group if call["id"] not in answered]
+            results = await asyncio.gather(*(self._exec_tool(run, call) for call in pending))
+            for call, result in zip(pending, results):
+                await self.db.add_message(run.conversation_id, "tool", result, tool_call_id=call["id"],
+                                          name=call["function"]["name"])
+
     # ------------------------------------------------------------ основной цикл
     async def _run(self, run: Run) -> None:
         cid = run.conversation_id
         partial = ""
         try:
-            await run.emit("start", model=run.model)
+            await run.emit("start", model=run.model, requested_model=run.requested_model, route=run.state.get("route"))
             conv = await self.db.get_conversation(cid) or {}
             if run.scenario:
                 await self._run_scenario(run)
@@ -914,11 +1039,19 @@ class Agent:
             # MCP — только в личных пространствах с keyguard и если агенту дан доступ «mcp»
             if run.project_id != TALK_PROJECT and mcp_client.enabled() and self.settings.space_kind != "team" and "mcp" in agent_tools:
                 run.mcp_tools = await mcp_client.tools()
-            for step in range(self.settings.max_agent_steps):
+            rows = await self.db.get_messages(cid)
+            last = next((row for row in reversed(rows) if row["role"] != "note"), None)
+            if last and last["role"] == "assistant" and last["tool_calls"]:
+                await self._execute_calls(run, last["tool_calls"])
+            paused = False
+            needs_more = False
+            while run.step - run.steps_at_resume < self.settings.max_agent_steps:
                 if why := self.budget_problem(run):
+                    paused = True
                     await run.emit("notice", text=why)
                     break
                 if run.budget and (why := await run.budget()):
+                    paused = True
                     await run.emit("notice", text=why)
                     break
                 try:  # свёртка истории — лучшее усилие, сбой не должен рвать запуск
@@ -927,7 +1060,7 @@ class Agent:
                     log.warning("event=compact.error chat=%s", cid, exc_info=True)
                 messages = await self._build_messages(cid, await self.context(cid, run.user, run),
                                                       split_model(run.model)[0])
-                await run.emit("thinking", step=step)
+                await run.emit("thinking", step=run.step)
                 partial = ""
                 res = await self._stream(run, messages)
                 text, tool_calls = res.text, res.tool_calls
@@ -936,22 +1069,25 @@ class Agent:
                 meta: dict = {"model": run.model}
                 if run.user.get("display_name"):
                     meta["launched_by"] = run.user["display_name"]
+                if run.state.get("route"):
+                    meta["requested_model"] = run.requested_model
+                    meta["route"] = run.state["route"]
                 if res.provider_blocks:
                     meta["provider_blocks"] = res.provider_blocks
                 await self.db.add_message(cid, "assistant", text, tool_calls=tool_calls or None, meta=meta)
+                run.step += 1
+                await self.db.save_run(run)
                 partial = ""
                 await run.emit("message_saved", has_tools=bool(tool_calls))
                 if not tool_calls:
                     break
-                for group in _tool_groups(run, tool_calls):
-                    results = await asyncio.gather(*(self._exec_tool(run, call) for call in group))
-                    for call, result in zip(group, results):
-                        await self.db.add_message(cid, "tool", result, tool_call_id=call["id"],
-                                                  name=call["function"]["name"])
-            else:
+                needs_more = True
+                await self._execute_calls(run, tool_calls)
+            if needs_more and run.step - run.steps_at_resume >= self.settings.max_agent_steps and not paused:
+                paused = True
                 await run.emit("notice", text="Достигнут лимит шагов агента — напишите «продолжай».")
-            run.status = "done"
-            await run.emit("done")
+            run.status = "paused" if paused else "done"
+            await run.emit("done", paused=paused)
         except asyncio.CancelledError:
             run.status = "cancelled"
             if partial:
@@ -968,6 +1104,7 @@ class Agent:
             await run.emit("error", message=f"{e.__class__.__name__}: {e}")
         finally:
             run.finished_at = time.time()
+            await self.db.save_run(run)
             if run.status in ("done", "error"):  # отменённое человеком уведомлять незачем
                 outbox.add(run.user.get("id"), "done" if run.status == "done" else "error", cid, run.project_id)
             # стираем копию ключей и закрываем git-клиенты этого запуска

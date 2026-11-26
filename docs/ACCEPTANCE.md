@@ -8,7 +8,9 @@
 
 | Область | Проверено | Результат |
 | --- | --- | --- |
-| Backend | 120 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
+| Backend | 129 passed, 1 skipped в main со schema v29, durable resume, router, repo map и evals: `cd backend && python -m pytest -q` | PASS |
+| Harness offline | Router 4/4; synthetic 20 files: map reduction 76,45%, одна функция 83 символа против 113580 исходных; live модели не запускались | PASS только offline |
+| Harness production | Опубликованный Space 0.20.0, migration v29, реальный auto chat и resume после перезапуска | PENDING |
 | Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
 | Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681966701) |
 | Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main, включая Authenticode configuration, NotSigned и чужого издателя: `cd desktop/windows && npm test` | PASS для unit/main |

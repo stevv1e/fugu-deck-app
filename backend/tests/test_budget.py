@@ -8,7 +8,7 @@ from app.llm import Usage
 
 
 def engine(settings: Settings) -> Agent:
-    db = SimpleNamespace(add_usage=AsyncMock(), sponsor_threshold=AsyncMock(return_value=None))
+    db = SimpleNamespace(add_usage=AsyncMock(), save_run=AsyncMock(), sponsor_threshold=AsyncMock(return_value=None))
     return Agent(db, settings, {})
 
 

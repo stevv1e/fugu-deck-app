@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "short-exact",
+      "category": "simple",
+      "project_id": "talk",
+      "prompt": "Ответь ровно одним словом: готово",
+      "expect": ["готово"],
+      "live": true
+    },
+    {
+      "id": "python-function",
+      "category": "code",
+      "project_id": "general",
+      "prompt": "Напиши на Python функцию add(a, b), которая возвращает их сумму. Только код.",
+      "expect": ["def add", "return"],
+      "live": true
+    },
+    {
+      "id": "security-review",
+      "category": "complex",
+      "project_id": "general",
+      "prompt": "Проведи краткий security audit хранения паролей открытым текстом. Назови два риска; ответ должен содержать слово «риск».",
+      "expect": ["риск"],
+      "live": true
+    },
+    {
+      "id": "audio-route",
+      "category": "media",
+      "project_id": "general",
+      "prompt": "Транскрибируй приложенную запись",
+      "attachments": [{"mime": "audio/ogg"}],
+      "expect": [],
+      "live": false
+    }
+  ]
+}

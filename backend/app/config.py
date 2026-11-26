@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     sakana_base_url: str = "https://api.sakana.ai/v1"
     # провайдер:модель через запятую; первая — по умолчанию. Каталог — llm/catalog.py.
     models: str = ",".join(DEFAULT_MODELS)
+    # Opt-in auto:auto: {"simple":"…","code":"…","complex":"…","media":"…","default":"…"}
+    model_router_json: str = "{}"
     # Метаданные пользовательских endpoint без API-ключей; заполняет ModelCatalog.
     custom_llm_json: str = "{}"
     # Цена за 1M токенов: {"модель": [input, output, cached_input, cache_write]}
@@ -151,6 +153,14 @@ class Settings(BaseSettings):
             if m:
                 out.append(m if ":" in m else f"sakana:{m}")
         return out
+
+    @property
+    def model_router(self) -> dict:
+        try:
+            value = json.loads(self.model_router_json)
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return {}
 
     @property
     def custom_llm(self) -> dict[str, dict]:

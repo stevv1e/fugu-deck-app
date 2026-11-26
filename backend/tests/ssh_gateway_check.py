@@ -95,8 +95,12 @@ with TestClient(main.app) as c:
     run = loop.run_until_complete(make_run())
     events = run.events
 
+    call_number = 0
+
     def call(command: str, server: str = "prod-1"):
-        return {"id": "call1", "function": {"name": "ssh_exec", "arguments": json.dumps({"server": server, "command": command})}}
+        global call_number
+        call_number += 1
+        return {"id": f"call{call_number}", "function": {"name": "ssh_exec", "arguments": json.dumps({"server": server, "command": command})}}
 
     async def do(command: str, decide=None, server: str = "prod-1"):
         events.clear()

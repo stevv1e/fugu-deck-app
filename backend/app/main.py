@@ -29,6 +29,7 @@ from .keyvault import KeyVault
 from .outbox import outbox
 from .llm import get_provider, split_model
 from .model_catalog import CatalogError, ModelCatalog
+from .model_router import AUTO_MODEL, route_model
 from .media import MediaWorker
 from .skills import SkillError, SkillStore
 from .tools import ssh_tools
@@ -449,6 +450,13 @@ async def config(u: dict = Me):
                         if agent().llm_key(split_model(m)[0], vault().get(u["id"]))})
     if kgc.enabled() and not is_team() and (mine := await kgc.my_llm_providers()) is not None:
         llm_ready = [p for p in llm_ready if p in mine]  # ключи владельца — в keyguard, не здесь
+    models = catalog().models
+    provider_titles = catalog().provider_titles
+    router_enabled = bool(settings.model_router) and not is_team()
+    if router_enabled:
+        models = [AUTO_MODEL, *models]
+        llm_ready = sorted({*llm_ready, "auto"})
+        provider_titles["auto"] = "Автоматический выбор"
     return {
         "mode": settings.deck_mode,
         "space": {"id": settings.space_id, "kind": settings.space_kind, "name": settings.space_name}
@@ -456,8 +464,9 @@ async def config(u: dict = Me):
         "keys": keys,
         "llm_ready": llm_ready,
         "me": public_user(u),
-        "models": catalog().models,
-        "provider_titles": catalog().provider_titles,
+        "models": models,
+        "provider_titles": provider_titles,
+        "model_router": router_enabled,
         "custom_endpoints": catalog().endpoints(),
         "default_model": catalog().models[0] if catalog().models else "",
         "pricing": settings.pricing,
@@ -735,7 +744,7 @@ async def workspace_ci(provider: str, repo: str, ref: str = "", u: dict = Me):
 @app.get("/api/workspace/runs")
 async def workspace_runs(u: dict = Me):
     out = []
-    for run in sorted(agent().runs.values(), key=lambda r: r.started_at, reverse=True):
+    for run in await agent().list_runs():
         try:
             await need(u, run.project_id)
         except HTTPException:
@@ -1214,6 +1223,8 @@ class ConvIn(BaseModel):
 
 def _check_model(m: str | None) -> str:
     models = catalog().models
+    if m == AUTO_MODEL and settings.model_router and not is_team():
+        return m
     if m and m not in models:
         raise HTTPException(400, f"Неизвестная модель {m}")
     return m or models[0]
@@ -1591,6 +1602,8 @@ async def _llm_access(c: dict, u: dict, want_model: str | None):
             raise HTTPException(409, why)
         return c["model"], keys, llm_key, budget
     model = _check_model(want_model or c["model"])
+    if model == AUTO_MODEL:
+        raise HTTPException(400, "Для auto:auto сначала примените детерминированный router к тексту запроса")
     if kgc.enabled() and (mine := await kgc.my_llm_providers()) is not None and split_model(model)[0] not in mine:
         kgc.forget_providers()  # ключ могли только что ввести — спросим ещё раз
         if (mine := await kgc.my_llm_providers()) is not None and split_model(model)[0] not in mine:
@@ -1604,7 +1617,22 @@ async def _llm_access(c: dict, u: dict, want_model: str | None):
 @app.post("/api/conversations/{cid}/messages")
 async def send(cid: str, body: MessageIn, u: dict = Me):
     c = await conv_access(u, cid, "editor")
-    model, keys, llm_key, budget = await _llm_access(c, u, body.model)
+    atts = []
+    for aid in body.attachment_ids:
+        a = await db().get_attachment(aid)
+        if not a or a["conversation_id"] != cid:
+            raise HTTPException(400, f"Вложение {aid} не найдено")
+        atts.append({"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": a["size"]})
+    requested = body.model or c["model"]
+    route = None
+    selected = requested
+    if requested == AUTO_MODEL:
+        try:
+            route = route_model(body.content, settings.model_router, c["project_id"], atts, catalog().models)
+            selected = route["model"]
+        except ValueError as error:
+            raise HTTPException(400, str(error))
+    model, keys, llm_key, budget = await _llm_access(c, u, selected)
     if (body.scenario or body.fallback_models) and is_team():
         raise HTTPException(400, "Сценарии и fallback пока доступны только в личных пространствах")
     scenario = None
@@ -1622,12 +1650,6 @@ async def send(cid: str, body: MessageIn, u: dict = Me):
         if selected != model and selected not in fallbacks:
             await _llm_access(c, u, selected)
             fallbacks.append(selected)
-    atts = []
-    for aid in body.attachment_ids:
-        a = await db().get_attachment(aid)
-        if not a or a["conversation_id"] != cid:
-            raise HTTPException(400, f"Вложение {aid} не найдено")
-        atts.append({"id": a["id"], "filename": a["filename"], "mime": a["mime"], "size": a["size"]})
     run = agent().active_run(cid)
     if run and run.status == "running":
         raise HTTPException(409, "В этом чате уже идёт выполнение")
@@ -1637,26 +1659,36 @@ async def send(cid: str, body: MessageIn, u: dict = Me):
     if scenario:
         meta["scenario"] = scenario["kind"]
     await db().add_message(cid, "user", body.content, meta=meta)
-    updates: dict = {} if is_team() else {"model": model}
+    updates: dict = {} if is_team() else {"model": requested}
     if c["title"] == "Новый чат":
         t = body.content.strip().splitlines()[0] if body.content.strip() else (atts[0]["filename"] if atts else "")
         updates["title"] = (t[:60] + "…") if len(t) > 60 else t or "Новый чат"
     await db().update_conversation(cid, **updates)
     run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
                               payer_id=c.get("sponsor_id") if is_team() else u["id"],
-                              fallback_models=fallbacks, scenario=scenario)
-    return {"run_id": run.id}
+                              fallback_models=fallbacks, scenario=scenario, requested_model=requested, route=route)
+    return {"run_id": run.id, "route": route}
 
 
 @app.post("/api/conversations/{cid}/retry")
 async def retry(cid: str, u: dict = Me):
-    """Продолжить прерванное задание (агент перезапускался посреди ответа): та же переписка, без нового сообщения."""
+    """Продолжить durable run с последней сохранённой границы, без нового пользовательского сообщения."""
     c = await conv_access(u, cid, "editor")
     run = agent().active_run(cid)
     if run and run.status == "running":
         raise HTTPException(409, "В этом чате уже идёт выполнение")
     if not await db().unanswered(cid):
         raise HTTPException(409, "Повторять нечего: на последнее сообщение агент уже ответил")
+    record = await db().latest_run(cid, resumable=True)
+    if record:
+        model, keys, llm_key, budget = await _llm_access(c, u, record["model"])
+        try:
+            run = await agent().resume(record["id"], u, keys, llm_key=llm_key, budget=budget,
+                                       payer_id=record.get("payer_id"))
+        except RuntimeError as error:
+            raise HTTPException(409, str(error))
+        await db().add_message(cid, "note", f"{u['display_name']}: продолжение с шага {record['step']}")
+        return {"run_id": run.id, "resumed": True, "step": record["step"]}
     model, keys, llm_key, budget = await _llm_access(c, u, None)
     await db().add_message(cid, "note", f"{u['display_name']}: повтор прерванного задания")
     run = await agent().start(cid, model, u, c["project_id"], keys, llm_key=llm_key, budget=budget,
@@ -1664,25 +1696,24 @@ async def retry(cid: str, u: dict = Me):
     return {"run_id": run.id}
 
 
-INTERRUPTED_NOTE = "Задание прервалось: агент перезапускался, ответа нет. Нажмите «Повторить», чтобы продолжить."
+INTERRUPTED_NOTE = "Задание прервалось: агент перезапускался. Нажмите «Повторить», чтобы продолжить с сохранённого шага."
 
 
 async def mark_interrupted(within: float = 2 * 86400) -> int:
-    """При запуске агента: чаты, где задание оборвалось (последнее — вопрос или вызов инструмента без ответа),
-    получают пометку с кнопкой «Повторить». Задания в памяти, и после перезапуска их не вернуть."""
-    n = 0
-    for cid in await db().unanswered_conversations(time.time() - within):
+    """Активные durable runs переводятся в interrupted; события и checkpoint остаются доступны после перезапуска."""
+    interrupted = {row["conversation_id"] for row in await db().interrupt_runs()}
+    cids = interrupted | set(await db().unanswered_conversations(time.time() - within))
+    for cid in cids:
         await db().add_message(cid, "note", INTERRUPTED_NOTE, meta={"interrupted": True})
-        n += 1
-    if n:
-        log.warning("прерванных заданий после перезапуска: %d", n)
-    return n
+    if cids:
+        log.warning("прерванных заданий после перезапуска: %d", len(cids))
+    return len(cids)
 
 
 async def _run_access(rid: str, u: dict, min_role: str = "viewer"):
-    run = agent().runs.get(rid)
+    run = await agent().get_run(rid)
     if not run:
-        raise HTTPException(404, "Запуск не найден (возможно, сервер перезапускался)")
+        raise HTTPException(404, "Запуск не найден")
     await need(u, run.project_id, min_role)
     return run
 
@@ -2404,21 +2435,30 @@ async def fire_schedule(s: dict) -> str:
     u = dict(u)
     if settings.is_space:
         u["space_role"] = "owner"  # личное пространство: автор задания — его владелец
-    model = s["model"] if s["model"] in settings.model_list else _check_model(None)
+    route = None
+    if s["model"] == AUTO_MODEL:
+        try:
+            route = route_model(s["prompt"], settings.model_router, s["project_id"], available=catalog().models)
+            model = route["model"]
+        except ValueError as error:
+            return f"пропущено: {error}"
+    else:
+        model = s["model"] if s["model"] in settings.model_list else _check_model(None)
     keys = vault().get(u["id"])
     if not agent().llm_key(split_model(model)[0], keys):
         return f"пропущено: нет ключа для {split_model(model)[0]}"
     c = await db().get_conversation(s["conversation_id"]) if s.get("conversation_id") else None
     if not c or c["project_id"] != s["project_id"]:
-        c = await db().create_conversation(model, s["project_id"], u["id"], f"⏰ {s['title']}"[:120])
+        c = await db().create_conversation(s["model"] if route else model, s["project_id"], u["id"], f"⏰ {s['title']}"[:120])
         await db().update_schedule(s["id"], conversation_id=c["id"])
         await broker().publish("conversation", s["project_id"], action="created", conversation_id=c["id"], by=u["display_name"])
     if (r := agent().active_run(c["id"])) and r.status == "running":
         return "пропущено: в чате задания ещё идёт прошлый запуск"
     await db().add_message(c["id"], "user", s["prompt"],
                            meta={"author": f"⏰ {s['title']}", "author_id": u["id"], "schedule": s["id"]})
-    await db().update_conversation(c["id"], model=model)
-    await agent().start(c["id"], model, u, s["project_id"], keys, payer_id=u["id"])
+    await db().update_conversation(c["id"], model=s["model"] if route else model)
+    await agent().start(c["id"], model, u, s["project_id"], keys, payer_id=u["id"],
+                        requested_model=s["model"] if route else model, route=route)
     tz = sched.zone(s.get("tz") or "UTC")
     return "запущено " + datetime.now(tz).strftime("%d.%m %H:%M")
 
