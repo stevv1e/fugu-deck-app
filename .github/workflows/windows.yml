@@ -29,11 +29,21 @@ jobs:
       - name: Сборка NSIS (.exe)
         working-directory: desktop/windows
         shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          DECK_WINDOWS_PUBLISHER: ${{ vars.DECK_WINDOWS_PUBLISHER }}
+          DECK_REQUIRE_AUTHENTICODE: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' }}
         run: |
-          rm -rf dist && cp -r ../../mobile/dist ./dist
+          rm -rf dist release.json && cp -r ../../mobile/dist ./dist
           npm ci
           npm test
-          npx electron-builder --win nsis --x64
+          node configure-signing.js release.json
+          if node -e "process.exit(require('./release.json').windowsPublisher ? 0 : 1)"; then
+            npx electron-builder --win nsis --x64 --config.forceCodeSigning=true
+          else
+            npx electron-builder --win nsis --x64
+          fi
       - name: Имя релизного EXE
         working-directory: desktop/windows
         shell: bash
@@ -41,6 +51,21 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           EXE=$(ls release/*.exe | head -1)
           mv "$EXE" "release/Fugu-Deck-Setup-${VERSION}.exe"
+      - name: Проверка Authenticode релиза
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        working-directory: desktop/windows
+        shell: pwsh
+        env:
+          DECK_WINDOWS_PUBLISHER: ${{ vars.DECK_WINDOWS_PUBLISHER }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $files = @("release/Fugu-Deck-Setup-$version.exe", "release/win-unpacked/Fugu Deck.exe")
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -ne $env:DECK_WINDOWS_PUBLISHER) {
+              throw "Authenticode verification failed for $file: $($signature.Status)"
+            }
+          }
       - name: Подписанный update manifest
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         shell: bash
@@ -64,5 +89,5 @@ jobs:
         with:
           files: |
             desktop/windows/release/*.exe
-            desktop/windows/release/update-windows.json
+            desktop/windows/release/update-windows*.json
           generate_release_notes: true

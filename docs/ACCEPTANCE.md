@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 25.11.2026, клиент 0.18.1, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты.
+Снимок: 26.11.2026, опубликованный клиент 0.18.1, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -11,7 +11,8 @@
 | Backend | 120 passed, 1 skipped: `cd backend && python -m pytest -q` | PASS |
 | Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
 | Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681966701) |
-| Electron files/transport/updates | 7 passed, включая beta и явный Windows rollback: `cd desktop/windows && npm test` | PASS |
+| Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main, включая Authenticode configuration, NotSigned и чужого издателя: `cd desktop/windows && npm test` | PASS для unit/main |
+| Authenticode release | Реальные `Get-AuthenticodeSignature = Valid`, совпадение subject и установка подписанного EXE; нужен сертификат издателя | PENDING |
 | Android release 0.18.1 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681555105) |
 | Windows release 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
 | Space image 0.19.0 | GHCR build, push, cosign sign/verify; отдельный migration smoke schema v28 в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45679566246) |
@@ -41,6 +42,7 @@
 | Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.1 |
 | Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.18.1 | PENDING на EXE 0.18.1 |
 | Beta channel и явный rollback на предыдущий stable | отдельные signed-manifest и Windows IPC tests | Beta update PENDING; downgrade поверх не поддерживается ОС | PENDING на EXE 0.18.1 |
+| Authenticode: доверенный publisher, NotSigned/чужой publisher, rollback на подписанный stable | 10 Electron tests в main и обязательная CI-проверка двух EXE | Не применимо | PENDING на следующем подписанном EXE |
 | Официальный и custom Git module, сетевые блокировки и журнал | module sandbox/signature/journal tests | PENDING | PENDING |
 | E2EE в обе стороны, неверная фраза и конфликт версий | backup round-trip, authentication и optimistic conflict tests | PENDING | PENDING |
 | База знаний: источник, ревизия, fresh/stale/unavailable и ручная пометка | FTS5/BM25 и source-check tests | PENDING на 0.17.0 | PENDING на 0.17.0 |

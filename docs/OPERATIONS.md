@@ -66,6 +66,26 @@ python -m pytest -q
 
 Сборки запускаются для main и создания Release. Для релиза не нужно собирать APK/EXE на production-сервере.
 
+### Authenticode для Windows
+
+Опубликованный клиент до 0.18.1 не подписан Authenticode. В main добавлена поддержка сертификата издателя: electron-builder подписывает приложение и NSIS по SHA-256 с RFC 3161 timestamp, CI проверяет оба файла через `Get-AuthenticodeSignature`, а клиент перед update/rollback дополнительно требует статус `Valid` и точный subject издателя из подписанного релизом `release.json`. Секрет сертификата в этот файл и приложение не попадает.
+
+Поддерживается code-signing PFX с экспортируемым закрытым ключом. Настройка репозитория:
+
+1. В Windows PowerShell получите точный subject и base64 PFX, не отправляя сам PFX в Git:
+
+   ```powershell
+   $password = Read-Host "Пароль PFX" -AsSecureString
+   (Get-PfxData -FilePath .\fugu-deck.pfx -Password $password).EndEntityCertificates[0].Subject
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\fugu-deck.pfx")) | Set-Clipboard
+   ```
+
+2. В **Settings → Secrets and variables → Actions** создайте secret `WIN_CSC_LINK` с base64 PFX и secret `WIN_CSC_KEY_PASSWORD` с паролем. Если у PFX нет пароля, секрет можно оставить пустым/не создавать.
+3. Создайте variable `DECK_WINDOWS_PUBLISHER` с точным выводом `Subject`, например `CN=Example, O=Example, C=...`. Это публичная часть сертификата, а не секрет.
+4. Запустите release workflow. Release без `WIN_CSC_LINK` и publisher намеренно падает до сборки; проверочная сборка main без сертификата остаётся явно unsigned и не получает права устанавливать обновления.
+
+При продлении сертификата сохраняйте subject либо выпустите клиент с новым закреплённым subject заранее. Первый подписанный релиз не сможет откатиться на старый unsigned EXE: такой откат отклоняется до запуска. EV-сертификат на закрытом HSM/USB без экспорта PFX требует отдельного signing workflow и не поддерживается этой конфигурацией.
+
 После публикации:
 
 1. Скачайте оба опубликованных файла обратно.

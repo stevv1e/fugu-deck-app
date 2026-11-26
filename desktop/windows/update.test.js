@@ -34,7 +34,13 @@ function fixture(data, changes = {}, remoteVersion = "1.0.0") {
     spawned.push(args);
     return { once: () => {}, unref: () => {} };
   };
-  registerUpdates(ipcMain, app, { fetchImpl, spawnImpl, publicKey });
+  const execFileImpl = (_file, _args, options, callback) => {
+    const content = fs.readFileSync(options.env.FUGU_UPDATE_PATH, "utf8");
+    const status = content.includes("unsigned") ? "NotSigned" : "Valid";
+    const subject = content.includes("other publisher") ? "CN=Other Publisher" : "CN=Fugu Deck Test";
+    callback(null, JSON.stringify({ Status: status, Subject: subject, Thumbprint: "A".repeat(40) }), "");
+  };
+  registerUpdates(ipcMain, app, { fetchImpl, spawnImpl, execFileImpl, publicKey, publisher: "CN=Fugu Deck Test" });
   return { dir, handlers, event, progress, spawned, quit: () => quit };
 }
 
@@ -45,8 +51,8 @@ test("signed Windows update downloads with progress and only verified handle ins
   assert.equal(downloaded.size, data.length);
   assert.equal(f.progress.at(-1).done, data.length);
   assert.equal(f.progress.at(-1).total, data.length);
-  assert.throws(() => f.handlers.get("update:install")(f.event, "unknown"), /не было скачано/);
-  assert.equal(f.handlers.get("update:install")(f.event, downloaded.id).installing, true);
+  await assert.rejects(f.handlers.get("update:install")(f.event, "unknown"), /не было скачано/);
+  assert.equal((await f.handlers.get("update:install")(f.event, downloaded.id)).installing, true);
   assert.equal(f.spawned[0][1][0], "/S");
   await new Promise((resolve) => setTimeout(resolve, 350));
   assert.equal(f.quit(), true);
@@ -70,7 +76,6 @@ test("wrong hash, wrong URL, old version and foreign window are rejected", async
   fs.rmSync(f.dir, { recursive: true, force: true });
 });
 
-
 test("beta channel and explicit rollback require their own signed manifests", async () => {
   const beta = fixture(Buffer.from("beta installer"), { channel: "beta" });
   await assert.rejects(beta.handlers.get("update:download")(beta.event, "1.0.0"), /не соответствует/);
@@ -82,8 +87,19 @@ test("beta channel and explicit rollback require their own signed manifests", as
   await assert.rejects(previous.handlers.get("update:download")(previous.event, "0.14.0"), /не новее/);
   const downloaded = await previous.handlers.get("update:download")(previous.event, "0.14.0", { mode: "rollback" });
   assert.equal(downloaded.version, "0.14.0");
-  assert.equal(previous.handlers.get("update:install")(previous.event, downloaded.id).installing, true);
+  assert.equal((await previous.handlers.get("update:install")(previous.event, downloaded.id)).installing, true);
   assert.equal(previous.spawned[0][1][0], "/S");
   await assert.rejects(previous.handlers.get("update:download")(previous.event, "1.0.0", { mode: "rollback" }), /более раннюю/);
   fs.rmSync(previous.dir, { recursive: true, force: true });
+});
+
+test("unsigned or foreign-publisher installer is deleted instead of executed", async () => {
+  for (const [data, error] of [["unsigned installer", /недействительна/], ["other publisher installer", /Издатель/]]) {
+    const f = fixture(Buffer.from(data));
+    const downloaded = await f.handlers.get("update:download")(f.event, "1.0.0");
+    await assert.rejects(f.handlers.get("update:install")(f.event, downloaded.id), error);
+    assert.equal(f.spawned.length, 0);
+    assert.equal(f.quit(), false);
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
 });

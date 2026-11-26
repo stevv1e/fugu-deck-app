@@ -6,7 +6,7 @@
   "main": "main.js",
   "author": "Fugu Deck",
   "scripts": {
-    "test": "node --test net.test.js files.test.js update.test.js"
+    "test": "node --test net.test.js files.test.js update.test.js configure-signing.test.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -32,11 +32,16 @@
       "net.js",
       "update.js",
       "preload.js",
+      "release.json",
       "dist/**/*"
     ],
     "win": {
       "target": "nsis",
-      "icon": "icon.png"
+      "icon": "icon.png",
+      "signtoolOptions": {
+        "signingHashAlgorithms": ["sha256"],
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      }
     },
     "nsis": {
       "oneClick": false,

@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash, createPublicKey, randomUUID, verify } = require("node:crypto");
-const { spawn } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 
 const UPDATE_PUBLIC_KEY = "h5JyYoZt7BKWxmCAPylZ41927mr9t6wlIAiciSwfVTw=";
 const PUBLIC_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -38,11 +38,54 @@ function verifyManifest(raw, requested, current, publicKey = UPDATE_PUBLIC_KEY, 
   return payload;
 }
 
+function configuredPublisher() {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, "release.json"), "utf8"));
+    return typeof config.windowsPublisher === "string" ? config.windowsPublisher.trim() : "";
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw new Error("Параметры Authenticode-сборки повреждены");
+  }
+}
+
+function verifyAuthenticode(file, publisher, execFileImpl = execFile) {
+  if (!publisher) return Promise.reject(new Error("Эта сборка не имеет параметров Authenticode-издателя"));
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    "$signature = Get-AuthenticodeSignature -LiteralPath $env:FUGU_UPDATE_PATH",
+    "[pscustomobject]@{ Status = [string]$signature.Status; Subject = [string]$signature.SignerCertificate.Subject; Thumbprint = [string]$signature.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress",
+  ].join("; ");
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return new Promise((resolve, reject) => {
+    execFileImpl("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
+      env: { ...process.env, FUGU_UPDATE_PATH: file },
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    }, (error, stdout) => {
+      if (error) return reject(new Error("Не удалось проверить Authenticode-подпись установщика"));
+      try {
+        const result = JSON.parse(stdout);
+        const normalize = (value) => value.replace(/\s+/g, " ").trim().toUpperCase();
+        if (result.Status !== "Valid") throw new Error("Authenticode-подпись установщика недействительна");
+        if (typeof result.Subject !== "string" || normalize(result.Subject) !== normalize(publisher)) throw new Error("Издатель установщика не соответствует этой сборке");
+        if (!/^[a-f0-9]{40}$/i.test(result.Thumbprint || "")) throw new Error("Authenticode-сертификат установщика неполный");
+        resolve({ publisher: result.Subject, thumbprint: result.Thumbprint });
+      } catch (parseError) {
+        reject(parseError instanceof SyntaxError ? new Error("Windows вернула некорректный результат проверки Authenticode") : parseError);
+      }
+    });
+  });
+}
+
 function registerUpdates(ipcMain, app, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const spawnImpl = options.spawnImpl || spawn;
+  const execFileImpl = options.execFileImpl || execFile;
   const tempDir = options.tempDir || (() => app.getPath("temp"));
   const publicKey = options.publicKey || UPDATE_PUBLIC_KEY;
+  const publisher = options.publisher === undefined ? configuredPublisher() : options.publisher;
   const downloads = new Map();
   const parts = new Map();
 
@@ -106,12 +149,18 @@ function registerUpdates(ipcMain, app, options = {}) {
     }
   });
 
-  ipcMain.handle("update:install", (event, id) => {
+  ipcMain.handle("update:install", async (event, id) => {
     const sender = event.senderFrame?.url || event.sender.getURL();
     if (!sender.startsWith("fugu-app://bundle")) throw new Error("Обновление не из окна Fugu Deck");
     const item = downloads.get(id);
     if (!item || item.sender !== event.sender.id) throw new Error("Обновление не было скачано и проверено в этом окне");
     downloads.delete(id);
+    try {
+      await verifyAuthenticode(item.path, publisher, execFileImpl);
+    } catch (error) {
+      await fs.promises.unlink(item.path).catch(() => {});
+      throw error;
+    }
     const child = spawnImpl(item.path, ["/S"], { detached: true, stdio: "ignore" });
     child.once("error", () => {});
     child.unref();
@@ -122,4 +171,4 @@ function registerUpdates(ipcMain, app, options = {}) {
   ipcMain.on("update:cancel", (event) => cleanupSender(event.sender.id));
 }
 
-module.exports = { registerUpdates, verifyManifest, newer };
+module.exports = { registerUpdates, verifyAuthenticode, verifyManifest, newer };
