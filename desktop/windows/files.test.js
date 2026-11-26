@@ -46,6 +46,7 @@ test("changed file and cancelled picker are safe", async () => {
   fs.writeFileSync(target, "before");
   const [picked] = await f.handlers.get("files:drop")(f.event, [target], 1);
   fs.writeFileSync(target, "after!");
+  fs.utimesSync(target, new Date(), new Date(Date.now() + 2000));
   await assert.rejects(f.handlers.get("files:read")(f.event, picked.id, 0, 6), /изменился/);
   f.dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
   assert.deepEqual(await f.handlers.get("files:pick")(f.event, 6), []);
