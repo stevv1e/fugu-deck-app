@@ -296,11 +296,11 @@ Roadmap не привязан к искусственным датам. Прио
 ## 10. Порядок принятия следующих этапов
 
 1. Продолжать заполнять device acceptance matrix по ошибкам реального использования.
-2. Проверить stable/beta и явный Windows rollback на устройствах; выпустить и проверить Authenticode после добавления сертификата, затем автоматический rollback.
-3. Продолжить Harness: repo map, durable resume, deterministic router и baseline quality/cost/latency evals.
-4. Добавить короткие доказательства и on-demand проверку актуальности базы знаний.
-5. Расширять PDF/OCR и media pipelines: диапазоны страниц, удалённая отмена OCR и восстанавливаемые задачи.
-6. Затем перейти к автоматической E2EE-синхронизации, Windows terminal и Android app-private shell.
-7. Только после этого расширять module capabilities и server execution.
+2. Продолжить Harness: repo map, durable resume, deterministic router и baseline quality/cost/latency evals.
+3. Добавить короткие доказательства и on-demand проверку актуальности базы знаний.
+4. Расширять PDF/OCR и media pipelines: диапазоны страниц, удалённая отмена OCR и восстанавливаемые задачи.
+5. Затем перейти к автоматической E2EE-синхронизации, Windows terminal и Android app-private shell.
+6. После этого расширять module capabilities и server execution.
+7. Автоматический Windows rollback и Android recovery выполнять после перечисленных этапов. Проверка stable/beta и выпуск Authenticode при появлении сертификата идут независимо и не блокируют Harness.
 
 Каждый этап должен иметь отдельный security review, тесты атак, обновлённую документацию и реальный сценарий на опубликованном артефакте.
