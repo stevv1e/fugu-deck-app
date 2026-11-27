@@ -51,7 +51,9 @@ async def transcribe_media(ctx, a):
 
     async def progress(current):
         if ctx.run:
-            await ctx.run.emit("media_progress", job_id=job["id"], status=current["status"], progress=current["progress"])
+            checkpoint = current.get("checkpoint") or {}
+            await ctx.run.emit("media_progress", job_id=job["id"], status=current["status"], progress=current["progress"],
+                               kind="transcribe", pages_done=checkpoint.get("next_chunk", 0), pages_total=0)
 
     done = await _worker(ctx).wait(job["id"], progress)
     return {"job_id": job["id"], **done["result"],
@@ -60,19 +62,30 @@ async def transcribe_media(ctx, a):
 
 @tool("process_pdf",
       "Обработать PDF-вложение на выделенном worker: текст с номерами страниц, OCR для сканов, таблицы и число изображений. "
-      "Создаёт Markdown и JSON. Используй для сканов и больших PDF; для маленького текстового PDF можно read_attachment.",
-      obj({"attachment_id": {"type": "string"}}, ["attachment_id"]), risk="write", group="files", title="Обработка PDF")
+      "Можно ограничить диапазон страниц start/end, чтобы не обрабатывать весь документ. Создаёт Markdown и JSON. "
+      "Используй для сканов и больших PDF; для маленького текстового PDF можно read_attachment.",
+      obj({"attachment_id": {"type": "string"},
+           "start": {"type": "integer", "minimum": 1, "maximum": 400, "default": 1},
+           "end": {"type": "integer", "minimum": 0, "maximum": 400, "default": 0,
+                   "description": "Последняя страница; 0 — до конца документа"}},
+          ["attachment_id"]), risk="write", group="files", title="Обработка PDF")
 async def process_pdf(ctx, a):
     att = await ctx.db.get_attachment(a["attachment_id"])
     if not att or att["conversation_id"] != ctx.conversation_id:
         raise ProviderError("Вложение не найдено")
     if Path(att["filename"]).suffix.lower() != ".pdf" and att["mime"] != "application/pdf":
         raise ProviderError("Нужен PDF")
-    job = await _worker(ctx).submit_pdf(ctx.conversation_id, att["id"], ctx.user.get("id", ""))
+    start, end = int(a.get("start", 1)), int(a.get("end", 0))
+    if not 1 <= start <= 400 or not 0 <= end <= 400 or (end and start > end):
+        raise ProviderError("Диапазон страниц должен быть в пределах 1..400, start не больше end")
+    job = await _worker(ctx).submit_pdf(ctx.conversation_id, att["id"], ctx.user.get("id", ""), start, end)
 
     async def progress(current):
         if ctx.run:
-            await ctx.run.emit("media_progress", job_id=job["id"], status=current["status"], progress=current["progress"])
+            checkpoint = current.get("checkpoint") or {}
+            await ctx.run.emit("media_progress", job_id=job["id"], status=current["status"], progress=current["progress"],
+                               kind="pdf", pages_done=checkpoint.get("pages_done", 0),
+                               pages_total=checkpoint.get("pages_total", 0))
 
     done = await _worker(ctx).wait(job["id"], progress)
     return {"job_id": job["id"], **done["result"], "note": "PDF обработан, Markdown и JSON приложены к чату"}

@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 27.11.2026, Android 0.21.0, Windows stable 0.18.1, Space 0.21.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный Windows 0.21.0 заблокирован отсутствием PFX.
+Снимок: 27.11.2026, Android/Space 0.22.0, Keyguard 0.15.0, Windows stable 0.18.1, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но следующий подписанный Windows Release заблокирован отсутствием PFX.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -8,11 +8,11 @@
 
 | Область | Проверено | Результат |
 | --- | --- | --- |
-| Backend | 134 passed, 1 skipped в main со schema v29, durable resume, router, repo map, evals и KB evidence/verify: `cd backend && python -m pytest -q` | PASS |
+| Backend | 140 passed, 1 skipped в main со schema v30, durable runs/media checkpoints, router, KB и PDF/OCR control: `cd backend && python -m pytest -q` | PASS |
 | Harness offline | Router 4/4; synthetic 20 files: map reduction 76,45%, одна функция 83 символа против 113580 исходных; live модели не запускались | PASS только offline |
 | Harness image/migration | Опубликованный Space 0.20.0: свежая БД получила schema v29 и durable tables, deterministic router выбрал code-модель; router также проверен в sleeping Space specs | PASS |
 | Harness production chat | Реальный auto chat и resume после перезапуска; существующие Space спят и не пробуждались для проверки | PENDING |
-| Mobile core | 72 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
+| Mobile core | 73 passed, 5 skipped без локального `kgcheck`; typecheck и lint; PDF progress/cancel event покрыт тестом | PASS |
 | KB evidence/on-demand | 15 targeted backend tests: компактный поиск, memory_read, fresh/stale/unavailable, current revision, REST verify и source evidence; 5 KB mobile tests | PASS |
 | KB image/rollout | Space 0.21.0: signed image, schema v29, memory tools smoke; `deck-services` Synced/Healthy, оба sleeping Space spec обновлены | PASS |
 | KB Android release | APK 0.21.0 скачан; Ed25519 manifest, размер, SHA-256 и разрешённый сертификат APK проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330082) |
@@ -30,6 +30,10 @@
 | Production chat mode | Личные Space спят; сквозной запуск и переключение на production ещё не выполнены | PENDING |
 | Большое видео | Production-видео 582 МБ → keyguard → FFmpeg worker → корректные OGG-фрагменты | PASS |
 | Space → worker | Реальный вызов через keyguard, получен корректный OGG | PASS |
+| PDF/OCR 0.22.0 | 19 media tests: диапазон, активный PDF, namespace, удалённая отмена, восстановление PDF/audio и миграция v29→v30 | PASS |
+| Keyguard 0.15.0 | Go 1.26 `go test ./...`: фиксированные status/result/cancel routes, range/job validation и namespace | PASS |
+| Media release/rollout | Signed Space 0.22.0 и Keyguard 0.15.0, Android 0.22.0 APK/manifest, sleeping Space specs и Malaysia worker | PENDING |
+| Media device/live | Большой PDF из Drive, выбор диапазона, кнопка отмены и реальные перезапуски Space/worker | PENDING |
 
 ## 2. Реальные Android и Windows
 
@@ -47,6 +51,7 @@
 | Переключатель Инжиниринг/Общение с историей и возвратом исходного проекта | backend migration/move test и typecheck | PENDING на 0.18.1 | PENDING на 0.18.1 |
 | Drive: read, write и create folder | backend tests с моками API | Create folder подтверждён ранее; read/write PENDING | PENDING |
 | Media больше 250 МБ: загрузка, отмена и восстановление частей | chunk upload tests и production worker 582 МБ | PENDING | PENDING |
+| PDF/OCR: диапазон, прогресс по страницам, удалённая отмена и восстановление | backend/worker/keyguard tests и mobile timeline test | PENDING на 0.22.0 | PENDING на следующем signed EXE |
 | Windows file picker, drag-and-drop, несколько файлов, Unicode, открытие и сохранение | Electron file bridge tests и chunked upload tests | Не применимо | PENDING на EXE 0.15.1 |
 | Обновление с сохранением состояния, неверная подпись/hash и отмена | update manifest tests и Windows update bridge tests | PENDING на APK 0.18.1 | PENDING на EXE 0.18.1 |
 | Beta channel и явный rollback на предыдущий stable | отдельные signed-manifest и Windows IPC tests | Beta update PENDING; downgrade поверх не поддерживается ОС | PENDING на EXE 0.18.1 |

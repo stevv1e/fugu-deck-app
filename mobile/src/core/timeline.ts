@@ -21,7 +21,7 @@ export type Item =
       error?: string;
     }
   // retry — задание прервалось (перезапуск агента): можно продолжить кнопкой «Повторить»
-  | { kind: "notice"; key: string; level: "info" | "error"; text: string; retry?: boolean };
+  | { kind: "notice"; key: string; level: "info" | "error"; text: string; retry?: boolean; mediaJobId?: string };
 
 let n = 0;
 const k = () => `i${++n}`;
@@ -123,8 +123,10 @@ export function applyEvent(items: Item[], e: RunEvent): Item[] {
       break;
     case "media_progress": {
       const key = `media:${e.job_id}`;
+      const detail = e.kind === "pdf" && e.pages_total ? ` · страница ${e.pages_done || 0}/${e.pages_total}` : "";
       const item = { kind: "notice" as const, key, level: "info" as const,
-        text: `Обработка медиа: ${Math.round(e.progress * 100)}%` };
+        text: `${e.kind === "pdf" ? "PDF/OCR" : "Обработка медиа"}: ${Math.round(e.progress * 100)}%${detail}`,
+        mediaJobId: e.status === "queued" || e.status === "running" ? e.job_id : undefined };
       const idx = out.findIndex((i) => i.kind === "notice" && i.key === key);
       if (idx >= 0) out[idx] = item;
       else out.push(item);

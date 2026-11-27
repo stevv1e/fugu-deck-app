@@ -178,3 +178,17 @@ test("лента: запрос подтверждения хранит исхо�
   assert.equal((items[1] as any).status, "running");
   assert.equal((items[1] as any).approval, undefined);
 });
+
+test("лента: PDF показывает страницы и прекращает отмену после завершения", () => {
+  let items = applyEvent([], { seq: 0, type: "media_progress", job_id: "pdf-1", status: "running", progress: 0.475,
+    kind: "pdf", pages_done: 1, pages_total: 2 });
+  let notice = items[0] as Extract<Item, { kind: "notice" }>;
+  assert.equal(notice.text, "PDF/OCR: 48% · страница 1/2");
+  assert.equal(notice.mediaJobId, "pdf-1");
+  items = applyEvent(items, { seq: 1, type: "media_progress", job_id: "pdf-1", status: "done", progress: 1,
+    kind: "pdf", pages_done: 2, pages_total: 2 });
+  notice = items[0] as Extract<Item, { kind: "notice" }>;
+  assert.equal(items.length, 1);
+  assert.equal(notice.text, "PDF/OCR: 100% · страница 2/2");
+  assert.equal(notice.mediaJobId, undefined);
+});

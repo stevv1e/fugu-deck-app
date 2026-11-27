@@ -114,6 +114,7 @@ class MediaWorker:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._pdf_controls: dict[str, object] = {}
         self._credentials: dict[str, str] = {}
         self._cancelled: set[str] = set()
         self._stopped = False
@@ -121,7 +122,7 @@ class MediaWorker:
     async def start(self) -> None:
         for job in await self.db.pending_media_jobs():
             if job["status"] == "running":
-                await self.db.update_media_job(job["id"], status="queued", progress=0)
+                await self.db.update_media_job(job["id"], status="queued")
         self._stopped = False
         self._task = asyncio.create_task(self._loop())
         self._wake.set()
@@ -131,8 +132,14 @@ class MediaWorker:
         self._wake.set()
         for proc in list(self._processes.values()):
             proc.terminate()
+        for control in list(self._pdf_controls.values()):
+            control.cancel()
         if self._task:
-            await self._task
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
 
     async def submit(self, cid: str, attachment_id: str, provider: str, user_id: str, api_key: str = "") -> dict:
         job = await self.db.create_media_job(cid, attachment_id, "transcribe", provider, user_id)
@@ -141,8 +148,9 @@ class MediaWorker:
         self._wake.set()
         return job
 
-    async def submit_pdf(self, cid: str, attachment_id: str, user_id: str) -> dict:
-        job = await self.db.create_media_job(cid, attachment_id, "pdf", "worker", user_id)
+    async def submit_pdf(self, cid: str, attachment_id: str, user_id: str, start: int = 1, end: int = 0) -> dict:
+        job = await self.db.create_media_job(cid, attachment_id, "pdf", "worker", user_id,
+                                             options={"start": start, "end": end})
         self._wake.set()
         return job
 
@@ -154,6 +162,8 @@ class MediaWorker:
             self._cancelled.add(jid)
             if proc := self._processes.get(jid):
                 proc.terminate()
+            if control := self._pdf_controls.get(jid):
+                control.cancel()
             await self.db.update_media_job(jid, status="cancelled", error="Остановлено пользователем")
             self._credentials.pop(jid, None)
             self._wake.set()
@@ -258,32 +268,43 @@ class MediaWorker:
     async def _process(self, job: dict) -> None:
         jid = job["id"]
         work = self.settings.data_dir / "media" / jid
+        keep_work = False
         try:
             att = await self.db.get_attachment(job["attachment_id"])
             if not att or att["conversation_id"] != job["conversation_id"] or not Path(att["path"]).is_file():
                 raise MediaError("Исходное вложение не найдено")
             work.mkdir(parents=True, exist_ok=True)
-            await self.db.update_media_job(jid, status="running", progress=0.05)
+            await self.db.update_media_job(jid, status="running", progress=max(0.05, job["progress"]))
             if job["kind"] == "pdf":
                 result = await self._process_pdf(job, att)
                 await self.db.update_media_job(jid, status="done", progress=1, result=result)
                 return
             kind = media_kind(att["filename"], att["mime"])
-            probe = await self._run(jid, ["ffprobe", "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration",
-                                          "-of", "default=noprint_wrappers=1:nokey=1", att["path"]])
-            try:
-                duration = float(probe.strip())
-            except ValueError as e:
-                raise MediaError("Не удалось определить длительность записи") from e
+            checkpoint = job.get("checkpoint") or {}
+            duration = float(checkpoint.get("duration") or 0)
             if not 0 < duration <= 24 * 3600:
-                raise MediaError("Запись должна быть длиной от одной секунды до 24 часов")
-            await self.db.update_media_job(jid, progress=0.1)
-            await self._extract_audio(job, att, work, kind)
+                probe = await self._run(jid, ["ffprobe", "-v", "error", "-protocol_whitelist", "file", "-show_entries", "format=duration",
+                                              "-of", "default=noprint_wrappers=1:nokey=1", att["path"]])
+                try:
+                    duration = float(probe.strip())
+                except ValueError as e:
+                    raise MediaError("Не удалось определить длительность записи") from e
+                if not 0 < duration <= 24 * 3600:
+                    raise MediaError("Запись должна быть длиной от одной секунды до 24 часов")
             chunks = sorted(work.glob("chunk_*.ogg"))
             if not chunks:
+                checkpoint = {}
+                await self.db.update_media_job(jid, progress=0.1, checkpoint={})
+                await self._extract_audio(job, att, work, kind)
+                chunks = sorted(work.glob("chunk_*.ogg"))
+            if not chunks:
                 raise MediaError("В файле нет звуковой дорожки")
-            segments = []
-            for i, path in enumerate(chunks):
+            next_chunk = int(checkpoint.get("next_chunk") or 0)
+            if not 0 <= next_chunk <= len(chunks):
+                raise MediaError("Повреждён checkpoint транскрибации")
+            segments = list(checkpoint.get("segments") or [])
+            for i in range(next_chunk, len(chunks)):
+                path = chunks[i]
                 if jid in self._cancelled:
                     raise asyncio.CancelledError
                 await self.db.update_media_job(jid, progress=0.15 + 0.65 * i / len(chunks))
@@ -293,46 +314,146 @@ class MediaWorker:
                     seg["start"] = round(seg.get("start", 0) + offset, 3)
                     seg["end"] = round(seg.get("end", seg["start"]) + offset, 3)
                 segments.extend(got)
+                await self.db.update_media_job(jid, checkpoint={
+                    "duration": duration, "next_chunk": i + 1, "segments": segments,
+                })
             result = await self._artifacts(job, att, duration, segments)
             await self.db.update_media_job(jid, status="done", progress=1, result=result)
-        except (asyncio.CancelledError, MediaError) as e:
-            status = "cancelled" if jid in self._cancelled or isinstance(e, asyncio.CancelledError) else "error"
-            await self.db.update_media_job(jid, status=status, error=str(e) or "Остановлено")
+        except asyncio.CancelledError as e:
+            if self._stopped and jid not in self._cancelled:
+                keep_work = True
+                await self.db.update_media_job(jid, status="queued", error="")
+            else:
+                await self.db.update_media_job(jid, status="cancelled", error=str(e) or "Остановлено")
+        except MediaError as e:
+            if self._stopped and jid not in self._cancelled:
+                keep_work = True
+                await self.db.update_media_job(jid, status="queued", error="")
+            else:
+                status = "cancelled" if jid in self._cancelled else "error"
+                await self.db.update_media_job(jid, status=status, error=str(e))
         except Exception as e:
-            await self.db.update_media_job(jid, status="error", error=(str(e) or type(e).__name__)[:1000])
+            if self._stopped and jid not in self._cancelled:
+                keep_work = True
+                await self.db.update_media_job(jid, status="queued", error="")
+            else:
+                status = "cancelled" if jid in self._cancelled else "error"
+                await self.db.update_media_job(jid, status=status, error=(str(e) or type(e).__name__)[:1000])
         finally:
             self._credentials.pop(jid, None)
             self._cancelled.discard(jid)
-            shutil.rmtree(work, ignore_errors=True)
+            if not keep_work:
+                shutil.rmtree(work, ignore_errors=True)
+
+    @staticmethod
+    def _pdf_response_json(response: httpx.Response) -> dict:
+        if len(response.content) > 16 * 1024 * 1024:
+            raise MediaError("PDF worker вернул слишком большой результат")
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise MediaError("PDF worker вернул не-JSON результат") from e
+        if not isinstance(data, dict):
+            raise MediaError("PDF worker вернул некорректный результат")
+        return data
+
+    async def _remote_pdf(self, job: dict, source: Path) -> dict:
+        base = f"{self.settings.keyguard_url.rstrip('/')}/media/pdf"
+        status_url = f"{base}/{job['id']}"
+        options = job.get("options") or {}
+        start, end = int(options.get("start", 1)), int(options.get("end", 0))
+        headers = {"Authorization": f"Bearer {kgc.token()}",
+                   **kgc.headers(job["conversation_id"], job["created_by"]),
+                   "X-Deck-Job-Id": job["id"], "X-Deck-PDF-Start": str(start), "X-Deck-PDF-End": str(end)}
+        post_headers = {**headers, "Content-Type": "application/octet-stream", "Content-Length": str(source.stat().st_size)}
+
+        async def content():
+            with source.open("rb") as f:
+                while chunk := await asyncio.to_thread(f.read, 2 * 1024 * 1024):
+                    yield chunk
+
+        timeout = httpx.Timeout(self.settings.media_job_timeout_seconds, connect=30)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            post_task: asyncio.Task | None = None
+            state: dict = {}
+            while True:
+                if job["id"] in self._cancelled:
+                    try:
+                        await client.post(f"{status_url}/cancel", headers=headers)
+                    finally:
+                        if post_task and not post_task.done():
+                            post_task.cancel()
+                    raise asyncio.CancelledError
+                if post_task and post_task.done():
+                    response = await post_task
+                    post_task = None
+                    if response.status_code not in {200, 202}:
+                        if response.status_code == 409:
+                            raise asyncio.CancelledError
+                        raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
+                    data = self._pdf_response_json(response)
+                    if "job_id" not in data:
+                        return data
+                    state = data
+                if state:
+                    status = state.get("status")
+                    if status == "done":
+                        response = await client.get(f"{status_url}/result", headers=headers)
+                        if response.status_code != 200:
+                            raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
+                        return self._pdf_response_json(response)
+                    if status == "cancelled":
+                        raise asyncio.CancelledError
+                    if status == "error":
+                        raise MediaError(str(state.get("error") or "PDF worker не смог обработать документ"))
+                    done, total = int(state.get("pages_done") or 0), int(state.get("pages_total") or 0)
+                    if total:
+                        await self.db.update_media_job(job["id"], progress=0.1 + 0.75 * done / total,
+                                                       checkpoint={"worker": "pdf", "pages_done": done, "pages_total": total})
+                if post_task is None and not state:
+                    response = await client.get(status_url, headers=headers)
+                    if response.status_code == 404:
+                        post_task = asyncio.create_task(client.post(base, headers=post_headers, content=content()))
+                    elif response.status_code == 200:
+                        state = self._pdf_response_json(response)
+                    else:
+                        raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
+                    continue
+                await asyncio.sleep(0.5)
+                response = await client.get(status_url, headers=headers)
+                if response.status_code == 200:
+                    state = self._pdf_response_json(response)
+                elif response.status_code == 404 and post_task is None:
+                    state = {}
+                elif response.status_code != 404:
+                    raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
 
     async def _process_pdf(self, job: dict, att: dict) -> dict:
         source = Path(att["path"])
+        options = job.get("options") or {}
+        start, end = int(options.get("start", 1)), int(options.get("end", 0))
         if kgc.enabled():
-            url = f"{self.settings.keyguard_url.rstrip('/')}/media/pdf"
-            headers = {"Authorization": f"Bearer {kgc.token()}",
-                       **kgc.headers(job["conversation_id"], job["created_by"]),
-                       "Content-Type": "application/octet-stream", "Content-Length": str(source.stat().st_size)}
-
-            async def content():
-                with source.open("rb") as f:
-                    while chunk := await asyncio.to_thread(f.read, 2 * 1024 * 1024):
-                        yield chunk
-
-            timeout = httpx.Timeout(self.settings.media_job_timeout_seconds, connect=30)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", url, headers=headers, content=content()) as response:
-                    raw = await response.aread()
-                    if response.status_code != 200:
-                        raise MediaError(f"PDF worker: {response.status_code} {response.text[:500]}")
-                    if len(raw) > 16 * 1024 * 1024:
-                        raise MediaError("PDF worker вернул слишком большой результат")
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                raise MediaError("PDF worker вернул не-JSON результат") from e
+            data = await asyncio.wait_for(self._remote_pdf(job, source), self.settings.media_job_timeout_seconds)
         else:
-            from .media_worker import pdf_document
-            data = await asyncio.wait_for(asyncio.to_thread(pdf_document, source), self.settings.media_job_timeout_seconds)
+            from .media_worker import PDFControl, pdf_document
+            control = PDFControl()
+            self._pdf_controls[job["id"]] = control
+            loop = asyncio.get_running_loop()
+
+            def progress(done: int, total: int) -> None:
+                loop.call_soon_threadsafe(lambda: asyncio.create_task(self.db.update_media_job(
+                    job["id"], progress=0.1 + 0.75 * done / max(1, total),
+                    checkpoint={"worker": "pdf", "pages_done": done, "pages_total": total})))
+
+            try:
+                data = await asyncio.wait_for(
+                    asyncio.to_thread(pdf_document, source, start, end, control, progress),
+                    self.settings.media_job_timeout_seconds)
+            except TimeoutError:
+                control.cancel()
+                raise
+            finally:
+                self._pdf_controls.pop(job["id"], None)
         await self.db.update_media_job(job["id"], progress=0.85)
         return await self._pdf_artifacts(job, att, data)
 
@@ -352,7 +473,9 @@ class MediaWorker:
             dest.write_bytes(raw)
             made = await self.db.add_attachment(job["conversation_id"], name, mime, len(raw), str(dest), origin="agent")
             attachments.append({k: made[k] for k in ("id", "filename", "mime", "size")})
-        return {"attachments": attachments, "pages": data.get("source_pages", 0), "ocr_pages": data.get("ocr_pages", 0),
+        return {"attachments": attachments, "pages": data.get("selected_pages", data.get("source_pages", 0)),
+                "source_pages": data.get("source_pages", 0), "page_start": data.get("page_start", 1),
+                "page_end": data.get("page_end", data.get("source_pages", 0)), "ocr_pages": data.get("ocr_pages", 0),
                 "text": text[:60000], "truncated": len(text) > 60000}
 
     async def _transcribe_chunk(self, job: dict, path: Path, seconds: float) -> list[dict]:

@@ -60,6 +60,8 @@ function subtitle(name: string, a: any): string {
       return String(a.content || "").slice(0, 80);
     case "memory_search":
       return a.query;
+    case "process_pdf":
+      return a.end ? `Страницы ${a.start || 1}–${a.end}` : a.start > 1 ? `Страницы с ${a.start} до конца` : "Весь документ";
     case "load_skill":
       return a.name;
     case "agent_save":
@@ -272,7 +274,9 @@ function copyText(text: string, onCopied: () => void) {
   }, () => {});
 }
 
-function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | null; onCopied: () => void; onRetry?: () => void }) {
+function Bubble({ item, api, onCopied, onRetry, onCancelMedia }: {
+  item: Item; api: DeckApi | null; onCopied: () => void; onRetry?: () => void; onCancelMedia?: (jid: string) => void;
+}) {
   const { p } = useTheme();
   if (item.kind === "user") {
     return (
@@ -304,6 +308,7 @@ function Bubble({ item, api, onCopied, onRetry }: { item: Item; api: DeckApi | n
       <View style={{ gap: 6, alignItems: "center" }}>
         <Txt kind="small" color={item.level === "error" ? p.accent2 : p.dim} style={{ textAlign: "center" }}>{item.text}</Txt>
         {item.retry && onRetry ? <Btn small title="Повторить" onPress={onRetry} /> : null}
+        {item.mediaJobId && onCancelMedia ? <Btn small kind="ghost" title="Остановить обработку" onPress={() => onCancelMedia(item.mediaJobId!)} /> : null}
       </View>
     );
   }
@@ -604,6 +609,17 @@ export default function Chat() {
     }
   }, [api, cid, runId, follow]);
 
+  const cancelMedia = useCallback(async (jid: string) => {
+    if (!api) return;
+    setError(null);
+    setItems((prev) => prev.map((x) => x.kind === "notice" && x.mediaJobId === jid ? { ...x, mediaJobId: undefined, text: "Остановка обработки…" } : x));
+    try {
+      await api.cancelMedia(jid);
+    } catch (e) {
+      setError(errText(e));
+    }
+  }, [api]);
+
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashCopied = useCallback(() => {
@@ -714,6 +730,7 @@ export default function Chat() {
           }}
           renderItem={({ item }) =>
             item.kind === "tool" ? item.status === "pending" && item.approval ? <ApprovalCard t={item} onDecide={decide} /> : <ToolCard t={item} api={api} /> : <Bubble item={item} api={api} onCopied={flashCopied}
+              onCancelMedia={canWrite ? cancelMedia : undefined}
               onRetry={!runId && canWrite && item.kind === "notice" && item.retry && items[items.length - 1]?.key === item.key ? retryRun : undefined} />
           }
           ListHeaderComponent={

@@ -425,6 +425,11 @@ SCHEMA = [
     );
     CREATE INDEX IF NOT EXISTS idx_agent_run_tools_status ON agent_run_tools(status);
     """,
+    # v30: параметры и checkpoints длительных media pipelines переживают перезапуск Space
+    """
+    ALTER TABLE media_jobs ADD COLUMN options TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE media_jobs ADD COLUMN checkpoint TEXT NOT NULL DEFAULT '{}';
+    """,
 ]
 
 DEFAULT_PROJECT = "general"
@@ -927,27 +932,33 @@ class Database:
         )
 
     # --- media jobs ---
-    async def create_media_job(self, cid: str, attachment_id: str, kind: str, provider: str, created_by: str = "") -> dict:
+    @staticmethod
+    def _media_job(row: dict | None) -> dict | None:
+        if row:
+            for key in ("result", "options", "checkpoint"):
+                row[key] = json.loads(row[key] or "{}")
+        return row
+
+    async def create_media_job(self, cid: str, attachment_id: str, kind: str, provider: str, created_by: str = "",
+                               options: dict | None = None) -> dict:
         jid, now = new_id(), time.time()
         await self._exec(
-            "INSERT INTO media_jobs (id,conversation_id,attachment_id,kind,status,provider,created_by,created_at,updated_at) "
-            "VALUES (?,?,?,?,'queued',?,?,?,?)", (jid, cid, attachment_id, kind, provider, created_by, now, now))
+            "INSERT INTO media_jobs (id,conversation_id,attachment_id,kind,status,provider,created_by,created_at,updated_at,options) "
+            "VALUES (?,?,?,?,'queued',?,?,?,?,?)", (jid, cid, attachment_id, kind, provider, created_by, now, now,
+                                                    json.dumps(options or {}, ensure_ascii=False)))
         return await self.get_media_job(jid)
 
     async def get_media_job(self, jid: str) -> dict | None:
-        row = await self._one("SELECT * FROM media_jobs WHERE id=?", (jid,))
-        if row:
-            row["result"] = json.loads(row["result"] or "{}")
-        return row
+        return self._media_job(await self._one("SELECT * FROM media_jobs WHERE id=?", (jid,)))
 
     async def update_media_job(self, jid: str, **fields) -> None:
-        allowed = {"status", "progress", "provider", "error", "result"}
+        allowed = {"status", "progress", "provider", "error", "result", "checkpoint"}
         sets, values = [], []
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(f"неизвестное поле media job: {key}")
             sets.append(f"{key}=?")
-            values.append(json.dumps(value, ensure_ascii=False) if key == "result" else value)
+            values.append(json.dumps(value, ensure_ascii=False) if key in {"result", "checkpoint"} else value)
         if sets:
             values.extend([time.time(), jid])
             await self._exec(f"UPDATE media_jobs SET {', '.join(sets)}, updated_at=? WHERE id=?", values)
@@ -955,12 +966,11 @@ class Database:
     async def list_media_jobs(self, cid: str, active: bool = False) -> list[dict]:
         where = "conversation_id=? AND status IN ('queued','running')" if active else "conversation_id=?"
         rows = await self._all(f"SELECT * FROM media_jobs WHERE {where} ORDER BY updated_at DESC", (cid,))
-        for row in rows:
-            row["result"] = json.loads(row["result"] or "{}")
-        return rows
+        return [self._media_job(row) for row in rows]
 
     async def pending_media_jobs(self) -> list[dict]:
-        return await self._all("SELECT * FROM media_jobs WHERE status IN ('queued','running') ORDER BY created_at")
+        rows = await self._all("SELECT * FROM media_jobs WHERE status IN ('queued','running') ORDER BY created_at")
+        return [self._media_job(row) for row in rows]
 
     # --- usage ---
     async def add_usage(self, cid: str | None, model: str, p: int, c: int, cached: int, cost: float,

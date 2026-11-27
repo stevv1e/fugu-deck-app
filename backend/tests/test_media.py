@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -272,10 +273,17 @@ async def test_media_job_cancel_and_restart_recovery(tmp_path: Path):
     with pytest.raises(MediaError, match="остановлена"):
         await worker.wait(job["id"])
     other = await db.create_media_job("c", att["id"], "transcribe", "google", "user-1")
-    await db.update_media_job(other["id"], status="running", progress=0.5)
+    await db.update_media_job(other["id"], status="running", progress=0.5,
+                              checkpoint={"duration": 1200, "next_chunk": 1, "segments": [{"text": "готово"}]})
+
+    async def idle():
+        await asyncio.Event().wait()
+
+    worker._loop = idle
     await worker.start()
     recovered = await db.get_media_job(other["id"])
-    assert recovered["status"] == "queued" and recovered["progress"] == 0
+    assert recovered["status"] == "queued" and recovered["progress"] == 0.5
+    assert recovered["checkpoint"]["next_chunk"] == 1
     await worker.stop()
     await db.close()
 
@@ -351,7 +359,7 @@ def test_pdf_worker_text_and_scanned_pages(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(media_worker, "TOKEN", "worker-secret")
     monkeypatch.setattr(media_worker, "WORK_DIR", tmp_path)
-    monkeypatch.setattr(media_worker, "ocr_image", lambda _png: "распознанный скан")
+    monkeypatch.setattr(media_worker, "ocr_image", lambda _png, _control=None: "распознанный скан")
     client = TestClient(media_worker.app)
     source = tmp_path / "mixed.pdf"
     doc = pymupdf.open()

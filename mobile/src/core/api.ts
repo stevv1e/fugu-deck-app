@@ -45,6 +45,11 @@ export type UsageMember = {
 };
 export type UsageModel = { model: string; usd: number; tokens: number; requests: number };
 export type UsageReport = { period: string; since: number; members: UsageMember[]; models: UsageModel[]; total_usd: number; total_tokens: number };
+export type MediaJob = {
+  id: string; conversation_id: string; attachment_id: string; kind: "transcribe" | "pdf"; status: string; progress: number;
+  provider: string; error: string; options: { start?: number; end?: number };
+  checkpoint: { pages_done?: number; pages_total?: number; next_chunk?: number }; result: Record<string, unknown>;
+};
 export type ScheduleKind = "hourly" | "daily" | "weekly" | "once";
 export type Schedule = {
   id: string; project_id: string; conversation_id: string | null; title: string; prompt: string; model: string; kind: ScheduleKind;
@@ -61,7 +66,7 @@ export type AgentTool = "git" | "ssh" | "memory" | "files" | "skills" | "mcp" | 
 export type AgentApprovals = "" | "sign" | "tap" | "dangerous" | "none";
 export type AgentApprovalAction = "commit_files" | "create_pull_request" | "create_branch" | "create_repo" | "project_repo_set" |
   "memory_save" | "memory_update" | "memory_link" | "memory_delete" | "create_file" | "delegate" | "mcp" |
-  "transcribe_media" | "media_cancel" | "drive_import";
+  "transcribe_media" | "process_pdf" | "media_cancel" | "drive_import";
 export type SpaceAgent = {
   id: string; name: string; model: string; instructions: string; tools: AgentTool[]; skills: string[];
   approvals?: AgentApprovals; approval_rules?: Partial<Record<AgentApprovalAction, AgentApprovals>>;
@@ -184,6 +189,8 @@ export class DeckApi {
   /** Продолжить прерванное задание (агент перезапускался): та же переписка, без нового сообщения. */
   retry = (cid: string) => this.s.request<{ run_id: string }>("POST", `/api/conversations/${enc(cid)}/retry`);
   cancel = (rid: string) => this.s.request("POST", `/api/runs/${enc(rid)}/cancel`);
+  mediaJobs = (cid: string) => this.s.request<MediaJob[]>("GET", `/api/conversations/${enc(cid)}/media-jobs`);
+  cancelMedia = (jid: string) => this.s.request<MediaJob>("POST", `/api/media-jobs/${enc(jid)}/cancel`);
 
   /**
    * Подтверждение инструмента. «Разрешить» подписывается ключом подтверждения (биометрия):

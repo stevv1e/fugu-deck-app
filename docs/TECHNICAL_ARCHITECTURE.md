@@ -55,7 +55,7 @@ Agent Harness использует стабильный cached prefix, отде�
 
 ### PDF/OCR worker
 
-`app.media_worker` дополнительно принимает PDF до 200 МБ/400 страниц. PyMuPDF извлекает текст, таблицы и метаданные изображений; Tesseract OCR запускается только при отсутствии текстового слоя. Space использует `process_pdf` и DB-backed media job, создаёт Markdown/JSON. В кластере запрос идёт `space → keyguard /media/pdf → Malaysia worker`; NetworkPolicy запрещает worker произвольный egress, активное содержимое PDF не исполняется.
+`app.media_worker` дополнительно принимает PDF до 200 МБ/400 страниц. PyMuPDF извлекает текст, таблицы и метаданные изображений; Tesseract OCR запускается только при отсутствии текстового слоя. `process_pdf` может ограничить диапазон `start/end`, создаёт Markdown/JSON и хранит параметры в SQLite. В кластере запрос идёт `space → keyguard /media/pdf → Malaysia worker`; фиксированные `status/result/cancel` позволяют продолжить опрос и остановить активный OCR. Keyguard сам подставляет namespace пространства, worker не принимает чужую задачу по одному угадыванию ID. NetworkPolicy запрещает worker произвольный egress, активное содержимое PDF не исполняется. Статус/результат worker находятся в памяти ограниченное время; параметры Space и checkpoints завершённых аудиофрагментов — в SQLite schema v30 без секретов.
 
 ### Keyguard
 
