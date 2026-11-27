@@ -1,6 +1,6 @@
 # Документация Fugu Deck
 
-Актуально для main **0.21.0**. Опубликованы приложение **0.18.1**, Space **0.20.0**, Control Plane **0.12.0** и Space Operator **0.14.0**.
+Актуально для **0.21.0**. Опубликованы Android **0.21.0**, Space **0.21.0**, Control Plane **0.12.0** и Space Operator **0.14.0**; Windows stable остаётся **0.18.1** до настройки Authenticode PFX.
 
 ## Документы
 

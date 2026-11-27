@@ -9,6 +9,10 @@
 - В карточке заметки добавлены понятный статус, дата последней проверки и кнопка «Проверить актуальность».
 - Проверка работает только через существующие Git providers; произвольный URL или SSH-доступ новому endpoint не добавлялся.
 
+[Скачать Android APK 0.21.0](https://github.com/stevv1e/fugu-deck-app/releases/download/v0.21.0/Fugu-Deck-Android-0.21.0-arm64.apk) · [Release](https://github.com/stevv1e/fugu-deck-app/releases/tag/v0.21.0) · [SHA-256](https://github.com/stevv1e/fugu-deck-app/releases/download/v0.21.0/SHA256SUMS.txt)
+
+Space 0.21.0 развёрнут. Windows stable остаётся 0.18.1: Release 0.21.0 остановлен обязательной проверкой Authenticode, поскольку `WIN_CSC_LINK`/PFX ещё не настроен. Проверка подписи не отключалась.
+
 ## Space 0.20.0 — 27 ноября 2026
 
 - Добавлены `repo_map` и `read_symbol`: агент сначала получает карту и сигнатуры, затем читает конкретные диапазоны кода.

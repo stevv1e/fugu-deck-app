@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 27.11.2026, main 0.21.0, опубликованный клиент 0.18.1, Space 0.20.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
+Снимок: 27.11.2026, Android 0.21.0, Windows stable 0.18.1, Space 0.21.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный Windows 0.21.0 заблокирован отсутствием PFX.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -14,16 +14,19 @@
 | Harness production chat | Реальный auto chat и resume после перезапуска; существующие Space спят и не пробуждались для проверки | PENDING |
 | Mobile core | 72 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
 | KB evidence/on-demand | 15 targeted backend tests: компактный поиск, memory_read, fresh/stale/unavailable, current revision, REST verify и source evidence; 5 KB mobile tests | PASS |
-| KB release/production | Space 0.21.0, APK/EXE 0.21.0, кнопка на Android/Windows и live-агент с изменившимся источником | PENDING |
-| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45901309008) |
-| Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main, включая Authenticode configuration, NotSigned и чужого издателя: `cd desktop/windows && npm test` | PASS для unit/main |
+| KB image/rollout | Space 0.21.0: signed image, schema v29, memory tools smoke; `deck-services` Synced/Healthy, оба sleeping Space spec обновлены | PASS |
+| KB Android release | APK 0.21.0 скачан; Ed25519 manifest, размер, SHA-256 и разрешённый сертификат APK проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330082) |
+| KB Windows release | Main validation и 10 Electron tests зелёные; Release остановлен отсутствием `WIN_CSC_LINK`/PFX | [BLOCKED — PFX](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330042) |
+| KB device/live | Кнопка на Android/Windows и live-агент с изменившимся источником | PENDING |
+| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46025748872) |
+| Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main 0.21.0, включая Authenticode configuration, NotSigned и чужого издателя | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46025749543) |
 | Authenticode release | Реальные `Get-AuthenticodeSignature = Valid`, совпадение subject и установка подписанного EXE; нужен сертификат издателя | PENDING |
-| Android release 0.18.1 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681555105) |
-| Windows release 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
-| Space image 0.20.0 | GHCR build, push, cosign sign/verify; отдельный migration smoke schema v29 в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46015574244) |
+| Android release 0.21.0 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330082) |
+| Windows stable 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
+| Space image 0.21.0 | GHCR build, push, cosign sign/verify; schema v29 и KB tools smoke в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026296725) |
 | Platform images 0.14.0 | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017508693) |
 | Platform validation | Go race tests для четырёх компонентов и disposable Keycloak | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017488005) |
-| Production rollout | `deck-services` и `landing` Synced/Healthy; Control Plane 0.12.0, latest 0.18.1, previous 0.17.1, Space Operator 0.14.0, Space image 0.20.0; оба sleeping Space spec обновлены | PASS |
+| Production rollout | `deck-services` и `landing` Synced/Healthy; Space 0.21.0, Android 0.21.0 на лендинге, Windows latest/stable 0.18.1, previous 0.17.1; Control Plane не указывает на отсутствующий EXE | PASS |
 | Production chat mode | Личные Space спят; сквозной запуск и переключение на production ещё не выполнены | PENDING |
 | Большое видео | Production-видео 582 МБ → keyguard → FFmpeg worker → корректные OGG-фрагменты | PASS |
 | Space → worker | Реальный вызов через keyguard, получен корректный OGG | PASS |
