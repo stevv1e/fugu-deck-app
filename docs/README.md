@@ -1,6 +1,6 @@
 # Документация Fugu Deck
 
-Актуально для **0.22.0**. Выпускаются Android **0.22.0**, Space **0.22.0** и Keyguard **0.15.0**; Control Plane **0.12.0** и Space Operator **0.14.0** не меняются. Windows stable остаётся **0.18.1** до настройки Authenticode PFX.
+Актуально для **0.22.0**. Опубликованы Android **0.22.0**, Space **0.22.0** и Keyguard **0.15.0**; Control Plane **0.12.0** и Space Operator **0.14.0** не меняются. Windows stable остаётся **0.18.1** до настройки Authenticode PFX.
 
 ## Документы
 

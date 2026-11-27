@@ -11,7 +11,9 @@
 - API-ключи, DPoP/mTLS-ключи и подписи не записываются в checkpoints. Если standalone перезапуск потерял пользовательский ключ в памяти, для продолжения нужен настроенный серверный ключ или новый запрос с ключом.
 - Активное содержимое PDF не исполняется и не попадает в текстовый результат; добавлены тесты отмены, диапазонов, namespace и восстановления.
 
-Windows stable остаётся 0.18.1 до настройки Authenticode PFX; новый Windows Release не выдаётся за опубликованный без подписанного EXE.
+[Скачать Android APK 0.22.0](https://github.com/stevv1e/fugu-deck-app/releases/download/v0.22.0/Fugu-Deck-Android-0.22.0-arm64.apk) · [Release](https://github.com/stevv1e/fugu-deck-app/releases/tag/v0.22.0) · [SHA-256](https://github.com/stevv1e/fugu-deck-app/releases/download/v0.22.0/SHA256SUMS.txt)
+
+Keyguard 0.15.0 и Malaysia worker развёрнуты перед Space 0.22.0. Windows stable остаётся 0.18.1 до настройки Authenticode PFX; новый Windows Release не выдаётся за опубликованный без подписанного EXE.
 
 ## 0.21.0 — 27 ноября 2026
 

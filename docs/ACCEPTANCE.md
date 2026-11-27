@@ -18,21 +18,21 @@
 | KB Android release | APK 0.21.0 скачан; Ed25519 manifest, размер, SHA-256 и разрешённый сертификат APK проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330082) |
 | KB Windows release | Main validation и 10 Electron tests зелёные; Release остановлен отсутствием `WIN_CSC_LINK`/PFX | [BLOCKED — PFX](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330042) |
 | KB device/live | Кнопка на Android/Windows и live-агент с изменившимся источником | PENDING |
-| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46025748872) |
-| Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main 0.21.0, включая Authenticode configuration, NotSigned и чужого издателя | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46025749543) |
+| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron 0.22.0 | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46067186887) |
+| Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main 0.22.0, включая Authenticode configuration, NotSigned и чужого издателя | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46067186662) |
 | Authenticode release | Реальные `Get-AuthenticodeSignature = Valid`, совпадение subject и установка подписанного EXE; нужен сертификат издателя | PENDING |
 | Android release 0.21.0 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026330082) |
 | Windows stable 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
 | Space image 0.21.0 | GHCR build, push, cosign sign/verify; schema v29 и KB tools smoke в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46026296725) |
 | Platform images 0.14.0 | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017508693) |
 | Platform validation | Go race tests для четырёх компонентов и disposable Keycloak | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017488005) |
-| Production rollout | `deck-services` и `landing` Synced/Healthy; Space 0.21.0, Android 0.21.0 на лендинге, Windows latest/stable 0.18.1, previous 0.17.1; Control Plane не указывает на отсутствующий EXE | PASS |
+| Production rollout | Keyguard 0.15.0 и Malaysia worker 0.22.0 выкатаны первыми; затем Space specs 0.22.0 и Android 0.22.0 на лендинге; Windows latest/stable 0.18.1, previous 0.17.1 | PASS |
 | Production chat mode | Личные Space спят; сквозной запуск и переключение на production ещё не выполнены | PENDING |
 | Большое видео | Production-видео 582 МБ → keyguard → FFmpeg worker → корректные OGG-фрагменты | PASS |
 | Space → worker | Реальный вызов через keyguard, получен корректный OGG | PASS |
 | PDF/OCR 0.22.0 | 19 media tests: диапазон, активный PDF, namespace, удалённая отмена, восстановление PDF/audio и миграция v29→v30 | PASS |
 | Keyguard 0.15.0 | Go 1.26 `go test ./...`: фиксированные status/result/cancel routes, range/job validation и namespace | PASS |
-| Media release/rollout | Signed Space 0.22.0 и Keyguard 0.15.0, Android 0.22.0 APK/manifest, sleeping Space specs и Malaysia worker | PENDING |
+| Media release/rollout | [Android 0.22.0](https://github.com/stevv1e/fugu-deck-app/actions/runs/46068049339), [Space image](https://github.com/stevv1e/fugu-deck-app/actions/runs/46067702341), [Keyguard 0.15.0](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46068047292); APK/manifest/SHA-256 и опубликованный image schema v30 проверены | PASS |
 | Media device/live | Большой PDF из Drive, выбор диапазона, кнопка отмены и реальные перезапуски Space/worker | PENDING |
 
 ## 2. Реальные Android и Windows
