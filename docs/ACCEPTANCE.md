@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 26.11.2026, опубликованный клиент 0.18.1, Space 0.19.0, Control Plane 0.12.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
+Снимок: 27.11.2026, опубликованный клиент 0.18.1, Space 0.20.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -10,17 +10,18 @@
 | --- | --- | --- |
 | Backend | 129 passed, 1 skipped в main со schema v29, durable resume, router, repo map и evals: `cd backend && python -m pytest -q` | PASS |
 | Harness offline | Router 4/4; synthetic 20 files: map reduction 76,45%, одна функция 83 символа против 113580 исходных; live модели не запускались | PASS только offline |
-| Harness production | Опубликованный Space 0.20.0, migration v29, реальный auto chat и resume после перезапуска | PENDING |
+| Harness image/migration | Опубликованный Space 0.20.0: свежая БД получила schema v29 и durable tables, deterministic router выбрал code-модель; router также проверен в sleeping Space specs | PASS |
+| Harness production chat | Реальный auto chat и resume после перезапуска; существующие Space спят и не пробуждались для проверки | PENDING |
 | Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
-| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681966701) |
+| Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45901309008) |
 | Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main, включая Authenticode configuration, NotSigned и чужого издателя: `cd desktop/windows && npm test` | PASS для unit/main |
 | Authenticode release | Реальные `Get-AuthenticodeSignature = Valid`, совпадение subject и установка подписанного EXE; нужен сертификат издателя | PENDING |
 | Android release 0.18.1 | GitHub Actions `apk`, release event; APK скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681555105) |
 | Windows release 0.18.1 | GitHub Actions `exe`, release event; EXE скачан, подпись manifest и SHA-256 проверены | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45681554880) |
-| Space image 0.19.0 | GHCR build, push, cosign sign/verify; отдельный migration smoke schema v28 в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45679566246) |
-| Platform images 0.12.0 | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/45679572685) |
-| Platform validation | Go race tests для четырёх компонентов и disposable Keycloak; failed Maven job перезапущен успешно | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/45679465787) |
-| Production rollout | `deck-services` и `landing` Synced/Healthy; Control Plane 0.12.0, latest 0.18.1, previous 0.17.1, Space image 0.19.0 | PASS |
+| Space image 0.20.0 | GHCR build, push, cosign sign/verify; отдельный migration smoke schema v29 в опубликованном образе | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/46015574244) |
+| Platform images 0.14.0 | keyguard, control-plane, space-operator и ssh-gateway собраны и подписаны | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017508693) |
+| Platform validation | Go race tests для четырёх компонентов и disposable Keycloak | [PASS](https://github.com/stevv1e/fugu-deck-platform/actions/runs/46017488005) |
+| Production rollout | `deck-services` и `landing` Synced/Healthy; Control Plane 0.12.0, latest 0.18.1, previous 0.17.1, Space Operator 0.14.0, Space image 0.20.0; оба sleeping Space spec обновлены | PASS |
 | Production chat mode | Личные Space спят; сквозной запуск и переключение на production ещё не выполнены | PENDING |
 | Большое видео | Production-видео 582 МБ → keyguard → FFmpeg worker → корректные OGG-фрагменты | PASS |
 | Space → worker | Реальный вызов через keyguard, получен корректный OGG | PASS |

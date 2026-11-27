@@ -59,7 +59,7 @@ python -m pytest -q
   MODEL_ROUTER_JSON='{"simple":"google:gemini-3.5-flash-lite","code":"kimi:kimi-for-coding","complex":"anthropic:claude-sonnet-5-5","media":"google:gemini-3.8-flash"}'
   ```
 
-  Все назначения должны присутствовать в каталоге; отсутствие ключа выбранного провайдера — явная ошибка, а не скрытый fallback. В team-пространствах auto отключён, поскольку спонсорское разрешение выдаётся на точную модель.
+  Все назначения должны присутствовать в каталоге; отсутствие ключа выбранного провайдера — явная ошибка, а не скрытый fallback. В team-пространствах auto отключён, поскольку спонсорское разрешение выдаётся на точную модель. В Kubernetes тот же JSON задаётся оператору через `DECK_MODEL_ROUTER_JSON`; Space Operator 0.14.0 проверяет категории и формат `provider:model`, затем передаёт только эту публичную настройку в `MODEL_ROUTER_JSON` каждого Space.
 
 ### Quality/cost/latency evals
 
