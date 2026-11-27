@@ -62,6 +62,32 @@ def relevance(stems_: list[str], title: str, content: str, tags: str = "") -> fl
     return sum(2.0 if s in t else 1.0 if s in c else 0.0 for s in stems_)
 
 
+def evidence(content: str, query: str = "", width: int = 360) -> tuple[str, bool]:
+    """Короткий фрагмент вокруг первого совпадения; полный текст читается отдельно по ID заметки."""
+    text = re.sub(r"\s+", " ", content or "").strip()
+    width = max(80, min(width, 1000))
+    if len(text) <= width:
+        return text, False
+    lower = text.lower()
+    positions = [p for s in stems(query) if (p := lower.find(s)) >= 0]
+    center = min(positions) if positions else 0
+    start = max(0, center - width // 3)
+    end = min(len(text), start + width)
+    start = max(0, end - width)
+    fragment = text[start:end].strip()
+    return ("…" if start else "") + fragment + ("…" if end < len(text) else ""), True
+
+
+def verification_state(m: dict) -> str:
+    if m.get("stale"):
+        return "stale"
+    if m.get("verification_error"):
+        return "unavailable"
+    if m.get("src_file") and m.get("src_version") and m.get("src_checked"):
+        return "fresh"
+    return "unverified"
+
+
 def classify(content: str, tags: str = "") -> str:
     """Область заметки по словам. Грубая, но предсказуемая замена кластеризации; человек может задать область сам."""
     text = f"{tags} {content}".lower()
@@ -157,6 +183,7 @@ def graph(project: dict, memories: list[dict], links: list[dict], now: float | N
             "last_verified": m.get("src_checked") if not m.get("stale") and not m.get("verification_error") else None,
             "valid_from": m.get("created_at"), "revision": m.get("src_version"),
             "verification_error": m.get("verification_error") or "",
+            "verification_state": verification_state(m), "can_verify": bool(m.get("src_file") and m.get("src_version")),
             "pinned": bool(m.get("pinned")), "tags": m.get("tags") or "",
         })
         groups[area].setdefault(group_of(m.get("tags") or "", m.get("grp")), []).append(nid)

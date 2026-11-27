@@ -102,3 +102,31 @@ async def test_verification_metadata_distinguishes_fresh_stale_and_unavailable(d
     await db.update_memory(mid, stale=False, stale_reason="", verification_error=None, src_checked=now + 10)
     recovered = memory_tools._fmt(await db.get_memory(mid), ctx)["verification"]
     assert recovered["state"] == "fresh" and recovered["note"] == ""
+
+
+async def test_on_demand_verify_returns_current_revision_and_source_evidence(db):
+    git = FakeGit()
+    original = ("введение\n" * 100 + "Сетевая настройка: порт 443\n" + "продолжение\n" * 100).encode()
+    git.files["a.md"] = original
+    mid = await note(db, "a.md", kb_watch.version_of(original), title="Сетевая настройка")
+    now = 1_000_000_000.0
+    fresh = await kb_watch.verify_note(db, {"github": git}, await db.get_memory(mid), now=now, include_evidence=True)
+    assert fresh["state"] == "fresh" and fresh["last_verified"] == now
+    assert fresh["revision"] == fresh["current_revision"] == kb_watch.version_of(original)
+    assert "Сетевая настройка: порт 443" in fresh["source_evidence"] and fresh["source_truncated"] is True
+
+    changed = original.replace(b"443", b"8443")
+    git.files["a.md"] = changed
+    stale = await kb_watch.verify_note(db, {"github": git}, await db.get_memory(mid), now=now + 10, include_evidence=True)
+    assert stale["state"] == "stale" and stale["last_verified"] is None
+    assert stale["revision"] == kb_watch.version_of(original) and stale["current_revision"] == kb_watch.version_of(changed)
+    assert "8443" in stale["source_evidence"] and "изменился" in stale["note"]
+
+
+async def test_on_demand_verify_requires_machine_readable_source(db):
+    m = await db.add_memory("general", "факт без источника")
+    try:
+        await kb_watch.verify_note(db, {}, m)
+        raise AssertionError("проверка без источника принята")
+    except ValueError as e:
+        assert "нет машинно проверяемого" in str(e)

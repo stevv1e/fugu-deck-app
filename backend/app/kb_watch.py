@@ -38,34 +38,57 @@ def source_file(v: object) -> tuple[str, str] | None:
     return json.dumps({"provider": prov, "repo": repo, "path": path}, ensure_ascii=False), ver
 
 
+async def verify_note(db, providers: dict, m: dict, now: float | None = None,
+                      include_evidence: bool = False) -> dict:
+    """Сверить одну заметку по требованию или из фонового прохода, не меняя её записанную ревизию."""
+    from .kb import evidence
+
+    if not m.get("src_file") or not m.get("src_version"):
+        raise ValueError("у заметки нет машинно проверяемого файла-источника")
+    now = now or time.time()
+    f = json.loads(m["src_file"])
+    source = f"{f['repo']}/{f['path']}"
+    p = providers.get(f["provider"])
+    stale: bool | None = None
+    reason: str | None = None
+    seen = False
+    raw: bytes | None = None
+    current: str | None = None
+    if p:
+        try:
+            raw = await p.read_file(f["repo"], f["path"], None)
+            seen, current = True, version_of(raw)
+        except ProviderError as e:
+            if re.search(r"\b404\b", str(e)):
+                stale, reason, seen = True, f"файл-источник удалён или переименован: {source}", True
+        if seen and stale is None:
+            if current != m["src_version"]:
+                stale, reason = True, f"файл-источник изменился: {source}"
+            elif m["stale"] and m.get("stale_reason"):
+                stale = False
+            elif m["stale"]:
+                stale, reason = True, m.get("stale_reason")
+            else:
+                stale = False
+    await db.mark_source(m["id"], stale=stale, reason=reason, now=now)
+    state = "stale" if stale else "fresh" if seen else "unavailable"
+    out = {"id": m["id"], "state": state, "source": source, "revision": m["src_version"],
+           "current_revision": current, "last_checked": now, "last_verified": now if state == "fresh" else None,
+           "note": reason or ("" if seen else "источник недоступен — сведения не подтверждены")}
+    if include_evidence and raw is not None:
+        text = raw.decode("utf-8", "replace")
+        query = f"{m.get('title') or ''} {m.get('content') or ''}"
+        out["source_evidence"], out["source_truncated"] = evidence(text, query, 480)
+    return out
+
+
 async def check_once(db, providers: dict, now: float | None = None) -> dict[str, int]:
     """Один проход: сверить заметки, которые давно не сверяли. Возвращает счётчики (для журнала и тестов)."""
     now = now or time.time()
     n = {"fresh": 0, "stale": 0, "skipped": 0}
     for m in await db.notes_to_check(now - CHECK_EVERY, BATCH):
-        f = json.loads(m["src_file"])
-        p = providers.get(f["provider"])
-        stale: bool | None = None  # None — пометку не трогаем
-        reason: str | None = None
-        seen = False               # удалось сверить с файлом
-        if p:
-            try:
-                raw = await p.read_file(f["repo"], f["path"], None)
-                seen = True
-            except ProviderError as e:
-                if re.search(r"\b404\b", str(e)):
-                    stale, reason, seen = True, f"файл-источник удалён или переименован: {f['repo']}/{f['path']}", True
-            if seen and stale is None:
-                if version_of(raw) != m["src_version"]:
-                    stale, reason = True, f"файл-источник изменился: {f['repo']}/{f['path']}"
-                elif m["stale"] and m.get("stale_reason"):
-                    stale = False  # файл снова как при записи — снимаем свою же пометку
-                elif m["stale"]:
-                    stale, reason = True, m.get("stale_reason")
-                else:
-                    stale = False
-        await db.mark_source(m["id"], stale=stale, reason=reason, now=now)
-        n["stale" if stale else "fresh" if seen else "skipped"] += 1
+        result = await verify_note(db, providers, m, now)
+        n["stale" if result["state"] == "stale" else "fresh" if result["state"] == "fresh" else "skipped"] += 1
     return n
 
 

@@ -143,3 +143,28 @@ async def test_agent_thought_for_kb_screen(tmp_path):
                                                             [f"n{b['id']}", "связана с найденной заметкой"]], r1
     finally:
         await db.close()
+
+
+def test_evidence_is_short_and_centered_on_match():
+    text = "начало " * 100 + "nginx слушает порт 443 " + "конец " * 100
+    fragment, truncated = kb.evidence(text, "nginx")
+    assert truncated is True and "nginx слушает порт 443" in fragment
+    assert fragment.startswith("…") and fragment.endswith("…") and len(fragment) <= 362
+    assert kb.evidence("  одна\nзаметка  ", "другое") == ("одна заметка", False)
+
+
+async def test_agent_search_returns_evidence_and_memory_read_returns_full_note(tmp_path):
+    db = Database(str(tmp_path / "kb.sqlite3"))
+    await db.connect()
+    try:
+        content = "начало " * 100 + "needle: текущий порт 443 " + "конец " * 100
+        m = await db.add_memory(DEFAULT_PROJECT, content, title="Сетевая настройка")
+        ctx = SimpleNamespace(db=db, project_id=DEFAULT_PROJECT, project={}, readable_projects={DEFAULT_PROJECT: "general"},
+                              run_id="r1", conversation_id="c1", broker=None)
+        found = await memory_tools.memory_search(ctx, {"query": "needle"})
+        assert found[0]["truncated"] is True and len(found[0]["content"]) <= 362
+        assert "needle: текущий порт 443" in found[0]["content"] and content != found[0]["content"]
+        full = await memory_tools.memory_read(ctx, {"id": m["id"]})
+        assert full["content"] == content and full["truncated"] is False
+    finally:
+        await db.close()

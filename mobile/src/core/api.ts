@@ -5,11 +5,17 @@ import type { DeviceSession } from "./session";
 import type { Conversation, ConversationFull, DeviceRow, Project, RunEvent } from "./types";
 
 /** Заметка базы знаний, как её отдаёт агент для экрана. id — для экрана (n<число>), mid — номер записи для правки. */
+export type NoteVerificationState = "fresh" | "stale" | "unavailable" | "unverified";
+export type NoteVerification = {
+  id: number; state: Exclude<NoteVerificationState, "unverified">; source: string; revision: string; current_revision?: string | null;
+  last_checked: number; last_verified?: number | null; note: string; source_evidence?: string; source_truncated?: boolean;
+};
 export type KbNote = {
   id: string; mid: number | null; area: string; title: string; body: string; days: number; source: string; src: string;
   stale: boolean; ext: boolean; pinned: boolean; tags: string; hub?: boolean;
   stale_reason?: string; // почему «устарела»: файл-источник изменился или удалён (сверка раз в сутки)
   last_checked?: number | null; last_verified?: number | null; valid_from?: number; revision?: string | null; verification_error?: string;
+  verification_state?: NoteVerificationState; can_verify?: boolean;
 };
 export type KbGraph = {
   project: { id: string; name: string }; hub: string; notes: KbNote[]; edges: [string, string, string, number][];
@@ -62,7 +68,11 @@ export type SpaceAgent = {
 };
 
 /** Найденная заметка; linked_to — найдена не по словам, а как связанная с заметкой linked_to. */
-export type FoundNote = { id: number; project_id: string; project_name?: string; title?: string | null; content: string; area?: string; tags: string; linked_to?: number; link_type?: string };
+export type FoundNote = {
+  id: number; project_id: string; project_name?: string; title?: string | null; content: string; area?: string; tags: string;
+  linked_to?: number; link_type?: string; truncated?: boolean; source?: string; last_checked?: number | null;
+  verification_state?: NoteVerificationState; can_verify?: boolean;
+};
 
 export type RepoRef = { provider: "github" | "gitlab"; repo: string };
 export type RepoInfo = { full_name: string; private?: boolean; description?: string | null; url?: string; updated_at?: string };
@@ -99,6 +109,7 @@ export class DeckApi {
   kb = (pid: string) => this.s.request<KbGraph>("GET", `/api/projects/${enc(pid)}/kb`);
   addNote = (pid: string, n: NoteInput) => this.s.request<{ id: number }>("POST", `/api/projects/${enc(pid)}/memory`, n);
   updateNote = (mid: number, n: Partial<NoteInput> & { stale?: boolean }) => this.s.request("PATCH", `/api/memory/${mid}`, n);
+  verifyNote = (mid: number) => this.s.request<NoteVerification>("POST", `/api/memory/${mid}/verify`);
   deleteNote = (mid: number) => this.s.request("DELETE", `/api/memory/${mid}`);
   linkNotes = (from: number, to: number, type: string) => this.s.request("POST", `/api/memory/${from}/links`, { to, type });
   searchNotes = (pid: string, q: string) =>

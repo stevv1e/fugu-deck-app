@@ -9,8 +9,9 @@ import { ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
-import type { FoundNote, KbGraph, KbNote, NoteProposal } from "@/core/api";
+import type { FoundNote, KbGraph, KbNote, NoteProposal, NoteVerification } from "@/core/api";
 import { kbInjection, parseKbMessage } from "@/kb/inject";
+import { verificationLabel, verificationMessage } from "@/kb/verification";
 import { KB_HTML } from "@/kb/kbHtml";
 import { pickBase64, saveBase64 } from "@/platform/pick";
 import { prefs } from "@/platform/storage";
@@ -36,6 +37,7 @@ export default function KnowledgeBase() {
   const [tools, setTools] = useState(false); // поиск и Obsidian
   const [q, setQ] = useState("");
   const [found, setFound] = useState<FoundNote[] | null>(null);
+  const [proof, setProof] = useState<NoteVerification | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [linkType, setLinkType] = useState("dep");
   const [linkQ, setLinkQ] = useState("");
@@ -77,6 +79,7 @@ export default function KnowledgeBase() {
     }
     if (m.type === "edit") {
       const n = graph?.notes.find((x: KbNote) => x.mid === m.mid);
+      setProof(null);
       if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
     }
   };
@@ -140,7 +143,19 @@ export default function KnowledgeBase() {
   });
   const openNote = (id: number) => {
     const n = graph?.notes.find((x: KbNote) => x.mid === id);
+    setProof(null);
     if (n) setDraft({ mid: n.mid, title: n.title, content: n.body, area: n.area, tags: n.tags, stale: n.stale, reason: n.stale_reason });
+  };
+  const verify = () => {
+    const mid = draft?.mid;
+    if (!api || !mid || !draftNote?.can_verify) return;
+    return task(async () => {
+      const result = await api.verifyNote(mid);
+      setProof(result);
+      setDraft((d) => d?.mid === mid ? { ...d, stale: result.state === "unavailable" ? d.stale : result.state === "stale", reason: result.note } : d);
+      await load();
+      return verificationMessage(result);
+    });
   };
 
   const toggleReview = async () => {
@@ -194,8 +209,12 @@ export default function KnowledgeBase() {
           {found?.map((n) => (
             <Card key={`${n.id}-${n.linked_to ?? ""}`} onPress={n.project_id === pid ? () => openNote(n.id) : undefined}>
               <Txt style={{ fontWeight: "600" }} numberOfLines={1}>{n.title || n.content.split("\n")[0]}</Txt>
-              <Txt kind="dim" numberOfLines={2}>{n.content}</Txt>
-              <Txt kind="small">{n.linked_to ? "связана с найденной" : "по словам"}{n.project_id !== pid && n.project_name ? ` · проект ${n.project_name}` : ""}</Txt>
+              <Txt kind="dim" numberOfLines={4}>{n.content}</Txt>
+              {n.source ? <Txt kind="small">Источник: {n.source}</Txt> : null}
+              <Txt kind="small">
+                {n.linked_to ? "связана с найденной" : "по словам"}{n.project_id !== pid && n.project_name ? ` · проект ${n.project_name}` : ""}
+                {` · ${verificationLabel(n.verification_state)}`}{n.last_checked ? ` · проверено ${new Date(n.last_checked * 1000).toLocaleString()}` : ""}
+              </Txt>
             </Card>
           ))}
           <Txt kind="label">заметки агента</Txt>
@@ -267,9 +286,20 @@ export default function KnowledgeBase() {
           {draft.mid !== null ? (
             <>
               {draftNote?.source ? <Txt kind="small">Источник: {draftNote.source}</Txt> : null}
-              {draftNote?.revision ? <Txt kind="small">Ревизия: {draftNote.revision}</Txt> : null}
-              {draftNote?.last_verified ? <Txt kind="small">Подтверждено: {new Date(draftNote.last_verified * 1000).toLocaleString()}</Txt> : null}
+              <Txt kind="small" color={draftNote?.verification_state === "stale" || draftNote?.verification_state === "unavailable" ? p.warn : undefined}>
+                Состояние: {verificationLabel(draftNote?.verification_state)}
+              </Txt>
+              {draftNote?.revision ? <Txt kind="small">Записанная ревизия: {draftNote.revision}</Txt> : null}
+              {draftNote?.last_checked ? <Txt kind="small">Последняя проверка: {new Date(draftNote.last_checked * 1000).toLocaleString()}</Txt> : null}
               {draftNote?.verification_error ? <Txt kind="small" color={p.warn}>{draftNote.verification_error}</Txt> : null}
+              {draftNote?.can_verify ? <Btn small title="Проверить актуальность" onPress={verify} disabled={busy} style={{ alignSelf: "flex-start" }} /> : null}
+              {proof?.current_revision && proof.current_revision !== proof.revision ? <Txt kind="small">Текущая ревизия: {proof.current_revision}</Txt> : null}
+              {proof?.source_evidence ? (
+                <Card>
+                  <Txt kind="label">фрагмент текущего источника</Txt>
+                  <Txt selectable>{proof.source_evidence}</Txt>
+                </Card>
+              ) : null}
               <Btn small kind="ghost" title={draft.stale ? "Отмечена устаревшей — снять отметку" : "Отметить устаревшей"} onPress={() => setDraft({ ...draft, stale: !draft.stale })} />
               {draft.stale && draft.reason ? <Txt kind="small" color={p.warn}>{draft.reason}</Txt> : null}
             </>

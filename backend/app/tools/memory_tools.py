@@ -9,9 +9,10 @@ from .providers import ProviderError
 from .registry import ToolContext, obj, tool
 
 
-def _fmt(m: dict, ctx: ToolContext) -> dict:
-    out = {"id": m["id"], "title": kb.title_of(m["content"], m.get("title")), "content": m["content"], "tags": m["tags"],
-           "pinned": bool(m["pinned"])}
+def _fmt(m: dict, ctx: ToolContext, query: str = "", compact: bool = False) -> dict:
+    content, truncated = kb.evidence(m["content"], query) if compact else (m["content"], False)
+    out = {"id": m["id"], "title": kb.title_of(m["content"], m.get("title")), "content": content, "tags": m["tags"],
+           "pinned": bool(m["pinned"]), "truncated": truncated}
     if m.get("src_file") or m.get("source_ref"):
         source = m.get("source_ref") or ""
         if m.get("src_file"):
@@ -20,10 +21,11 @@ def _fmt(m: dict, ctx: ToolContext) -> dict:
                 source = f"{src['repo']}/{src['path']}"
             except (ValueError, KeyError):
                 source = "файл-источник"
-        state = "stale" if m.get("stale") else "unavailable" if m.get("verification_error") else "fresh" if m.get("src_checked") and m.get("src_file") else "unverified"
+        state = kb.verification_state(m)
         out["verification"] = {"state": state, "source": source, "revision": m.get("src_version"),
                                "last_checked": m.get("src_checked"), "last_verified": m.get("src_checked") if state == "fresh" else None,
-                               "valid_from": m.get("created_at"), "note": m.get("verification_error") or m.get("stale_reason") or ""}
+                               "valid_from": m.get("created_at"), "note": m.get("verification_error") or m.get("stale_reason") or "",
+                               "can_verify": bool(m.get("src_file") and m.get("src_version"))}
     if m.get("stale"):
         out["stale"] = "устарела: " + (m.get("stale_reason") or "источник мог измениться") + " — перепроверь и обнови заметку"
     if m.get("external"):
@@ -51,8 +53,9 @@ async def _changed(ctx: ToolContext, action: str, memory: dict | None = None, mi
 
 @tool("memory_search",
       "Поиск по памяти проекта (факты, решения, договорённости). Ищет также в памяти связанных проектов "
-      "(только чтение). project — имя проекта, чтобы искать только в нём. Словоформы не важны; ищет по словам, "
-      "а не по смыслу — если не нашлось, спроси иначе: синонимы, по-английски, имя сервиса или файла.",
+      "(только чтение). Возвращает короткие доказательства; полный текст читай через memory_read. Перед использованием "
+      "изменчивых сведений вызови memory_verify. Словоформы не важны; ищет по словам, а не по смыслу — если не нашлось, "
+      "спроси иначе: синонимы, по-английски, имя сервиса или файла. project — имя проекта для поиска только в нём.",
       obj({"query": {"type": "string"}, "project": {"type": "string"},
            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 15}}, ["query"]),
       group="memory", title="Поиск в памяти")
@@ -64,12 +67,12 @@ async def memory_search(ctx, a):
         if not ids:
             raise ProviderError(f"нет доступа к памяти проекта {a['project']}")
     rows = await ctx.db.search_memories(ids, a["query"], a.get("limit", 15))
-    out = [_fmt(m, ctx) for m in rows]
+    out = [_fmt(m, ctx, a["query"], compact=True) for m in rows]
     # Соседи по связям на один шаг (сильные — первыми): короткий связанный контекст вместо чтения исходников.
     near = await ctx.db.note_neighbors([m["id"] for m in rows], 6)
     for m in near:
         if m["project_id"] in ctx.readable_projects:
-            f = _fmt(m, ctx)
+            f = _fmt(m, ctx, a["query"], compact=True)
             f["linked_to"] = m["link_from"]
             f["link"] = kb.LINK_TYPES.get(m["link_type"], m["link_type"])
             out.append(f)
@@ -82,6 +85,32 @@ async def memory_search(ctx, a):
     # Прочитанные заметки снова «свежие», связи между использованными вместе — сильнее.
     await ctx.db.record_note_uses([m["id"] for m in [*rows, *near] if m["project_id"] == ctx.project_id], ctx.run_id)
     return out
+
+
+@tool("memory_read", "Прочитать полную заметку по ID из memory_search, если короткого доказательства недостаточно.",
+      obj({"id": {"type": "integer"}}, ["id"]), group="memory", title="Прочитать заметку")
+async def memory_read(ctx, a):
+    m = await ctx.db.get_memory(a["id"])
+    if not m or m["project_id"] not in ctx.readable_projects:
+        raise ProviderError("запись памяти не найдена")
+    if m["project_id"] == ctx.project_id:
+        await ctx.db.record_note_uses([m["id"]], ctx.run_id)
+    return _fmt(m, ctx)
+
+
+@tool("memory_verify", "Немедленно сверить заметку с её файлом GitHub/GitLab. Возвращает fresh, stale или unavailable, "
+      "recorded/current revision и короткий фрагмент источника. Не помечает изменчивый факт подтверждённым без сверки.",
+      obj({"id": {"type": "integer"}}, ["id"]), group="memory", title="Проверить актуальность")
+async def memory_verify(ctx, a):
+    m = await ctx.db.get_memory(a["id"])
+    if not m or m["project_id"] not in ctx.readable_projects:
+        raise ProviderError("запись памяти не найдена")
+    try:
+        result = await kb_watch.verify_note(ctx.db, ctx.providers, m, include_evidence=True)
+    except ValueError as e:
+        raise ProviderError(str(e)) from e
+    await _changed(ctx, "verified", mid=m["id"])
+    return result
 
 
 SOURCE_FILE = {"type": "object", "description": "факт взят из файла репозитория: provider, repo, path и version из read_file — "

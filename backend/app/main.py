@@ -946,6 +946,18 @@ async def list_memory(pid: str, q: str = "", linked: bool = False, u: dict = Me)
             if m["project_id"] in ids:
                 m["linked_to"] = m["link_from"]
                 rows.append(m)
+        for m in rows:
+            m["content"], m["truncated"] = kb.evidence(m["content"], q)
+            m["verification_state"] = kb.verification_state(m)
+            m["can_verify"] = bool(m.get("src_file") and m.get("src_version"))
+            m["source"] = m.get("source_ref") or ""
+            m["last_checked"] = m.get("src_checked")
+            if m.get("src_file"):
+                try:
+                    src = json.loads(m["src_file"])
+                    m["source"] = f"{src['repo']}/{src['path']}"
+                except (ValueError, KeyError):
+                    m["source"] = "файл-источник"
         return rows
     out = []
     for i in ids:
@@ -1040,6 +1052,23 @@ async def unlink_notes(mid: int, other: int, type: str | None = None, u: dict = 
     n = await db().delete_note_link(mid, other, type)
     await broker().publish("memory", m["project_id"], action="unlinked", memory_id=mid, by=u["display_name"])
     return {"ok": True, "removed": n}
+
+
+@app.post("/api/memory/{mid}/verify")
+async def verify_memory(mid: int, u: dict = Me):
+    m = await db().get_memory(mid)
+    if not m:
+        raise HTTPException(404, "Запись не найдена")
+    await need(u, m["project_id"])
+    git = agent().git_providers()
+    try:
+        result = await kb_watch.verify_note(db(), git, m, include_evidence=True)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        await _close_workspace(git)
+    await broker().publish("memory", m["project_id"], action="verified", memory_id=mid, by=u["display_name"])
+    return result
 
 
 async def _memory_for_edit(mid: int, u: dict) -> dict:

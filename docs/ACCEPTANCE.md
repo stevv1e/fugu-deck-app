@@ -1,6 +1,6 @@
 # Acceptance matrix Fugu Deck
 
-Снимок: 27.11.2026, опубликованный клиент 0.18.1, Space 0.20.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
+Снимок: 27.11.2026, main 0.21.0, опубликованный клиент 0.18.1, Space 0.20.0, Control Plane 0.12.0, Space Operator 0.14.0; ручные сценарии нового релиза ещё не закрыты. Authenticode реализован в main, но подписанный релиз ещё не выпущен.
 
 Матрица не заменяет тесты и не выдаёт их за проверку на устройстве. `PASS` означает, что указанный уровень проверки действительно выполнен; `PENDING` — сценарий ещё нужно выполнить на опубликованных APK/EXE. Пароли, токены, device IDs, invite/pairing secrets и содержимое чатов в результаты не вносятся.
 
@@ -8,11 +8,13 @@
 
 | Область | Проверено | Результат |
 | --- | --- | --- |
-| Backend | 129 passed, 1 skipped в main со schema v29, durable resume, router, repo map и evals: `cd backend && python -m pytest -q` | PASS |
+| Backend | 134 passed, 1 skipped в main со schema v29, durable resume, router, repo map, evals и KB evidence/verify: `cd backend && python -m pytest -q` | PASS |
 | Harness offline | Router 4/4; synthetic 20 files: map reduction 76,45%, одна функция 83 символа против 113580 исходных; live модели не запускались | PASS только offline |
 | Harness image/migration | Опубликованный Space 0.20.0: свежая БД получила schema v29 и durable tables, deterministic router выбрал code-модель; router также проверен в sleeping Space specs | PASS |
 | Harness production chat | Реальный auto chat и resume после перезапуска; существующие Space спят и не пробуждались для проверки | PENDING |
-| Mobile core | 71 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
+| Mobile core | 72 passed, 5 skipped без локального `kgcheck`; typecheck и lint | PASS |
+| KB evidence/on-demand | 15 targeted backend tests: компактный поиск, memory_read, fresh/stale/unavailable, current revision, REST verify и source evidence; 5 KB mobile tests | PASS |
+| KB release/production | Space 0.21.0, APK/EXE 0.21.0, кнопка на Android/Windows и live-агент с изменившимся источником | PENDING |
 | Public validation | Backend, mobile lint/typecheck/tests, action vectors, настоящий keyguard `kgcheck`, web export и Electron | [PASS](https://github.com/stevv1e/fugu-deck-app/actions/runs/45901309008) |
 | Electron files/transport/updates | 7 passed в опубликованном 0.18.1; 10 passed в main, включая Authenticode configuration, NotSigned и чужого издателя: `cd desktop/windows && npm test` | PASS для unit/main |
 | Authenticode release | Реальные `Get-AuthenticodeSignature = Valid`, совпадение subject и установка подписанного EXE; нужен сертификат издателя | PENDING |

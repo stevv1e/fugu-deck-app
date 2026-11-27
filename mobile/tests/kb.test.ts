@@ -6,6 +6,7 @@ import vm from "node:vm";
 
 import { kbInjection, parseKbMessage } from "../src/kb/inject";
 import { KB_HTML } from "../src/kb/kbHtml";
+import { verificationLabel, verificationMessage } from "../src/kb/verification";
 
 test("данные базы знаний вставляются в скрипт без возможности выйти из него", () => {
   const evil = {
@@ -48,4 +49,16 @@ test("свёртка сотен заметок: страница просит п
   assert.deepEqual(parseKbMessage(JSON.stringify({ type: "all", extra: "<x>" })), { type: "all" });
   assert.match(kbInjection({ notes: [] }, "tree", true), /window\.KB_ALL=true;/);
   assert.match(kbInjection({ notes: [] }, "tree"), /window\.KB_ALL=false;/);
+});
+
+
+test("состояния источника понятны пользователю и не выдают unavailable за fresh", () => {
+  assert.equal(verificationLabel("fresh"), "подтверждено источником");
+  assert.equal(verificationLabel("stale"), "источник изменился");
+  assert.equal(verificationLabel("unavailable"), "источник недоступен");
+  assert.equal(verificationLabel(undefined), "не проверено");
+  const base = { id: 1, source: "me/app/a.md", revision: "sha256:aaaa", last_checked: 1, note: "" };
+  assert.match(verificationMessage({ ...base, state: "fresh" }), /подтверждена/);
+  assert.match(verificationMessage({ ...base, state: "stale", note: "файл изменился" }), /файл изменился/);
+  assert.match(verificationMessage({ ...base, state: "unavailable" }), /не подтверждены/);
 });
